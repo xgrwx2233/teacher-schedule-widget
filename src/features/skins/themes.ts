@@ -1,0 +1,23 @@
+import type { SkinTheme } from "./types";
+
+export const skinThemes: SkinTheme[] = [
+  {
+    id: "midnight-coral",
+    name: "午夜珊瑚",
+    tokens: {
+      "--widget-panel": "18 14 44",
+      "--widget-panel-strong": "29 22 62",
+      "--widget-border": "255 255 255",
+      "--widget-text": "246 242 255",
+      "--widget-muted": "189 182 214",
+      "--accent": "255 92 104",
+      "--accent-strong": "255 113 122",
+      "--morning-card": "239 230 211",
+      "--morning-text": "195 133 36",
+      "--afternoon-card": "205 217 232",
+      "--afternoon-text": "62 135 82",
+      "--lunch-card": "210 221 239",
+      "--lunch-text": "5 111 116"
+    }
+  }
+];

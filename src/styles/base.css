@@ -1,0 +1,812 @@
+/*
+  Global reset for a transparent Tauri window.
+  The widget background is drawn by .schedule-card, not by body, so the desktop
+  wallpaper remains visible around rounded corners.
+*/
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  font-family:
+    Segoe UI,
+    Microsoft YaHei,
+    sans-serif;
+}
+
+.interaction-proxy-root {
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+}
+
+.widget-menu-window-root {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  align-content: start;
+  gap: 0;
+  padding: 5px;
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.18),
+    0 2px 8px rgba(15, 23, 42, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  user-select: none;
+}
+
+.widget-root {
+  /*
+    Layout tokens. These drive the entire timetable.
+    - --layout-columns is shared by the date row and every schedule block.
+    - clamp() keeps proportions polished when the detached window is resized.
+  */
+  --panel-opacity: 0.9;
+  --outer-padding: clamp(14px, 2.3vmin, 20px);
+  --content-padding: clamp(12px, 2vmin, 16px);
+  --toolbar-height: 34px;
+  --layout-columns: minmax(60px, 0.72fr) repeat(var(--day-count, 5), minmax(0, 1fr));
+  --column-gap: clamp(8px, 1.45vmin, 12px);
+  --content-gap: clamp(10px, 1.65vmin, 16px);
+  --block-gap: clamp(12px, 2.1vmin, 20px);
+  --date-row-height: clamp(38px, 7.2vmin, 52px);
+  --period-column-min: 52px;
+  --title-size: clamp(12px, 1.55vmin, 16px);
+  --meta-size: clamp(8px, 1.05vmin, 11px);
+  --period-title-size: clamp(11px, 1.35vmin, 14px);
+  --period-time-size: clamp(7px, 0.95vmin, 10px);
+  --course-title-size: clamp(12px, 1.55vmin, 16px);
+  --course-meta-size: clamp(8px, 1.05vmin, 11px);
+  --course-padding-y: clamp(4px, 0.9vmin, 6px);
+  --course-padding-x: clamp(4px, 0.9vmin, 6px);
+  --row-divider: rgba(102, 91, 78, 0.16);
+  width: 100vw;
+  height: 100vh;
+  min-width: 360px;
+  min-height: 460px;
+  position: relative;
+  color: rgb(var(--widget-text));
+  background: transparent;
+}
+
+.schedule-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: var(--outer-padding);
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.schedule-shell.mode-detached {
+  padding: var(--outer-padding);
+}
+
+.schedule-card {
+  /*
+    Main responsive grid:
+    toolbar is fixed, date row scales gently, timetable blocks consume all
+    remaining height. min-height: 0 is required so children can shrink cleanly.
+  */
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: var(--toolbar-height) var(--date-row-height) minmax(0, 1fr);
+  gap: var(--content-gap);
+  padding: var(--content-padding);
+  border: 1px solid rgba(var(--widget-border), 0.1);
+  border-radius: 12px;
+  background: rgba(var(--widget-panel), var(--panel-opacity));
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+}
+
+.schedule-toolbar {
+  min-width: 0;
+  min-height: 0;
+  height: var(--toolbar-height);
+  display: grid;
+  grid-template-columns: auto minmax(44px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.toolbar-left,
+.toolbar-right,
+.toolbar-drag-zone {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-left {
+  justify-content: flex-start;
+  gap: clamp(5px, 1vmin, 8px);
+}
+
+.toolbar-drag-zone {
+  align-self: stretch;
+  justify-content: center;
+  border-radius: 9px;
+  cursor: default;
+}
+
+.mode-detached .toolbar-drag-zone {
+  cursor: grab;
+}
+
+.mode-detached .toolbar-drag-zone:active {
+  cursor: grabbing;
+}
+
+.toolbar-right {
+  position: relative;
+  justify-content: flex-end;
+}
+
+.week-arrow-button,
+.week-number-button,
+.hamburger-button,
+.icon-button {
+  height: 32px;
+  border: 1px solid rgba(var(--widget-border), 0.14);
+  border-radius: 9px;
+  color: rgba(var(--widget-text), 0.92);
+  background: rgba(var(--widget-border), 0.08);
+  cursor: pointer;
+}
+
+.week-arrow-button,
+.icon-button {
+  width: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.week-number-button {
+  min-width: clamp(68px, 12vmin, 84px);
+  padding: 0 12px;
+  color: rgba(var(--widget-text), 0.94);
+  background: rgba(var(--widget-border), 0.08);
+  border-color: rgba(var(--widget-border), 0.14);
+  font-size: clamp(12px, 1.35vmin, 14px);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.hamburger-button {
+  width: 34px;
+  height: 32px;
+  padding: 8px 7px;
+  display: grid;
+  gap: 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.hamburger-button span {
+  display: block;
+  height: 2px;
+  width: 100%;
+  border-radius: 99px;
+  background: #ffffff;
+}
+
+.hamburger-button:hover {
+  background: rgba(var(--widget-border), 0.08);
+}
+
+.hamburger-button:active {
+  background: rgba(var(--widget-border), 0.14);
+}
+
+.toolbar-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  min-width: 112px;
+  display: grid;
+  gap: 0;
+  padding: 5px;
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.18),
+    0 2px 8px rgba(15, 23, 42, 0.1);
+}
+
+.menu-item {
+  width: 100%;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 11px;
+  color: #1f2937;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.menu-item:hover {
+  background: #f3f4f6;
+}
+
+.menu-close-item {
+  color: #b91c1c;
+  margin-top: 4px;
+  border-top: 1px solid #e5e7eb;
+  border-radius: 0 0 6px 6px;
+}
+
+.menu-close-item:hover {
+  background: #fef2f2;
+}
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: transparent;
+}
+
+.dialog-window-root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+}
+
+.settings-window,
+.card-settings-window {
+  width: min(92vw, 680px);
+  height: min(92vh, 560px);
+  max-width: 100%;
+  max-height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+}
+
+.card-settings-window {
+  width: min(92vw, 560px);
+  height: min(92vh, 620px);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.settings-titlebar {
+  flex: 1;
+  min-width: 0;
+  cursor: move;
+  user-select: none;
+}
+
+.settings-titlebar h2,
+.settings-titlebar p {
+  pointer-events: none;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.settings-header p {
+  margin: 4px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.settings-close-button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.settings-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+}
+
+.settings-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 12px;
+  border-right: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.settings-nav-item,
+.choice-card {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #374151;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-nav-item {
+  height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.settings-nav-item.is-active {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.settings-content,
+.card-settings-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+
+.settings-panel-section,
+.card-settings-body,
+.course-rule-panel,
+.design-note-list {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-panel-section h3,
+.course-rule-panel h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.settings-panel-section p,
+.design-note-list p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.segmented-list {
+  display: grid;
+  gap: 10px;
+}
+
+.choice-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-color: #e5e7eb;
+  background: #ffffff;
+}
+
+.choice-card.is-selected {
+  border-color: #818cf8;
+  background: #eef2ff;
+}
+
+.choice-card strong {
+  font-size: 13px;
+}
+
+.choice-card span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 6px;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.form-grid input,
+.form-grid select {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0 9px;
+  background: #ffffff;
+  color: #111827;
+}
+
+.form-grid input[type="color"] {
+  padding: 3px;
+}
+
+.checkbox-label {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  align-content: center;
+}
+
+.checkbox-label input {
+  width: 16px;
+  height: 16px;
+}
+
+.settings-note {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #374151;
+  font-size: 13px;
+}
+
+.design-note-list {
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f9fafb;
+}
+
+.date-row {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--layout-columns);
+  gap: var(--column-gap);
+  align-items: stretch;
+}
+
+.date-cell {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: stretch;
+}
+
+.arrow-card,
+.date-card,
+.period-card,
+.course-card,
+.merged-card {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.arrow-card,
+.date-card {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+}
+
+.arrow-card {
+  color: rgba(var(--widget-muted), 0.86);
+  background: rgba(var(--widget-border), 0.04);
+  font-size: clamp(16px, 2vmin, 22px);
+}
+
+.date-card {
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: center;
+  padding: clamp(3px, 0.8vmin, 6px);
+  color: rgba(var(--widget-text), 0.9);
+  background: rgba(var(--widget-border), 0.04);
+}
+
+.date-card span,
+.date-card small,
+.period-card strong,
+.period-card span,
+.course-card span,
+.course-card small,
+.merged-card strong,
+.merged-card span {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.date-card span {
+  font-size: var(--title-size);
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.date-card small {
+  color: rgba(var(--widget-muted), 0.78);
+  font-size: var(--meta-size);
+  line-height: 1.05;
+}
+
+.date-card.is-current {
+  color: #fff;
+  background: rgb(var(--accent));
+}
+
+.date-card.is-current small {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.schedule-blocks {
+  /*
+    The block stack fills the timetable area. Morning and afternoon use equal
+    flexible shares; lunch keeps a smaller but still responsive share.
+  */
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 4fr) minmax(44px, 1.15fr) minmax(0, 4fr);
+  gap: var(--block-gap);
+  overflow: hidden;
+}
+
+.schedule-block {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--layout-columns);
+  gap: var(--column-gap);
+  align-items: stretch;
+}
+
+.block-column {
+  /*
+    Every block column owns its rows. Course blocks divide their height by
+    --block-row-count, so all cells stretch/shrink together during resizing.
+  */
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: repeat(var(--block-row-count, 1), minmax(0, 1fr));
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.column-item {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: stretch;
+}
+
+.row-divider {
+  position: absolute;
+  top: 0;
+  left: clamp(5px, 1vmin, 8px);
+  right: clamp(5px, 1vmin, 8px);
+  height: 1px;
+  background: var(--row-divider);
+  z-index: 2;
+}
+
+.period-card {
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: end;
+  padding: clamp(3px, 0.75vmin, 7px) 0 clamp(3px, 0.75vmin, 7px) 2px;
+  border: 0;
+  background: transparent;
+  color: var(--card-fg, rgba(var(--widget-text), 0.9));
+  font-family: var(--card-font, inherit);
+  text-align: right;
+  cursor: pointer;
+}
+
+.period-card strong {
+  align-self: end;
+  font-size: var(--card-font-size, var(--period-title-size));
+  font-weight: 850;
+  line-height: 1.05;
+}
+
+.period-card span {
+  align-self: start;
+  color: rgba(var(--widget-muted), 0.84);
+  font-size: var(--period-time-size);
+  line-height: 1.15;
+}
+
+.course-card {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: center;
+  gap: clamp(1px, 0.4vmin, 3px);
+  padding: var(--course-padding-y) var(--course-padding-x);
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  color: var(--card-fg, currentColor);
+  font-family: var(--card-font, inherit);
+}
+
+.course-column .column-item:first-child .course-card {
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+}
+
+.course-column .column-item:last-child .course-card {
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.course-card span {
+  font-size: var(--card-font-size, var(--course-title-size));
+  font-weight: 800;
+  line-height: 1.08;
+}
+
+.course-card small {
+  opacity: 0.7;
+  font-size: var(--course-meta-size);
+  line-height: 1.05;
+}
+
+.tone-wheat .course-card {
+  color: #b97916;
+  background: var(--card-bg, #fff8e1);
+}
+
+.tone-blue .course-card {
+  color: #2e7d52;
+  background: var(--card-bg, #e8f5e9);
+}
+
+.course-card.is-active {
+  outline: 2px solid rgba(var(--accent), 0.4);
+  outline-offset: -2px;
+}
+
+.placeholder-block .block-column {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.merged-cell {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: stretch;
+}
+
+.merged-card {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  gap: clamp(1px, 0.5vmin, 4px);
+  border-radius: 10px;
+  border: 0;
+  color: var(--card-fg, rgb(var(--lunch-text)));
+  background: var(--card-bg, #e3f2fd);
+  font-family: var(--card-font, inherit);
+  cursor: pointer;
+}
+
+.merged-card strong {
+  font-size: var(--card-font-size, clamp(16px, 2.5vmin, 24px));
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+
+.merged-card span {
+  color: rgba(var(--lunch-text), 0.68);
+  font-size: clamp(10px, 1.25vmin, 13px);
+  line-height: 1.1;
+}
+
+.resize-grip {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 24px;
+  height: 24px;
+  cursor: nwse-resize;
+}
+
+.resize-grip::before,
+.resize-grip::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  border-right: 2px solid rgba(var(--widget-text), 0.46);
+  border-bottom: 2px solid rgba(var(--widget-text), 0.46);
+}
+
+.resize-grip::before {
+  width: 14px;
+  height: 14px;
+}
+
+.resize-grip::after {
+  width: 8px;
+  height: 8px;
+}
+
+/*
+  Compact mode preserves readability in smaller detached windows. It only
+  adjusts ratios and type limits; the same grid/flex principles still apply.
+*/
+@media (max-width: 560px), (max-height: 620px) {
+  .widget-root {
+    --layout-columns: minmax(48px, 0.7fr) repeat(var(--day-count, 5), minmax(0, 1fr));
+    --column-gap: clamp(5px, 1vmin, 8px);
+    --content-gap: clamp(7px, 1.2vmin, 11px);
+    --block-gap: clamp(8px, 1.45vmin, 13px);
+    --date-row-height: clamp(34px, 6vmin, 42px);
+    --title-size: clamp(10px, 1.35vmin, 13px);
+    --meta-size: clamp(7px, 0.95vmin, 9px);
+    --period-title-size: clamp(9px, 1.15vmin, 12px);
+    --period-time-size: clamp(6px, 0.8vmin, 8px);
+    --course-title-size: clamp(10px, 1.3vmin, 13px);
+    --course-meta-size: clamp(7px, 0.9vmin, 9px);
+  }
+
+  .week-number-button {
+    min-width: 62px;
+    padding: 0 9px;
+  }
+}
