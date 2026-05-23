@@ -12,7 +12,10 @@ use windows::Win32::{
     Foundation::{HWND, POINT, RECT},
     UI::{
         Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
-        WindowsAndMessaging::{GetCursorPos, GetWindowRect, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOOWNERZORDER},
+        WindowsAndMessaging::{
+            GetAncestor, GetClassNameW, GetCursorPos, GetWindowRect, SetWindowPos, WindowFromPoint,
+            GA_ROOT, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
+        },
     },
 };
 
@@ -250,11 +253,13 @@ pub fn start_proxy_input_manager(
             );
             let widget_hit = hit_test_rects(&hitboxes, local_x, local_y);
             let desktop_icon_hit = desktop_icons::is_desktop_icon_at_screen_point(cursor.x, cursor.y);
-            let can_interact = !desktop_icon_hit && widget_hit.is_some();
+            let point_exposed = is_widget_point_exposed(&app, &widget, cursor.x, cursor.y);
+            let can_interact = !desktop_icon_hit && widget_hit.is_some() && point_exposed;
             let debug_state = format!(
-                "hit={:?}; icon={}; interact={}",
+                "hit={:?}; icon={}; exposed={}; interact={}",
                 widget_hit.as_ref().map(|hit| (&hit.kind, &hit.id)),
                 desktop_icon_hit,
+                point_exposed,
                 can_interact,
             );
             if debug_state != last_debug_state {
@@ -441,4 +446,79 @@ fn map_physical_to_css(
         (physical_x / physical_width) * css_width,
         (physical_y / physical_height) * css_height,
     )
+}
+
+fn is_widget_point_exposed(app: &AppHandle, widget: &WebviewWindow, screen_x: i32, screen_y: i32) -> bool {
+    matches!(
+        top_window_kind(app, widget, screen_x, screen_y),
+        Some(TopWindowKind::Widget | TopWindowKind::Shell)
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TopWindowKind {
+    Widget,
+    Shell,
+    Overlay,
+    Other,
+}
+
+fn top_window_kind(app: &AppHandle, widget: &WebviewWindow, screen_x: i32, screen_y: i32) -> Option<TopWindowKind> {
+    let top = unsafe { WindowFromPoint(POINT { x: screen_x, y: screen_y }) };
+    if top.0.is_null() {
+        return None;
+    }
+
+    let root = unsafe { GetAncestor(top, GA_ROOT) };
+    let widget_hwnd = HWND(widget.hwnd().ok()?.0);
+
+    if same_hwnd(root, widget_hwnd) || same_hwnd(top, widget_hwnd) {
+        return Some(TopWindowKind::Widget);
+    }
+
+    if is_overlay_window(app, root) || is_overlay_window(app, top) {
+        return Some(TopWindowKind::Overlay);
+    }
+
+    if is_shell_window(root) || is_shell_window(top) {
+        return Some(TopWindowKind::Shell);
+    }
+
+    Some(TopWindowKind::Other)
+}
+
+fn is_overlay_window(app: &AppHandle, hwnd: HWND) -> bool {
+    for label in ["settings", "card-settings", "widget-menu"] {
+        if let Some(window) = app.get_webview_window(label) {
+            if let Ok(raw) = window.hwnd() {
+                if same_hwnd(hwnd, HWND(raw.0)) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn is_shell_window(hwnd: HWND) -> bool {
+    let class_name = window_class_name(hwnd);
+    matches!(
+        class_name.as_deref(),
+        Some("Progman") | Some("WorkerW") | Some("SHELLDLL_DefView") | Some("SysListView32")
+    )
+}
+
+fn window_class_name(hwnd: HWND) -> Option<String> {
+    let mut buffer = [0u16; 128];
+    let len = unsafe { GetClassNameW(hwnd, &mut buffer) };
+    if len == 0 {
+        return None;
+    }
+
+    Some(String::from_utf16_lossy(&buffer[..len as usize]))
+}
+
+fn same_hwnd(left: HWND, right: HWND) -> bool {
+    left.0 == right.0
 }
