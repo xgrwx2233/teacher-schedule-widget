@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { CSSProperties, MutableRefObject, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScheduleWidget } from "../components/ScheduleWidget/ScheduleWidget";
@@ -37,6 +38,7 @@ import {
   SETTINGS_WINDOW_STATE_REQUEST_EVENT,
   SETTINGS_WINDOW_UPDATE_EVENT,
   WIDGET_MENU_ACTION_EVENT,
+  WIDGET_MENU_WINDOW_LABEL,
   type WidgetMenuAction,
   type CardSettingsWindowStatePayload,
   type CardSettingsWindowUpdatePayload,
@@ -192,19 +194,45 @@ export function App() {
     }
   }, []);
 
-  const openWidgetMenu = useCallback(async () => {
-    console.info("open widget menu requested");
+  const closeWidgetMenu = useCallback(async () => {
     menuOpenRef.current = false;
     setMenuOpen(false);
+    await invoke("clear_proxy_menu_open");
+    await hideWindowByLabel(WIDGET_MENU_WINDOW_LABEL);
+  }, []);
+
+  const openWidgetMenu = useCallback(async () => {
+    if (menuOpenRef.current) {
+      await closeWidgetMenu();
+      return;
+    }
+
+    console.info("open widget menu requested");
     try {
       await invoke("open_widget_menu_window");
       console.info("open widget menu window invoked");
+      menuOpenRef.current = true;
+      setMenuOpen(true);
     } catch (error) {
       console.error("failed to open widget menu window", error);
     }
+  }, [closeWidgetMenu]);
+
+  const closeCardSettings = useCallback(async () => {
+    cardSettingsWindowOpenRef.current = false;
+    selectedCardRef.current = null;
+    setSelectedCard(null);
+    setActiveCellId(null);
+    await invoke("clear_proxy_active_card");
+    await hideWindowByLabel(CARD_SETTINGS_WINDOW_LABEL);
   }, []);
 
   const openCardSettings = useCallback(async (card: SelectedCard) => {
+    if (cardSettingsWindowOpenRef.current && selectedCardRef.current && isSameSelectedCard(selectedCardRef.current, card)) {
+      await closeCardSettings();
+      return;
+    }
+
     console.info("open card settings requested", card);
     const draft = createDraftForCard(schedule, card, settings.term);
     selectedCardRef.current = card;
@@ -225,7 +253,7 @@ export function App() {
     } catch (error) {
       console.error("failed to open card settings window", error);
     }
-  }, [schedule, settings.term]);
+  }, [closeCardSettings, schedule, settings.term]);
 
   useEffect(() => {
     const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
@@ -546,6 +574,26 @@ function collectProxyHitboxes() {
       };
     })
     .filter((hitbox) => hitbox.right > hitbox.left && hitbox.bottom > hitbox.top);
+}
+
+async function hideWindowByLabel(label: string) {
+  const window = await WebviewWindow.getByLabel(label);
+  if (!window) {
+    return;
+  }
+
+  await window.hide();
+}
+
+function isSameSelectedCard(left: SelectedCard, right: SelectedCard): boolean {
+  switch (left.type) {
+    case "course":
+      return right.type === "course" && left.courseId === right.courseId;
+    case "period":
+      return right.type === "period" && left.periodId === right.periodId;
+    case "placeholder":
+      return right.type === "placeholder" && left.blockId === right.blockId;
+  }
 }
 
 function handleProxyWidgetHit(

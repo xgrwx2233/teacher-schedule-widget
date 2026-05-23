@@ -14,7 +14,7 @@ export function WidgetMenuWindowHost() {
   const runAction = async (action: WidgetMenuAction) => {
     await invoke("clear_proxy_menu_open");
     await emitTo(WIDGET_WINDOW_LABEL, WIDGET_MENU_ACTION_EVENT, action);
-    await currentWindow.close();
+    await currentWindow.hide();
   };
 
   return (

@@ -65,7 +65,7 @@ export function SettingsWindowHost() {
     await emitTo(WIDGET_WINDOW_LABEL, SETTINGS_WINDOW_CLOSE_EVENT, {
       windowLabel: currentWindow.label,
     });
-    await currentWindow.close();
+    await currentWindow.hide();
   };
 
   return (

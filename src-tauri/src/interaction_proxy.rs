@@ -334,20 +334,10 @@ pub fn start_proxy_input_manager(
 
 fn handle_proxy_click(
     app: &AppHandle,
-    ui_state: &ProxyUiStateStore,
+    _ui_state: &ProxyUiStateStore,
     hit: ProxyWidgetHit,
 ) {
     let _ = app.emit(PROXY_TRIGGER_EVENT, hit.clone());
-
-    if let Ok(mut state) = ui_state.lock() {
-        match hit.kind.as_str() {
-            "menu-button" => state.menu_open = !state.menu_open,
-            "course" | "period" | "placeholder" => {
-                state.active_card = Some(hit);
-            }
-            _ => {}
-        }
-    }
 }
 
 pub fn hide_proxy(app: &AppHandle) -> Result<(), String> {
