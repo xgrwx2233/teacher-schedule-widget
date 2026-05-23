@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { CSSProperties, MutableRefObject, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -76,9 +76,6 @@ export function App() {
   const appWindow = useMemo(() => getCurrentWindow(), []);
 
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
-  const menuSettingsButtonRef = useRef<HTMLButtonElement | null>(null);
-  const menuModeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const menuCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
   const scaleFactorRef = useRef(1);
   const menuOpenRef = useRef(false);
@@ -211,6 +208,7 @@ export function App() {
     try {
       await invoke("open_widget_menu_window");
       console.info("open widget menu window invoked");
+      await positionWidgetMenuWindow();
       menuOpenRef.current = true;
       setMenuOpen(true);
     } catch (error) {
@@ -510,13 +508,7 @@ export function App() {
         hovered={hovered}
         activeCellId={activeCellId}
         menuButtonRef={menuButtonRef}
-        menuSettingsButtonRef={menuSettingsButtonRef}
-        menuModeButtonRef={menuModeButtonRef}
-        menuCloseButtonRef={menuCloseButtonRef}
-        onToggleMenu={() => setMenuOpen((current) => !current)}
-        onOpenSettings={openSettings}
-        onSwitchMode={switchMode}
-        onClose={closeApp}
+        onToggleMenu={openWidgetMenu}
         onCourseClick={onCourseClick}
         onCardEdit={openCardSettings}
         onDragStart={startWindowDrag}
@@ -626,6 +618,24 @@ function handleProxyWidgetHit(
   if (hit.kind === "placeholder" && hit.id) {
     void openCardSettings({ type: "placeholder", blockId: hit.id });
   }
+}
+
+async function positionWidgetMenuWindow() {
+  const menuWindow = await WebviewWindow.getByLabel(WIDGET_MENU_WINDOW_LABEL);
+  const button = document.querySelector<HTMLButtonElement>("[data-menu-button]");
+  if (!menuWindow || !button) {
+    return;
+  }
+
+  const rect = button.getBoundingClientRect();
+  const scaleFactor = window.devicePixelRatio || 1;
+  const width = 132;
+  const height = 132;
+  const x = Math.max(8, Math.round((window.screenX + rect.right - width) * scaleFactor));
+  const y = Math.max(8, Math.round((window.screenY + rect.bottom + 8) * scaleFactor));
+
+  await menuWindow.setPosition(new PhysicalPosition(x, y));
+  await menuWindow.setSize(new PhysicalSize(Math.round(width * scaleFactor), Math.round(height * scaleFactor)));
 }
 
 function calculateWeekNumber(startDate: string, currentDate: Date): number {

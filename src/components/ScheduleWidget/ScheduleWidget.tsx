@@ -18,13 +18,7 @@ type ScheduleWidgetProps = {
   hovered: boolean;
   activeCellId: string | null;
   menuButtonRef: RefObject<HTMLButtonElement | null>;
-  menuModeButtonRef: RefObject<HTMLButtonElement | null>;
-  menuCloseButtonRef: RefObject<HTMLButtonElement | null>;
-  menuSettingsButtonRef: RefObject<HTMLButtonElement | null>;
   onToggleMenu: () => void;
-  onOpenSettings: () => void;
-  onSwitchMode: () => void;
-  onClose: () => void;
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
   onDragStart: (event: PointerEvent<HTMLDivElement>) => void;
@@ -39,20 +33,12 @@ export function ScheduleWidget({
   hovered,
   activeCellId,
   menuButtonRef,
-  menuModeButtonRef,
-  menuCloseButtonRef,
-  menuSettingsButtonRef,
   onToggleMenu,
-  onOpenSettings,
-  onSwitchMode,
-  onClose,
   onCourseClick,
   onCardEdit,
   onDragStart,
   onResizeStart,
 }: ScheduleWidgetProps) {
-  const modeActionLabel = mode === "attached" ? "浮" : "贴";
-  const modeActionTitle = mode === "attached" ? "切换到布局编辑模式" : "贴回桌面图标下";
   const visibleWeekdays = schedule.days.map((day) => day.id);
 
   return (
@@ -91,43 +77,6 @@ export function ScheduleWidget({
               <span />
               <span />
             </button>
-
-            {menuOpen && (
-              <div className="toolbar-menu" role="menu" aria-label="窗口菜单">
-                <button
-                  ref={menuSettingsButtonRef}
-                  className="menu-item"
-                  data-menu-action="settings"
-                  type="button"
-                  role="menuitem"
-                  onClick={onOpenSettings}
-                >
-                  设置
-                </button>
-                <button
-                  ref={menuModeButtonRef}
-                  className="menu-item"
-                  data-menu-action="mode"
-                  type="button"
-                  role="menuitem"
-                  title={modeActionTitle}
-                  onClick={onSwitchMode}
-                >
-                  {modeActionLabel}
-                </button>
-                <button
-                  ref={menuCloseButtonRef}
-                  className="menu-item menu-close-item"
-                  data-menu-action="close"
-                  type="button"
-                  role="menuitem"
-                  title="退出"
-                  onClick={onClose}
-                >
-                  X
-                </button>
-              </div>
-            )}
           </div>
         </header>
 
