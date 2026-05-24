@@ -655,9 +655,9 @@ button {
   position: relative;
   min-width: 0;
   display: grid;
-  grid-template-columns: 126px minmax(0, 1fr);
+  grid-template-columns: 78px minmax(0, 1fr);
   align-items: start;
-  gap: 12px;
+  gap: 10px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -690,7 +690,7 @@ button {
 .block-container-header {
   position: relative;
   display: grid;
-  grid-template-columns: 3.5em 30px 28px;
+  grid-template-columns: 30px 28px;
   align-items: start;
   gap: 6px;
   min-width: 0;
@@ -718,25 +718,6 @@ button {
   font-weight: 900;
   letter-spacing: -2px;
   user-select: none;
-}
-
-.block-name-input {
-  min-width: 0;
-  width: 100%;
-  height: 30px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 0 6px;
-  background: transparent;
-  color: #111827;
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.block-name-input:focus {
-  border-color: #c7d2fe;
-  background: #ffffff;
-  outline: 0;
 }
 
 .block-type-select,
@@ -945,7 +926,7 @@ button {
 
 .period-row {
   display: grid;
-  grid-template-columns: 18px minmax(74px, 120px) 50px 8px 50px minmax(8px, 1fr) 24px 30px;
+  grid-template-columns: 18px minmax(74px, 120px) 50px 8px 50px minmax(18px, 1fr) 24px 30px;
   align-items: center;
   gap: 7px;
   min-height: 52px;

@@ -473,7 +473,6 @@ function BlockSettingsPanel({
                 blockCount={blockSettings.blocks.length}
                 styleOpen={openStyleBlockId === block.id}
                 onToggleStyle={() => setOpenStyleBlockId(openStyleBlockId === block.id ? null : block.id)}
-                onRename={(name) => updateBlock(block.id, { name })}
                 onChangeType={(type) => updateBlock(block.id, { type })}
                 onChangeBackground={(cardBackgroundColor) => updateBlock(block.id, { cardBackgroundColor })}
                 onChangeRadius={(cardCornerRadius) => updateBlock(block.id, { cardCornerRadius })}
@@ -552,7 +551,6 @@ function BlockHeaderRow({
   blockCount,
   styleOpen,
   onToggleStyle,
-  onRename,
   onChangeType,
   onChangeBackground,
   onChangeRadius,
@@ -564,7 +562,6 @@ function BlockHeaderRow({
   blockCount: number;
   styleOpen: boolean;
   onToggleStyle: () => void;
-  onRename: (name: string) => void;
   onChangeType: (type: BlockType) => void;
   onChangeBackground: (color: string) => void;
   onChangeRadius: (radius: number) => void;
@@ -575,13 +572,6 @@ function BlockHeaderRow({
 
   return (
     <div className="block-container-header">
-      <input
-        className="block-name-input"
-        value={block.name}
-        placeholder="块名"
-        onChange={(event) => onRename(event.currentTarget.value)}
-        onClick={stopPropagation}
-      />
       <div className="block-style-area">
         <button className="block-settings-icon-button" type="button" onClick={stopAndRun(onToggleStyle)} aria-label="块设置">
           ⚙
