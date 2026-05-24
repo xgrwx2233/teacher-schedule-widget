@@ -34,6 +34,19 @@ type DraggingPeriod = {
   periodId: string;
 } | null;
 
+type DialogPosition = {
+  x: number;
+  y: number;
+};
+
+type DialogDragState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  originX: number;
+  originY: number;
+} | null;
+
 const sectionItems: Array<{ id: SettingsSection; label: string }> = [
   { id: "workdays", label: "工作日" },
   { id: "term", label: "学期" },
@@ -178,11 +191,14 @@ function BlockSettingsPanel({
   const [blockDropTargetId, setBlockDropTargetId] = useState<string | null>(null);
   const [draggingPeriod, setDraggingPeriod] = useState<DraggingPeriod>(null);
   const [periodDropTargetId, setPeriodDropTargetId] = useState<string | null>(null);
+  const [blockDialogPosition, setBlockDialogPosition] = useState<DialogPosition>({ x: 560, y: 156 });
+  const [blockDialogDrag, setBlockDialogDrag] = useState<DialogDragState>(null);
 
   const blockSettings = useMemo(() => normalizeBlockConflicts(settings.blockSettings), [settings.blockSettings]);
   const activeBlock = blockSettings.blocks.find((block) => block.id === blockSettings.activeBlockId) ?? blockSettings.blocks[0] ?? null;
   const activePeriod = findPeriodInBlocks(blockSettings, blockSettings.activePeriodId) ?? activeBlock?.periods[0] ?? null;
   const conflictSummary = getConflictSummary(blockSettings);
+  const openStyleBlock = blockSettings.blocks.find((block) => block.id === openStyleBlockId) ?? null;
 
   const commitBlockSettings = (nextBlockSettings: BlockSettingsState) => {
     onSettingsChange({ ...settings, blockSettings: normalizeBlockConflicts(nextBlockSettings) });
@@ -467,16 +483,6 @@ function BlockSettingsPanel({
                 setBlockDropTargetId(null);
               }}
             >
-              {openStyleBlockId === block.id && (
-                <BlockSettingsPopover
-                  block={block}
-                  onChangeType={(type) => updateBlock(block.id, { type })}
-                  onChangeBackground={(cardBackgroundColor) => updateBlock(block.id, { cardBackgroundColor })}
-                  onChangeRadius={(cardCornerRadius) => updateBlock(block.id, { cardCornerRadius })}
-                  onClose={() => setOpenStyleBlockId(null)}
-                />
-              )}
-
               <BlockHeaderRow
                 block={block}
                 blockIndex={blockIndex}
@@ -548,6 +554,45 @@ function BlockSettingsPanel({
           );
         })}
       </div>
+
+      {openStyleBlock && (
+        <BlockSettingsDialog
+          block={openStyleBlock}
+          position={blockDialogPosition}
+          dragging={blockDialogDrag}
+          onDragStart={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setBlockDialogDrag({
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startY: event.clientY,
+              originX: blockDialogPosition.x,
+              originY: blockDialogPosition.y,
+            });
+          }}
+          onDragMove={(event) => {
+            if (!blockDialogDrag || blockDialogDrag.pointerId !== event.pointerId) {
+              return;
+            }
+
+            setBlockDialogPosition({
+              x: Math.max(12, blockDialogDrag.originX + event.clientX - blockDialogDrag.startX),
+              y: Math.max(12, blockDialogDrag.originY + event.clientY - blockDialogDrag.startY),
+            });
+          }}
+          onDragEnd={(event) => {
+            if (blockDialogDrag?.pointerId === event.pointerId) {
+              setBlockDialogDrag(null);
+            }
+          }}
+          onChangeType={(type) => updateBlock(openStyleBlock.id, { type })}
+          onChangeBackground={(cardBackgroundColor) => updateBlock(openStyleBlock.id, { cardBackgroundColor })}
+          onChangeRadius={(cardCornerRadius) => updateBlock(openStyleBlock.id, { cardCornerRadius })}
+          onClose={() => setOpenStyleBlockId(null)}
+        />
+      )}
     </section>
   );
 }
@@ -591,14 +636,24 @@ function BlockHeaderRow({
   );
 }
 
-function BlockSettingsPopover({
+function BlockSettingsDialog({
   block,
+  position,
+  dragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
   onChangeType,
   onChangeBackground,
   onChangeRadius,
   onClose,
 }: {
   block: BlockSettings;
+  position: DialogPosition;
+  dragging: DialogDragState;
+  onDragStart: (event: PointerEvent<HTMLElement>) => void;
+  onDragMove: (event: PointerEvent<HTMLElement>) => void;
+  onDragEnd: (event: PointerEvent<HTMLElement>) => void;
   onChangeType: (type: BlockType) => void;
   onChangeBackground: (color: string) => void;
   onChangeRadius: (radius: number) => void;
@@ -607,17 +662,27 @@ function BlockSettingsPopover({
   const radiusOptions = [0, 2, 4, 6, 8, 10, 12, 14, 16];
 
   return (
-    <section className="block-settings-popover" onClick={stopPropagation}>
-      <header className="block-settings-popover-header">
+    <section
+      className="block-settings-dialog"
+      style={{ left: position.x, top: position.y }}
+      onClick={stopPropagation}
+    >
+      <header
+        className={dragging ? "block-settings-dialog-header is-dragging" : "block-settings-dialog-header"}
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+      >
         <div>
           <strong>块信息设置</strong>
-          <span>统一控制该块内课程卡片样式</span>
+          <span>课程卡片样式</span>
         </div>
         <button type="button" onClick={onClose} aria-label="关闭块设置">
           ×
         </button>
       </header>
-      <div className="block-settings-popover-grid">
+      <div className="block-settings-dialog-body">
         <label>
           <span>块类型</span>
           <select
@@ -630,11 +695,11 @@ function BlockSettingsPopover({
           </select>
         </label>
         <label>
-          <span>课程卡片背景色</span>
+          <span>背景色</span>
           <input type="color" value={block.cardBackgroundColor} onChange={(event) => onChangeBackground(event.currentTarget.value)} />
         </label>
         <label className="block-radius-control">
-          <span>课程卡片圆角</span>
+          <span>圆角</span>
           <select
             value={block.cardCornerRadius}
             onChange={(event) => onChangeRadius(Number(event.currentTarget.value))}

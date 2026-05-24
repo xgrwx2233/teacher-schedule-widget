@@ -827,78 +827,85 @@ button {
   line-height: 1;
 }
 
-.block-settings-popover {
-  grid-column: 1 / -1;
-  position: sticky;
-  top: 0;
-  z-index: 30;
+.block-settings-dialog {
+  position: fixed;
+  z-index: 40;
+  width: 320px;
   display: grid;
-  gap: 12px;
-  margin: 0 0 8px;
-  padding: 14px;
+  gap: 0;
   border: 1px solid #ddd6fe;
   border-radius: 14px;
   background: #ffffff;
   box-shadow:
-    0 16px 36px rgba(15, 23, 42, 0.14),
+    0 18px 40px rgba(15, 23, 42, 0.18),
     0 0 0 3px rgba(124, 58, 237, 0.08);
+  overflow: hidden;
 }
 
-.block-settings-popover-header {
+.block-settings-dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef2f7;
+  background: #fafafa;
+  cursor: move;
+  user-select: none;
 }
 
-.block-settings-popover-header div {
+.block-settings-dialog-header.is-dragging {
+  cursor: grabbing;
+}
+
+.block-settings-dialog-header div {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.block-settings-popover-header strong {
+.block-settings-dialog-header strong {
   color: #111827;
   font-size: 14px;
   line-height: 1.2;
 }
 
-.block-settings-popover-header span {
+.block-settings-dialog-header span {
   color: #64748b;
-  font-size: 12px;
+  font-size: 11px;
 }
 
-.block-settings-popover-header button {
-  width: 28px;
-  height: 28px;
+.block-settings-dialog-header button {
+  width: 24px;
+  height: 24px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #ffffff;
   color: #475569;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1;
 }
 
-.block-settings-popover-grid {
+.block-settings-dialog-body {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(150px, 1fr) minmax(120px, 1fr);
-  gap: 12px;
+  gap: 10px;
+  padding: 12px;
 }
 
-.block-settings-popover-grid label {
+.block-settings-dialog-body label {
   min-width: 0;
   display: grid;
-  gap: 6px;
+  gap: 5px;
   color: #374151;
   font-size: 12px;
   font-weight: 700;
 }
 
-.block-settings-popover-grid select,
-.block-settings-popover-grid input[type="color"] {
+.block-settings-dialog-body select,
+.block-settings-dialog-body input[type="color"] {
   width: 100%;
-  height: 32px;
+  height: 30px;
   border: 1px solid #d1d5db;
   border-radius: 8px;
   padding: 0 8px;
@@ -906,7 +913,7 @@ button {
   color: #111827;
 }
 
-.block-settings-popover-grid input[type="color"] {
+.block-settings-dialog-body input[type="color"] {
   padding: 3px;
 }
 
@@ -961,9 +968,9 @@ button {
 
 .period-row {
   display: grid;
-  grid-template-columns: 18px minmax(74px, 120px) 50px 8px 50px minmax(18px, 1fr) 24px 30px;
+  grid-template-columns: 18px minmax(74px, 112px) 52px 10px 52px minmax(20px, 1fr) 24px 30px;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-height: 52px;
   padding: 0 10px 0 18px;
   border-top: 1px solid #eef2f7;
