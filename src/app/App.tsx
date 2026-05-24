@@ -167,10 +167,10 @@ export function App() {
     setHovered(false);
   }, []);
 
-  const closeApp = useCallback(async () => {
+  const hideScheduleWidget = useCallback(async () => {
     menuOpenRef.current = false;
     setMenuOpen(false);
-    await invoke("close_app");
+    await invoke("hide_schedule_widget");
   }, []);
 
   const openSettings = useCallback(async () => {
@@ -359,7 +359,7 @@ export function App() {
       }
 
       if (menuOpenRef.current && hit.menuAction === "close") {
-        void closeApp();
+        void hideScheduleWidget();
         return;
       }
 
@@ -377,7 +377,7 @@ export function App() {
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [closeApp, openCardSettings, openSettings, openWidgetMenu, switchMode]);
+  }, [hideScheduleWidget, openCardSettings, openSettings, openWidgetMenu, switchMode]);
 
   useEffect(() => {
     const publishHitboxes = () => {
@@ -437,15 +437,15 @@ export function App() {
         return;
       }
 
-      if (event.payload === "close") {
-        void closeApp();
+      if (event.payload === "hide") {
+        void hideScheduleWidget();
       }
     });
 
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [closeApp, openSettings, switchMode]);
+  }, [hideScheduleWidget, openSettings, switchMode]);
 
   const onCourseClick = (courseId: string) => {
     if (mode === "detached") {

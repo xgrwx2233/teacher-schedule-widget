@@ -17,7 +17,7 @@ export const CARD_SETTINGS_WINDOW_CLOSE_EVENT = "card-settings-window-close";
 
 export const WIDGET_MENU_ACTION_EVENT = "widget-menu-action";
 
-export type WidgetMenuAction = "settings" | "mode" | "close";
+export type WidgetMenuAction = "settings" | "mode" | "hide";
 
 export type SettingsWindowStatePayload = {
   settings: WidgetSettingsState;

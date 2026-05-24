@@ -5,6 +5,7 @@ mod desktop_layer;
 mod input_forwarder;
 mod interaction_proxy;
 mod settings_windows;
+mod tray;
 mod widget_manager;
 mod window_mode;
 
@@ -22,12 +23,6 @@ use tauri::{Manager, Position, Size};
 use window_mode::{
     apply_initial_attached_mode, get_window_mode, switch_to_attached, switch_to_detached,
 };
-
-#[tauri::command]
-fn close_app(app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
-    state.allow_exit();
-    app.exit(0);
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -49,7 +44,7 @@ pub fn run() {
             switch_to_attached,
             switch_to_detached,
             get_window_mode,
-            close_app,
+            tray::hide_schedule_widget,
             config_store::load_widget_settings,
             widget_manager::load_widget_registry,
             settings_windows::open_settings_window,
@@ -83,6 +78,7 @@ pub fn run() {
             window.show()?;
             settings_windows::create_hidden_auxiliary_windows(app.handle())?;
             interaction_proxy::show_proxy_for_widget(app.handle(), &window, &state)?;
+            tray::create_tray(app.handle())?;
 
             start_input_forwarder(window.clone(), state.attached_flag());
             interaction_proxy::start_proxy_input_manager(

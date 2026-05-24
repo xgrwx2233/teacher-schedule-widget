@@ -25,7 +25,7 @@ export function WidgetMenuWindowHost() {
       <button type="button" className="menu-item" onClick={() => runAction("mode")}>
         浮/贴
       </button>
-      <button type="button" className="menu-item menu-close-item" onClick={() => runAction("close")}>
+      <button type="button" className="menu-item menu-close-item" onClick={() => runAction("hide")}>
         X
       </button>
     </main>

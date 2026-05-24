@@ -22,6 +22,16 @@ pub fn create_hidden_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+pub fn hide_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
+    for label in ["settings", "card-settings", "widget-menu"] {
+        if let Some(window) = app.get_webview_window(label) {
+            window.hide().map_err(|error| error.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
 pub fn ensure_settings_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     if let Some(window) = app.get_webview_window("settings") {
         window.show().map_err(|error| error.to_string())?;
