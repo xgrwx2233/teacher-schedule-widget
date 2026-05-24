@@ -58,6 +58,9 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn hide_schedule_widget(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    state.set_widget_visible(false);
+
     if let Some(proxy) = app.get_webview_window(interaction_proxy::PROXY_WINDOW_LABEL) {
         proxy
             .set_ignore_cursor_events(true)
@@ -80,6 +83,7 @@ pub fn show_schedule_widget(app: &AppHandle) -> Result<(), String> {
     };
 
     let state = app.state::<AppState>();
+    state.set_widget_visible(true);
     widget.show().map_err(|error| error.to_string())?;
 
     if state.is_attached() {

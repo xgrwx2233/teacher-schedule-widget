@@ -27,6 +27,7 @@ use window_mode::{
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let attached_mode = Arc::new(AtomicBool::new(true));
+    let widget_visible = Arc::new(AtomicBool::new(true));
     let allow_exit = Arc::new(AtomicBool::new(false));
     let proxy_hitboxes = Arc::new(Mutex::new(Vec::new()));
     let proxy_geometry = Arc::new(Mutex::new(interaction_proxy::ProxyGeometry::default()));
@@ -35,6 +36,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::new(
             Arc::clone(&attached_mode),
+            Arc::clone(&widget_visible),
             Arc::clone(&allow_exit),
         ))
         .manage(Arc::clone(&proxy_hitboxes))
@@ -88,7 +90,12 @@ pub fn run() {
                 Arc::clone(&proxy_geometry),
                 Arc::clone(&proxy_ui_state),
             );
-            start_desktop_layer_guard(app.handle().clone(), window, state.attached_flag());
+    start_desktop_layer_guard(
+        app.handle().clone(),
+        window,
+        state.attached_flag(),
+        state.widget_visible_flag(),
+    );
 
             Ok(())
         })
@@ -107,8 +114,14 @@ fn start_desktop_layer_guard(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     attached_mode: Arc<AtomicBool>,
+    widget_visible: Arc<AtomicBool>,
 ) {
     thread::spawn(move || loop {
+        if !widget_visible.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
         if !attached_mode.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_millis(500));
             continue;
