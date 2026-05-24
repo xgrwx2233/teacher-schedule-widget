@@ -1,4 +1,5 @@
 import type { PointerEvent, SyntheticEvent } from "react";
+import { useMemo, useState } from "react";
 import type { WorkdayMode } from "../../features/schedule/types";
 import type {
   BlockPeriodSettings,
@@ -19,6 +20,13 @@ type SettingsWindowProps = {
   onApplyBlockSettings: (blockSettings: BlockSettingsState) => void;
   onDragStart?: (event: PointerEvent<HTMLElement>) => void;
   onClose: () => void;
+};
+
+type ConflictSummary = {
+  count: number;
+  firstPeriodId: string | null;
+  periodIds: Set<string>;
+  blockIds: Set<string>;
 };
 
 const sectionItems: Array<{ id: SettingsSection; label: string }> = [
@@ -139,6 +147,7 @@ export function SettingsWindow({
                 settings={settings}
                 onSettingsChange={onSettingsChange}
                 onApplyBlockSettings={onApplyBlockSettings}
+                onClose={onClose}
               />
             )}
           </main>
@@ -152,15 +161,19 @@ function BlockSettingsPanel({
   settings,
   onSettingsChange,
   onApplyBlockSettings,
+  onClose,
 }: {
   settings: WidgetSettingsState;
   onSettingsChange: (settings: WidgetSettingsState) => void;
   onApplyBlockSettings: (blockSettings: BlockSettingsState) => void;
+  onClose: () => void;
 }) {
-  const blockSettings = normalizeBlockConflicts(settings.blockSettings);
+  const [openStyleBlockId, setOpenStyleBlockId] = useState<string | null>(null);
+  const blockSettings = useMemo(() => normalizeBlockConflicts(settings.blockSettings), [settings.blockSettings]);
   const activeBlock = blockSettings.blocks.find((block) => block.id === blockSettings.activeBlockId) ?? blockSettings.blocks[0] ?? null;
   const activePeriod = findPeriodInBlocks(blockSettings, blockSettings.activePeriodId) ?? activeBlock?.periods[0] ?? null;
-  const hasConflict = blockSettings.blocks.some((block) => block.periods.some((period) => period.conflict));
+  const conflictSummary = getConflictSummary(blockSettings);
+  const selectedIsPlaceholder = activeBlock?.type === "placeholder";
 
   const commitBlockSettings = (nextBlockSettings: BlockSettingsState) => {
     onSettingsChange({ ...settings, blockSettings: normalizeBlockConflicts(nextBlockSettings) });
@@ -220,7 +233,7 @@ function BlockSettingsPanel({
             name: "新课程块",
             type: "course",
             cardBackgroundColor: "#fff8e1",
-            cardCornerRadius: 12,
+            cardCornerRadius: 10,
             periods: [createDefaultPeriod(`${nextId}-p1`, 0)],
           }
         : {
@@ -228,7 +241,7 @@ function BlockSettingsPanel({
             name: "新占位块",
             type: "placeholder",
             cardBackgroundColor: "#e3f2fd",
-            cardCornerRadius: 12,
+            cardCornerRadius: 10,
             periods: [createDefaultPeriod(`${nextId}-p1`, 0, "午休", "12:00", "14:00")],
           };
 
@@ -273,18 +286,25 @@ function BlockSettingsPanel({
     });
   };
 
-  const deleteActive = () => {
-    if (!activeBlock || !activePeriod) {
+  const deletePeriod = (blockId: string, periodId: string) => {
+    const block = blockSettings.blocks.find((item) => item.id === blockId);
+    const period = block?.periods.find((item) => item.id === periodId);
+    if (!block || !period) {
       return;
     }
 
-    if (activeBlock.type === "placeholder" || activeBlock.periods.length === 1) {
+    const deletesBlock = block.type === "placeholder" || block.periods.length === 1;
+    if (deletesBlock) {
       const ok = window.confirm("当前课次是该块的唯一课次。继续删除会删除整个块，是否继续？");
       if (!ok) {
         return;
       }
+    } else if (!window.confirm("删除课次会同时移除该行已有课程卡片。是否继续？")) {
+      return;
+    }
 
-      const nextBlocks = blockSettings.blocks.filter((block) => block.id !== activeBlock.id);
+    if (deletesBlock) {
+      const nextBlocks = blockSettings.blocks.filter((item) => item.id !== block.id);
       commitBlockSettings({
         ...blockSettings,
         blocks: nextBlocks,
@@ -296,14 +316,12 @@ function BlockSettingsPanel({
 
     commitBlockSettings({
       ...blockSettings,
-      blocks: blockSettings.blocks.map((block) => {
-        if (block.id !== activeBlock.id || block.type !== "course") {
-          return block;
-        }
-
-        return { ...block, periods: withPeriodOrder(block.periods.filter((period) => period.id !== activePeriod.id)) };
-      }),
-      activePeriodId: activeBlock.periods.find((period) => period.id !== activePeriod.id)?.id ?? null,
+      blocks: blockSettings.blocks.map((current) =>
+        current.id === block.id && current.type === "course"
+          ? { ...current, periods: withPeriodOrder(current.periods.filter((item) => item.id !== period.id)) }
+          : current,
+      ),
+      activePeriodId: block.periods.find((item) => item.id !== period.id)?.id ?? null,
     });
   };
 
@@ -349,9 +367,10 @@ function BlockSettingsPanel({
 
   const applyChanges = () => {
     const normalized = normalizeBlockConflicts(blockSettings);
-    if (normalized.blocks.some((block) => block.periods.some((period) => period.conflict))) {
-      window.alert("当前课次时间存在重叠，请修正后再应用到小挂件。");
+    const nextSummary = getConflictSummary(normalized);
+    if (nextSummary.firstPeriodId) {
       commitBlockSettings(normalized);
+      focusPeriod(nextSummary.firstPeriodId);
       return;
     }
 
@@ -360,7 +379,7 @@ function BlockSettingsPanel({
 
   return (
     <section className="settings-panel-section block-settings-section">
-      <div className="block-settings-toolbar">
+      <div className="block-settings-toolbar timeline-toolbar">
         <div className="block-settings-toolbar-left">
           <button type="button" className="toolbar-action" onClick={() => addBlock("course")}>
             添加课程块
@@ -368,26 +387,32 @@ function BlockSettingsPanel({
           <button type="button" className="toolbar-action" onClick={() => addBlock("placeholder")}>
             添加占位块
           </button>
-          <button type="button" className="toolbar-action primary" onClick={addPeriodAfterActive}>
+          <button
+            type="button"
+            className="toolbar-action primary"
+            onClick={addPeriodAfterActive}
+            disabled={selectedIsPlaceholder}
+            title={selectedIsPlaceholder ? "占位块只能包含一个课次" : undefined}
+          >
             添加课次
           </button>
         </div>
         <div className="block-settings-toolbar-right">
-          {hasConflict && <span className="block-conflict-hint">存在时间冲突</span>}
-          <button type="button" className="toolbar-action" onClick={deleteActive}>
-            删除
+          {conflictSummary.count > 0 && <span className="block-conflict-hint">冲突 {conflictSummary.count} 项</span>}
+          <button type="button" className="toolbar-action" onClick={onClose}>
+            关闭
           </button>
           <button type="button" className="toolbar-action primary" onClick={applyChanges}>
-            应用
+            应用修改
           </button>
         </div>
       </div>
 
-      <div className="block-settings-layout">
+      <div className="block-settings-layout timeline-layout">
         <section className="block-list-panel">
           <div className="block-panel-header">
-            <h3>课程块列</h3>
-            <span>当前用上下按钮调整顺序</span>
+            <h3>课程块</h3>
+            <span>{blockSettings.blocks.length} 个块</span>
           </div>
           <div className="block-list">
             {blockSettings.blocks.map((block) => (
@@ -395,6 +420,9 @@ function BlockSettingsPanel({
                 key={block.id}
                 block={block}
                 selected={block.id === activeBlock?.id}
+                hasConflict={conflictSummary.blockIds.has(block.id)}
+                styleOpen={openStyleBlockId === block.id}
+                onToggleStyle={() => setOpenStyleBlockId(openStyleBlockId === block.id ? null : block.id)}
                 onSelect={() => selectBlock(block.id)}
                 onRename={(name) => updateBlock(block.id, { name })}
                 onChangeTone={(cardBackgroundColor) => updateBlock(block.id, { cardBackgroundColor })}
@@ -406,17 +434,17 @@ function BlockSettingsPanel({
           </div>
         </section>
 
-        <section className="period-list-panel">
+        <section className="period-list-panel timeline-panel">
           <div className="block-panel-header">
-            <h3>课次列</h3>
-            <span>全部块课次展开显示</span>
+            <h3>课次时间轴</h3>
+            <span>全部课次展开</span>
           </div>
-          <div className="period-list">
+          <div className="period-list timeline-list">
             {blockSettings.blocks.map((block) => (
-              <div className="period-block-group" key={block.id}>
+              <div className="period-block-group timeline-group" key={block.id}>
                 <div className="period-block-title">
                   <strong>{block.name}</strong>
-                  <span>{block.type === "course" ? "课程块" : "占位块"}</span>
+                  <span>{formatBlockTimeRange(block)}</span>
                 </div>
                 {block.periods.map((period) => (
                   <PeriodRow
@@ -424,13 +452,14 @@ function BlockSettingsPanel({
                     blockType={block.type}
                     period={period}
                     selected={block.id === activeBlock?.id && period.id === activePeriod?.id}
-                    conflict={period.conflict}
+                    conflict={conflictSummary.periodIds.has(period.id)}
                     onSelect={() => selectPeriod(block.id, period.id)}
                     onChangeName={(name) => updatePeriod(block.id, period.id, { name })}
                     onChangeStartTime={(startTime) => updatePeriod(block.id, period.id, { startTime })}
                     onChangeEndTime={(endTime) => updatePeriod(block.id, period.id, { endTime })}
                     onMoveUp={() => movePeriod(block.id, period.id, -1)}
                     onMoveDown={() => movePeriod(block.id, period.id, 1)}
+                    onDelete={() => deletePeriod(block.id, period.id)}
                   />
                 ))}
               </div>
@@ -445,6 +474,9 @@ function BlockSettingsPanel({
 function BlockCard({
   block,
   selected,
+  hasConflict,
+  styleOpen,
+  onToggleStyle,
   onSelect,
   onRename,
   onChangeTone,
@@ -454,6 +486,9 @@ function BlockCard({
 }: {
   block: BlockSettings;
   selected: boolean;
+  hasConflict: boolean;
+  styleOpen: boolean;
+  onToggleStyle: () => void;
   onSelect: () => void;
   onRename: (name: string) => void;
   onChangeTone: (tone: string) => void;
@@ -461,48 +496,63 @@ function BlockCard({
   onMoveUp: () => void;
   onMoveDown: () => void;
 }) {
+  const className = ["block-card", "timeline-block-card", selected ? "is-selected" : "", hasConflict ? "has-conflict" : ""]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <article className={selected ? "block-card is-selected" : "block-card"} onClick={onSelect}>
-      <div className="block-card-summary">
-        <button type="button" className="block-select-dot" aria-label="选中课程块" />
-        <div className="block-card-meta">
-          <strong>{block.name}</strong>
-          <span>{block.type === "course" ? "课程块" : "占位块"}</span>
+    <article className={className} onClick={onSelect}>
+      <div className="block-drag-handle" title="拖动排序">
+        ⋮⋮
+      </div>
+      <div className="block-card-main">
+        <div className="block-card-title-row">
+          <input
+            className="block-name-input"
+            value={block.name}
+            onChange={(event) => onRename(event.currentTarget.value)}
+            onClick={stopPropagation}
+          />
+          <span className="period-kind-tag">{block.type === "course" ? "课程块" : "占位块"}</span>
         </div>
-        <div className="block-card-inline-actions">
-          <button type="button" className="mini-action" onClick={stopAndRun(onMoveUp)}>
-            ↑
-          </button>
-          <button type="button" className="mini-action" onClick={stopAndRun(onMoveDown)}>
-            ↓
-          </button>
+        <div className="block-card-metrics">
+          <span>{block.periods.length} 个课次</span>
+          <span>{formatBlockTimeRange(block)}</span>
+          {hasConflict && <strong>时间冲突</strong>}
         </div>
       </div>
-      <div className="block-card-form">
-        <label>
-          <span>块名</span>
-          <input value={block.name} onChange={(event) => onRename(event.currentTarget.value)} onClick={stopPropagation} />
-        </label>
-        <label>
-          <span>卡片背景</span>
-          <input
-            type="color"
-            value={block.cardBackgroundColor}
-            onChange={(event) => onChangeTone(event.currentTarget.value)}
-            onClick={stopPropagation}
-          />
-        </label>
-        <label>
-          <span>圆角 {block.cardCornerRadius}px</span>
-          <input
-            type="range"
-            min="0"
-            max="18"
-            value={block.cardCornerRadius}
-            onChange={(event) => onChangeRadius(Number(event.currentTarget.value))}
-            onClick={stopPropagation}
-          />
-        </label>
+      <div className="block-style-area">
+        <button className="style-button" type="button" onClick={stopAndRun(onToggleStyle)}>
+          <span className="style-swatch" style={{ background: block.cardBackgroundColor }} />
+          样式
+        </button>
+        <span className="radius-value">{block.cardCornerRadius}px</span>
+        {styleOpen && (
+          <div className="style-popover" onClick={stopPropagation}>
+            <label>
+              <span>块内课程卡片背景色</span>
+              <input type="color" value={block.cardBackgroundColor} onChange={(event) => onChangeTone(event.currentTarget.value)} />
+            </label>
+            <label>
+              <span>块内课程卡片圆角 {block.cardCornerRadius}px</span>
+              <input
+                type="range"
+                min="0"
+                max="16"
+                value={block.cardCornerRadius}
+                onChange={(event) => onChangeRadius(Number(event.currentTarget.value))}
+              />
+            </label>
+          </div>
+        )}
+      </div>
+      <div className="block-card-more">
+        <button type="button" onClick={stopAndRun(onMoveUp)} title="上移块">
+          ↑
+        </button>
+        <button type="button" onClick={stopAndRun(onMoveDown)} title="下移块">
+          ↓
+        </button>
       </div>
     </article>
   );
@@ -519,6 +569,7 @@ function PeriodRow({
   onChangeEndTime,
   onMoveUp,
   onMoveDown,
+  onDelete,
 }: {
   period: BlockPeriodSettings;
   blockType: BlockType;
@@ -530,37 +581,37 @@ function PeriodRow({
   onChangeEndTime: (endTime: string) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  onDelete: () => void;
 }) {
-  const className = ["period-row", selected ? "is-selected" : "", conflict ? "is-conflict" : ""]
+  const className = ["period-row", "timeline-period-row", selected ? "is-selected" : "", conflict ? "is-conflict" : ""]
     .filter(Boolean)
     .join(" ");
 
   return (
-    <article className={className} onClick={onSelect}>
+    <article className={className} data-period-row-id={period.id} onClick={onSelect}>
       <button type="button" className="period-select-dot" aria-label="选中课次" />
-      <div className="period-row-main">
-        <div className="period-row-label">
-          <input value={period.name} onChange={(event) => onChangeName(event.currentTarget.value)} onClick={stopPropagation} />
-        </div>
-        <div className="period-row-time">
-          <input
-            value={period.startTime}
-            onChange={(event) => onChangeStartTime(event.currentTarget.value)}
-            onClick={stopPropagation}
-          />
-          <span>~</span>
-          <input value={period.endTime} onChange={(event) => onChangeEndTime(event.currentTarget.value)} onClick={stopPropagation} />
-        </div>
+      <input className="period-name-input" value={period.name} onChange={(event) => onChangeName(event.currentTarget.value)} />
+      <input
+        className="period-time-input"
+        value={period.startTime}
+        onChange={(event) => onChangeStartTime(event.currentTarget.value)}
+      />
+      <input className="period-time-input" value={period.endTime} onChange={(event) => onChangeEndTime(event.currentTarget.value)} />
+      <span className="period-duration">{formatDuration(period.startTime, period.endTime)}</span>
+      <div className="timeline-row-handle" title={blockType === "course" ? "同一课程块内拖动排序" : "占位块不可添加课次"}>
+        ⋮⋮
       </div>
-      <div className="period-row-actions">
-        <span className="period-kind-tag">{blockType === "course" ? "课程块" : "占位块"}</span>
-        <button type="button" className="mini-action" onClick={stopAndRun(onMoveUp)} disabled={blockType === "placeholder"}>
+      <div className="timeline-row-more">
+        <button type="button" onClick={stopAndRun(onMoveUp)} disabled={blockType === "placeholder"} title="上移">
           ↑
         </button>
-        <button type="button" className="mini-action" onClick={stopAndRun(onMoveDown)} disabled={blockType === "placeholder"}>
+        <button type="button" onClick={stopAndRun(onMoveDown)} disabled={blockType === "placeholder"} title="下移">
           ↓
         </button>
       </div>
+      <button type="button" className="period-delete-button" onClick={stopAndRun(onDelete)} aria-label="删除课次">
+        删除
+      </button>
     </article>
   );
 }
@@ -595,10 +646,7 @@ function withPeriodOrder(periods: BlockPeriodSettings[]): BlockPeriodSettings[] 
 }
 
 function shiftTime(time: string, minutes: number): string {
-  const [hoursPart, minutesPart] = time.split(":");
-  const hours = Number(hoursPart);
-  const mins = Number(minutesPart);
-  const total = hours * 60 + mins + minutes;
+  const total = timeToMinutes(time) + minutes;
   const wrapped = (total + 1440) % 1440;
   const nextHours = Math.floor(wrapped / 60);
   const nextMins = wrapped % 60;
@@ -606,47 +654,57 @@ function shiftTime(time: string, minutes: number): string {
 }
 
 function normalizeBlockConflicts(blockSettings: BlockSettingsState): BlockSettingsState {
-  const periods = blockSettings.blocks.flatMap((block) => block.periods.map((period) => ({ blockId: block.id, period })));
-  const conflicts = new Set<string>();
-  const sorted = [...periods].sort((a, b) => timeToMinutes(a.period.startTime) - timeToMinutes(b.period.startTime));
-
-  for (let index = 0; index < sorted.length; index += 1) {
-    const current = sorted[index];
-    const currentStart = timeToMinutes(current.period.startTime);
-    const currentEnd = timeToMinutes(current.period.endTime);
-
-    if (currentEnd <= currentStart) {
-      conflicts.add(current.period.id);
-      continue;
-    }
-
-    for (let nextIndex = index + 1; nextIndex < sorted.length; nextIndex += 1) {
-      const next = sorted[nextIndex];
-      const nextStart = timeToMinutes(next.period.startTime);
-      const nextEnd = timeToMinutes(next.period.endTime);
-
-      if (nextEnd <= nextStart) {
-        conflicts.add(next.period.id);
-      }
-
-      if (nextStart >= currentEnd) {
-        break;
-      }
-
-      if (nextEnd > currentStart) {
-        conflicts.add(current.period.id);
-        conflicts.add(next.period.id);
-      }
-    }
-  }
+  const summary = getConflictSummary(blockSettings);
 
   return {
     ...blockSettings,
     blocks: blockSettings.blocks.map((block) => ({
       ...block,
-      periods: withPeriodOrder(block.periods).map((period) => ({ ...period, conflict: conflicts.has(period.id) })),
+      periods: withPeriodOrder(block.periods).map((period) => ({ ...period, conflict: summary.periodIds.has(period.id) })),
     })),
   };
+}
+
+function getConflictSummary(blockSettings: BlockSettingsState): ConflictSummary {
+  const periodRecords = blockSettings.blocks.flatMap((block, blockIndex) =>
+    block.periods.map((period, periodIndex) => ({ block, blockIndex, period, periodIndex })),
+  );
+  const periodIds = new Set<string>();
+  const blockIds = new Set<string>();
+
+  for (let index = 0; index < periodRecords.length; index += 1) {
+    const current = periodRecords[index];
+    const currentStart = timeToMinutes(current.period.startTime);
+    const currentEnd = timeToMinutes(current.period.endTime);
+
+    if (currentEnd <= currentStart) {
+      markConflict(current.block.id, current.period.id, blockIds, periodIds);
+    }
+
+    const next = periodRecords[index + 1];
+    if (!next) {
+      continue;
+    }
+
+    const nextStart = timeToMinutes(next.period.startTime);
+    const nextEnd = timeToMinutes(next.period.endTime);
+    if (currentStart > nextStart || currentEnd > nextStart || nextEnd <= nextStart) {
+      markConflict(current.block.id, current.period.id, blockIds, periodIds);
+      markConflict(next.block.id, next.period.id, blockIds, periodIds);
+    }
+  }
+
+  return {
+    count: periodIds.size,
+    firstPeriodId: periodIds.values().next().value ?? null,
+    periodIds,
+    blockIds,
+  };
+}
+
+function markConflict(blockId: string, periodId: string, blockIds: Set<string>, periodIds: Set<string>) {
+  blockIds.add(blockId);
+  periodIds.add(periodId);
 }
 
 function timeToMinutes(value: string): number {
@@ -656,6 +714,33 @@ function timeToMinutes(value: string): number {
   }
 
   return hours * 60 + minutes;
+}
+
+function formatDuration(startTime: string, endTime: string): string {
+  const minutes = timeToMinutes(endTime) - timeToMinutes(startTime);
+  if (minutes <= 0) {
+    return "无效";
+  }
+
+  return `${minutes} 分钟`;
+}
+
+function formatBlockTimeRange(block: BlockSettings): string {
+  const first = block.periods[0];
+  const last = block.periods[block.periods.length - 1];
+  if (!first || !last) {
+    return "未设置时间";
+  }
+
+  return `${first.startTime}-${last.endTime}`;
+}
+
+function focusPeriod(periodId: string) {
+  window.requestAnimationFrame(() => {
+    const row = document.querySelector<HTMLElement>(`[data-period-row-id="${periodId}"]`);
+    row?.scrollIntoView({ block: "center", behavior: "smooth" });
+    row?.querySelector<HTMLInputElement>("input")?.focus();
+  });
 }
 
 function stopPropagation(event: SyntheticEvent) {
