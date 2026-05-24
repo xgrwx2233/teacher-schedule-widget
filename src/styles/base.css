@@ -762,58 +762,10 @@ button {
   color: #4f46e5;
 }
 
-.style-button {
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  padding: 0 10px;
-  background: #ffffff;
-  color: #374151;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.style-swatch {
-  width: 14px;
-  height: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.18);
-  border-radius: 4px;
-}
-
-.style-popover {
-  position: absolute;
-  top: 36px;
-  left: -120px;
-  z-index: 20;
-  width: 240px;
-  display: grid;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid #dbe1ea;
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
-}
-
-.style-popover label {
-  display: grid;
-  gap: 6px;
-  color: #374151;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.style-popover input[type="color"] {
-  width: 100%;
-  height: 32px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  padding: 3px;
-  background: #ffffff;
+.block-settings-icon-button.is-active {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+  color: #6d28d9;
 }
 
 .block-radius-control {
@@ -873,6 +825,89 @@ button {
   border-radius: 6px;
   font-size: 10px;
   line-height: 1;
+}
+
+.block-settings-popover {
+  grid-column: 1 / -1;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: grid;
+  gap: 12px;
+  margin: 0 0 8px;
+  padding: 14px;
+  border: 1px solid #ddd6fe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow:
+    0 16px 36px rgba(15, 23, 42, 0.14),
+    0 0 0 3px rgba(124, 58, 237, 0.08);
+}
+
+.block-settings-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.block-settings-popover-header div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.block-settings-popover-header strong {
+  color: #111827;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.block-settings-popover-header span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.block-settings-popover-header button {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.block-settings-popover-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(150px, 1fr) minmax(120px, 1fr);
+  gap: 12px;
+}
+
+.block-settings-popover-grid label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.block-settings-popover-grid select,
+.block-settings-popover-grid input[type="color"] {
+  width: 100%;
+  height: 32px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #111827;
+}
+
+.block-settings-popover-grid input[type="color"] {
+  padding: 3px;
 }
 
 .block-content-card {

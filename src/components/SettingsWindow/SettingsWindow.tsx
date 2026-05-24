@@ -467,15 +467,22 @@ function BlockSettingsPanel({
                 setBlockDropTargetId(null);
               }}
             >
+              {openStyleBlockId === block.id && (
+                <BlockSettingsPopover
+                  block={block}
+                  onChangeType={(type) => updateBlock(block.id, { type })}
+                  onChangeBackground={(cardBackgroundColor) => updateBlock(block.id, { cardBackgroundColor })}
+                  onChangeRadius={(cardCornerRadius) => updateBlock(block.id, { cardCornerRadius })}
+                  onClose={() => setOpenStyleBlockId(null)}
+                />
+              )}
+
               <BlockHeaderRow
                 block={block}
                 blockIndex={blockIndex}
                 blockCount={blockSettings.blocks.length}
                 styleOpen={openStyleBlockId === block.id}
                 onToggleStyle={() => setOpenStyleBlockId(openStyleBlockId === block.id ? null : block.id)}
-                onChangeType={(type) => updateBlock(block.id, { type })}
-                onChangeBackground={(cardBackgroundColor) => updateBlock(block.id, { cardBackgroundColor })}
-                onChangeRadius={(cardCornerRadius) => updateBlock(block.id, { cardCornerRadius })}
                 onMoveUp={() => moveBlock(block.id, -1)}
                 onMoveDown={() => moveBlock(block.id, 1)}
               />
@@ -546,68 +553,31 @@ function BlockSettingsPanel({
 }
 
 function BlockHeaderRow({
-  block,
   blockIndex,
   blockCount,
   styleOpen,
   onToggleStyle,
-  onChangeType,
-  onChangeBackground,
-  onChangeRadius,
   onMoveUp,
   onMoveDown,
 }: {
-  block: BlockSettings;
   blockIndex: number;
   blockCount: number;
   styleOpen: boolean;
   onToggleStyle: () => void;
-  onChangeType: (type: BlockType) => void;
-  onChangeBackground: (color: string) => void;
-  onChangeRadius: (radius: number) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
 }) {
-  const radiusOptions = [0, 2, 4, 6, 8, 10, 12, 14, 16];
-
   return (
     <div className="block-container-header">
       <div className="block-style-area">
-        <button className="block-settings-icon-button" type="button" onClick={stopAndRun(onToggleStyle)} aria-label="块设置">
+        <button
+          className={styleOpen ? "block-settings-icon-button is-active" : "block-settings-icon-button"}
+          type="button"
+          onClick={stopAndRun(onToggleStyle)}
+          aria-label="块设置"
+        >
           ⚙
         </button>
-        {styleOpen && (
-          <div className="style-popover" onClick={stopPropagation}>
-            <label>
-              <span>块类型</span>
-              <select
-                className="block-type-select"
-                value={block.type}
-                onChange={(event) => onChangeType(event.currentTarget.value as BlockType)}
-              >
-                <option value="course">课程块</option>
-                <option value="placeholder">占位块</option>
-              </select>
-            </label>
-            <label>
-              <span>块内课程卡片背景色</span>
-              <input type="color" value={block.cardBackgroundColor} onChange={(event) => onChangeBackground(event.currentTarget.value)} />
-            </label>
-            <label className="block-radius-control">
-              <span>块内课程卡片圆角</span>
-              <select
-                value={block.cardCornerRadius}
-                onChange={(event) => onChangeRadius(Number(event.currentTarget.value))}
-              >
-                {radiusOptions.map((radius) => (
-                  <option key={radius} value={radius}>
-                    {radius}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
       </div>
       <div className="block-move-buttons">
         <button type="button" onClick={stopAndRun(onMoveUp)} disabled={blockIndex === 0} title="上移块">
@@ -618,6 +588,66 @@ function BlockHeaderRow({
         </button>
       </div>
     </div>
+  );
+}
+
+function BlockSettingsPopover({
+  block,
+  onChangeType,
+  onChangeBackground,
+  onChangeRadius,
+  onClose,
+}: {
+  block: BlockSettings;
+  onChangeType: (type: BlockType) => void;
+  onChangeBackground: (color: string) => void;
+  onChangeRadius: (radius: number) => void;
+  onClose: () => void;
+}) {
+  const radiusOptions = [0, 2, 4, 6, 8, 10, 12, 14, 16];
+
+  return (
+    <section className="block-settings-popover" onClick={stopPropagation}>
+      <header className="block-settings-popover-header">
+        <div>
+          <strong>块信息设置</strong>
+          <span>统一控制该块内课程卡片样式</span>
+        </div>
+        <button type="button" onClick={onClose} aria-label="关闭块设置">
+          ×
+        </button>
+      </header>
+      <div className="block-settings-popover-grid">
+        <label>
+          <span>块类型</span>
+          <select
+            className="block-type-select"
+            value={block.type}
+            onChange={(event) => onChangeType(event.currentTarget.value as BlockType)}
+          >
+            <option value="course">课程块</option>
+            <option value="placeholder">占位块</option>
+          </select>
+        </label>
+        <label>
+          <span>课程卡片背景色</span>
+          <input type="color" value={block.cardBackgroundColor} onChange={(event) => onChangeBackground(event.currentTarget.value)} />
+        </label>
+        <label className="block-radius-control">
+          <span>课程卡片圆角</span>
+          <select
+            value={block.cardCornerRadius}
+            onChange={(event) => onChangeRadius(Number(event.currentTarget.value))}
+          >
+            {radiusOptions.map((radius) => (
+              <option key={radius} value={radius}>
+                {radius}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </section>
   );
 }
 
