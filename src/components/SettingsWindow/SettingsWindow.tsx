@@ -471,16 +471,7 @@ function BlockSettingsPanel({
                 block={block}
                 blockIndex={blockIndex}
                 blockCount={blockSettings.blocks.length}
-                hasConflict={hasConflict}
                 styleOpen={openStyleBlockId === block.id}
-                onDragStart={(event) => {
-                  setDraggingBlockId(block.id);
-                  event.dataTransfer.effectAllowed = "move";
-                }}
-                onDragEnd={() => {
-                  setDraggingBlockId(null);
-                  setBlockDropTargetId(null);
-                }}
                 onToggleStyle={() => setOpenStyleBlockId(openStyleBlockId === block.id ? null : block.id)}
                 onRename={(name) => updateBlock(block.id, { name })}
                 onChangeType={(type) => updateBlock(block.id, { type })}
@@ -490,61 +481,63 @@ function BlockSettingsPanel({
                 onMoveDown={() => moveBlock(block.id, 1)}
               />
 
-              <div className="block-period-list" role="list">
-                {block.periods.map((period) => (
-                  <PeriodRow
-                    key={period.id}
-                    block={block}
-                    period={period}
-                    selected={block.id === activeBlock?.id && period.id === activePeriod?.id}
-                    conflict={conflictSummary.periodIds.has(period.id)}
-                    dragging={draggingPeriod?.periodId === period.id}
-                    dropTarget={periodDropTargetId === period.id && draggingPeriod?.periodId !== period.id}
-                    onSelect={() => selectPeriod(block.id, period.id)}
-                    onChangeName={(name) => updatePeriod(block.id, period.id, { name })}
-                    onChangeStartTime={(startTime) => updatePeriod(block.id, period.id, { startTime })}
-                    onChangeEndTime={(endTime) => updatePeriod(block.id, period.id, { endTime })}
-                    onDragStart={(event) => {
-                      if (block.type === "placeholder") {
+              <div className="block-content-card">
+                <div className="block-period-list" role="list">
+                  {block.periods.map((period) => (
+                    <PeriodRow
+                      key={period.id}
+                      block={block}
+                      period={period}
+                      selected={block.id === activeBlock?.id && period.id === activePeriod?.id}
+                      conflict={conflictSummary.periodIds.has(period.id)}
+                      dragging={draggingPeriod?.periodId === period.id}
+                      dropTarget={periodDropTargetId === period.id && draggingPeriod?.periodId !== period.id}
+                      onSelect={() => selectPeriod(block.id, period.id)}
+                      onChangeName={(name) => updatePeriod(block.id, period.id, { name })}
+                      onChangeStartTime={(startTime) => updatePeriod(block.id, period.id, { startTime })}
+                      onChangeEndTime={(endTime) => updatePeriod(block.id, period.id, { endTime })}
+                      onDragStart={(event) => {
+                        if (block.type === "placeholder") {
+                          event.preventDefault();
+                          return;
+                        }
+                        setDraggingPeriod({ blockId: block.id, periodId: period.id });
+                        event.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(event) => {
+                        if (!draggingPeriod || draggingPeriod.blockId !== block.id || draggingPeriod.periodId === period.id) {
+                          return;
+                        }
                         event.preventDefault();
-                        return;
-                      }
-                      setDraggingPeriod({ blockId: block.id, periodId: period.id });
-                      event.dataTransfer.effectAllowed = "move";
-                    }}
-                    onDragOver={(event) => {
-                      if (!draggingPeriod || draggingPeriod.blockId !== block.id || draggingPeriod.periodId === period.id) {
-                        return;
-                      }
-                      event.preventDefault();
-                      setPeriodDropTargetId(period.id);
-                    }}
-                    onDragEnd={() => {
-                      setDraggingPeriod(null);
-                      setPeriodDropTargetId(null);
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      if (draggingPeriod?.blockId === block.id) {
-                        movePeriodToTarget(block.id, draggingPeriod.periodId, period.id);
-                      }
-                      setDraggingPeriod(null);
-                      setPeriodDropTargetId(null);
-                    }}
-                    onDelete={() => deletePeriod(block.id, period.id)}
-                  />
-                ))}
-              </div>
+                        setPeriodDropTargetId(period.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingPeriod(null);
+                        setPeriodDropTargetId(null);
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        if (draggingPeriod?.blockId === block.id) {
+                          movePeriodToTarget(block.id, draggingPeriod.periodId, period.id);
+                        }
+                        setDraggingPeriod(null);
+                        setPeriodDropTargetId(null);
+                      }}
+                      onDelete={() => deletePeriod(block.id, period.id)}
+                    />
+                  ))}
+                </div>
 
-              {block.type === "course" && (
-                <button
-                  type="button"
-                  className="block-add-period-button"
-                  onClick={stopAndRun(() => addPeriodToBlock(block.id, block.periods[block.periods.length - 1]?.id ?? null))}
-                >
-                  + 在当前块中添加课次
-                </button>
-              )}
+                {block.type === "course" && (
+                  <button
+                    type="button"
+                    className="block-add-period-button"
+                    onClick={stopAndRun(() => addPeriodToBlock(block.id, block.periods[block.periods.length - 1]?.id ?? null))}
+                  >
+                    + 在当前块中添加课次
+                  </button>
+                )}
+              </div>
             </article>
           );
         })}
@@ -557,10 +550,7 @@ function BlockHeaderRow({
   block,
   blockIndex,
   blockCount,
-  hasConflict,
   styleOpen,
-  onDragStart,
-  onDragEnd,
   onToggleStyle,
   onRename,
   onChangeType,
@@ -572,10 +562,7 @@ function BlockHeaderRow({
   block: BlockSettings;
   blockIndex: number;
   blockCount: number;
-  hasConflict: boolean;
   styleOpen: boolean;
-  onDragStart: (event: DragEvent<HTMLButtonElement>) => void;
-  onDragEnd: () => void;
   onToggleStyle: () => void;
   onRename: (name: string) => void;
   onChangeType: (type: BlockType) => void;
@@ -588,17 +575,6 @@ function BlockHeaderRow({
 
   return (
     <div className="block-container-header">
-      <button
-        type="button"
-        className="block-drag-handle"
-        draggable
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        title="拖动课程块排序"
-        onClick={stopPropagation}
-      >
-        ⋮⋮
-      </button>
       <input
         className="block-name-input"
         value={block.name}
@@ -606,53 +582,43 @@ function BlockHeaderRow({
         onChange={(event) => onRename(event.currentTarget.value)}
         onClick={stopPropagation}
       />
-      <select
-        className="block-type-select"
-        value={block.type}
-        onChange={(event) => onChangeType(event.currentTarget.value as BlockType)}
-        onClick={stopPropagation}
-      >
-        <option value="course">课程块</option>
-        <option value="placeholder">占位块</option>
-      </select>
       <div className="block-style-area">
-        <button className="style-button" type="button" onClick={stopAndRun(onToggleStyle)}>
-          <span className="style-swatch" style={{ background: block.cardBackgroundColor }} />
-          背景色
+        <button className="block-settings-icon-button" type="button" onClick={stopAndRun(onToggleStyle)} aria-label="块设置">
+          ⚙
         </button>
         {styleOpen && (
           <div className="style-popover" onClick={stopPropagation}>
             <label>
+              <span>块类型</span>
+              <select
+                className="block-type-select"
+                value={block.type}
+                onChange={(event) => onChangeType(event.currentTarget.value as BlockType)}
+              >
+                <option value="course">课程块</option>
+                <option value="placeholder">占位块</option>
+              </select>
+            </label>
+            <label>
               <span>块内课程卡片背景色</span>
               <input type="color" value={block.cardBackgroundColor} onChange={(event) => onChangeBackground(event.currentTarget.value)} />
             </label>
-            <label>
-              <span>块内课程卡片圆角 {block.cardCornerRadius}px</span>
-              <input
-                type="range"
-                min="0"
-                max="16"
+            <label className="block-radius-control">
+              <span>块内课程卡片圆角</span>
+              <select
                 value={block.cardCornerRadius}
                 onChange={(event) => onChangeRadius(Number(event.currentTarget.value))}
-              />
+              >
+                {radiusOptions.map((radius) => (
+                  <option key={radius} value={radius}>
+                    {radius}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
         )}
       </div>
-      <label className="block-radius-control" onClick={stopPropagation}>
-        <span>圆角</span>
-        <select
-          value={block.cardCornerRadius}
-          onChange={(event) => onChangeRadius(Number(event.currentTarget.value))}
-        >
-          {radiusOptions.map((radius) => (
-            <option key={radius} value={radius}>
-              {radius}
-            </option>
-          ))}
-        </select>
-      </label>
-      {hasConflict && <span className="block-error-label">时间冲突</span>}
       <div className="block-move-buttons">
         <button type="button" onClick={stopAndRun(onMoveUp)} disabled={blockIndex === 0} title="上移块">
           ↑

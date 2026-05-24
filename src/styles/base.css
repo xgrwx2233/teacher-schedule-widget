@@ -655,21 +655,23 @@ button {
   position: relative;
   min-width: 0;
   display: grid;
-  gap: 0;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  overflow: hidden;
+  grid-template-columns: 126px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
 }
 
 .block-container-card.is-selected {
-  border-color: rgba(124, 58, 237, 0.45);
-  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.12);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .block-container-card.has-conflict {
-  border-color: rgba(220, 38, 38, 0.35);
+  border-color: transparent;
 }
 
 .block-container-card.is-dragging {
@@ -682,34 +684,24 @@ button {
 }
 
 .block-container-card::before {
-  content: "";
-  position: absolute;
-  width: 4px;
-  height: 100%;
-  background: var(--block-accent);
+  content: none;
 }
 
 .block-container-header {
   position: relative;
   display: grid;
-  grid-template-columns: 28px minmax(86px, 0.92fr) minmax(88px, 120px) auto minmax(68px, 96px) auto;
-  align-items: center;
-  gap: 10px;
+  grid-template-columns: 3.5em 30px 28px;
+  align-items: start;
+  gap: 6px;
   min-width: 0;
-  min-height: 56px;
-  padding: 12px 14px 12px 18px;
-  border-bottom: 1px solid #eef2f7;
-  background: #fcfdff;
+  min-height: 44px;
+  padding: 2px 0 0;
+  border-bottom: 0;
+  background: transparent;
 }
 
 .block-container-header::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 4px;
-  height: 100%;
-  background: var(--block-accent);
+  content: none;
 }
 
 .block-drag-handle,
@@ -731,19 +723,24 @@ button {
 .block-name-input {
   min-width: 0;
   width: 100%;
-  height: 32px;
-  border: 1px solid #dbe1ea;
+  height: 30px;
+  border: 1px solid transparent;
   border-radius: 8px;
-  padding: 0 10px;
-  background: #ffffff;
+  padding: 0 6px;
+  background: transparent;
   color: #111827;
   font-size: 14px;
   font-weight: 800;
 }
 
+.block-name-input:focus {
+  border-color: #c7d2fe;
+  background: #ffffff;
+  outline: 0;
+}
+
 .block-type-select,
-.block-radius-control input,
-.timeline-row-more button,
+.block-radius-control select,
 .period-delete-button,
 .timeline-period-row input {
   min-width: 0;
@@ -764,6 +761,24 @@ button {
   position: relative;
   display: flex;
   justify-content: flex-start;
+}
+
+.block-settings-icon-button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dbe1ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.block-settings-icon-button:hover {
+  background: #f8fafc;
+  color: #4f46e5;
 }
 
 .style-button {
@@ -790,8 +805,8 @@ button {
 
 .style-popover {
   position: absolute;
-  top: 38px;
-  left: 0;
+  top: 36px;
+  left: -120px;
   z-index: 20;
   width: 240px;
   display: grid;
@@ -864,6 +879,50 @@ button {
   cursor: pointer;
 }
 
+.block-move-buttons {
+  display: grid;
+  gap: 4px;
+}
+
+.block-move-buttons button {
+  width: 28px;
+  height: 14px;
+  min-width: 28px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.block-content-card {
+  position: relative;
+  min-width: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+}
+
+.block-content-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--block-accent);
+}
+
+.block-container-card.is-selected .block-content-card {
+  border-color: rgba(124, 58, 237, 0.45);
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.12);
+}
+
+.block-container-card.has-conflict .block-content-card {
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
 .block-period-list {
   display: grid;
 }
@@ -886,11 +945,11 @@ button {
 
 .period-row {
   display: grid;
-  grid-template-columns: 18px minmax(100px, 1.2fr) 82px 10px 82px 24px 34px;
+  grid-template-columns: 18px minmax(74px, 120px) 50px 8px 50px minmax(8px, 1fr) 24px 30px;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-height: 52px;
-  padding: 0 14px 0 18px;
+  padding: 0 10px 0 18px;
   border-top: 1px solid #eef2f7;
   background: #ffffff;
 }
@@ -943,6 +1002,10 @@ button {
   background: #ffffff;
   color: #111827;
   font-size: 12px;
+}
+
+.period-time-input {
+  padding: 0 6px;
 }
 
 .period-name-input {
