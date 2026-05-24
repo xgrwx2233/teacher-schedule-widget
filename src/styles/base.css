@@ -618,26 +618,6 @@ button {
   flex-wrap: wrap;
 }
 
-.block-status-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #f8fafc;
-  color: #475569;
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.block-status-summary.has-conflict {
-  border-color: #fecaca;
-  background: #fff1f2;
-  color: #b91c1c;
-}
-
 .toolbar-action {
   height: 32px;
   padding: 0 12px;
@@ -656,23 +636,9 @@ button {
   color: #ffffff;
 }
 
-.toolbar-action:disabled,
-.timeline-row-more button:disabled {
+.toolbar-action:disabled {
   opacity: 0.42;
   cursor: not-allowed;
-}
-
-.block-conflict-hint {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border: 1px solid #fecaca;
-  border-radius: 999px;
-  background: #fff1f2;
-  color: #b91c1c;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .block-container-list {
@@ -726,7 +692,7 @@ button {
 .block-container-header {
   position: relative;
   display: grid;
-  grid-template-columns: 28px minmax(110px, 1.4fr) minmax(88px, 120px) auto minmax(88px, 120px) auto auto;
+  grid-template-columns: 28px minmax(86px, 0.92fr) minmax(88px, 120px) auto minmax(68px, 96px) auto;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -863,12 +829,12 @@ button {
   font-weight: 700;
 }
 
-.block-radius-control input {
-  width: 54px;
+.block-radius-control select {
+  width: 58px;
   height: 32px;
   border: 1px solid #dbe1ea;
   border-radius: 8px;
-  padding: 0 8px;
+  padding: 0 6px;
   background: #ffffff;
 }
 
@@ -885,14 +851,7 @@ button {
   font-weight: 700;
 }
 
-.block-move-buttons {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
 .block-move-buttons button,
-.timeline-row-more button,
 .period-delete-button {
   height: 28px;
   min-width: 28px;
@@ -927,7 +886,7 @@ button {
 
 .period-row {
   display: grid;
-  grid-template-columns: 18px minmax(100px, 1.1fr) 82px 10px 82px 24px auto 42px;
+  grid-template-columns: 18px minmax(100px, 1.2fr) 82px 10px 82px 24px 34px;
   align-items: center;
   gap: 8px;
   min-height: 52px;
@@ -1001,20 +960,9 @@ button {
   border-color: #ef4444;
 }
 
-.timeline-row-more {
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.period-row:hover .timeline-row-more {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 .period-delete-button {
-  min-width: 42px;
+  justify-self: end;
+  min-width: 34px;
   color: #b91c1c;
 }
 

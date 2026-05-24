@@ -183,7 +183,6 @@ function BlockSettingsPanel({
   const activeBlock = blockSettings.blocks.find((block) => block.id === blockSettings.activeBlockId) ?? blockSettings.blocks[0] ?? null;
   const activePeriod = findPeriodInBlocks(blockSettings, blockSettings.activePeriodId) ?? activeBlock?.periods[0] ?? null;
   const conflictSummary = getConflictSummary(blockSettings);
-  const addPeriodDisabled = activeBlock?.type === "placeholder";
 
   const commitBlockSettings = (nextBlockSettings: BlockSettingsState) => {
     onSettingsChange({ ...settings, blockSettings: normalizeBlockConflicts(nextBlockSettings) });
@@ -271,14 +270,6 @@ function BlockSettingsPanel({
     });
   };
 
-  const addPeriodAfterActive = () => {
-    if (!activeBlock || activeBlock.type !== "course") {
-      return;
-    }
-
-    addPeriodToBlock(activeBlock.id, activePeriod?.id ?? null);
-  };
-
   const addPeriodToBlock = (blockId: string, afterPeriodId: string | null) => {
     const targetBlock = blockSettings.blocks.find((block) => block.id === blockId);
     if (!targetBlock || targetBlock.type !== "course") {
@@ -359,24 +350,6 @@ function BlockSettingsPanel({
     });
   };
 
-  const movePeriod = (blockId: string, periodId: string, direction: -1 | 1) => {
-    const block = blockSettings.blocks.find((item) => item.id === blockId);
-    if (!block || block.type !== "course") {
-      return;
-    }
-
-    const index = block.periods.findIndex((period) => period.id === periodId);
-    const target = index + direction;
-    if (target < 0 || target >= block.periods.length) {
-      return;
-    }
-
-    const nextPeriods = [...block.periods];
-    const [item] = nextPeriods.splice(index, 1);
-    nextPeriods.splice(target, 0, item);
-    setPeriodsForBlock(block.id, nextPeriods, periodId);
-  };
-
   const movePeriodToTarget = (blockId: string, periodId: string, targetPeriodId: string) => {
     const block = blockSettings.blocks.find((item) => item.id === blockId);
     if (!block || block.type !== "course" || periodId === targetPeriodId) {
@@ -447,18 +420,6 @@ function BlockSettingsPanel({
           <button type="button" className="toolbar-action" onClick={() => addBlock("course")}>
             添加课程块
           </button>
-          <button type="button" className="toolbar-action" onClick={() => addBlock("placeholder")}>
-            添加占位块
-          </button>
-          <button
-            type="button"
-            className="toolbar-action primary"
-            onClick={addPeriodAfterActive}
-            disabled={addPeriodDisabled}
-            title={addPeriodDisabled ? "占位块只能包含一个课次" : undefined}
-          >
-            添加课次
-          </button>
         </div>
         <div className="block-settings-toolbar-right">
           <button type="button" className="toolbar-action" onClick={onClose}>
@@ -468,11 +429,6 @@ function BlockSettingsPanel({
             应用修改
           </button>
         </div>
-      </div>
-
-      <div className={conflictSummary.count > 0 ? "block-status-summary has-conflict" : "block-status-summary"}>
-        <span>共 {blockSettings.blocks.length} 个块</span>
-        <span>{conflictSummary.count > 0 ? `有 ${conflictSummary.count} 处时间冲突` : "无时间冲突"}</span>
       </div>
 
       <div className="block-container-list">
@@ -575,8 +531,6 @@ function BlockSettingsPanel({
                       setDraggingPeriod(null);
                       setPeriodDropTargetId(null);
                     }}
-                    onMoveUp={() => movePeriod(block.id, period.id, -1)}
-                    onMoveDown={() => movePeriod(block.id, period.id, 1)}
                     onDelete={() => deletePeriod(block.id, period.id)}
                   />
                 ))}
@@ -630,6 +584,8 @@ function BlockHeaderRow({
   onMoveUp: () => void;
   onMoveDown: () => void;
 }) {
+  const radiusOptions = [0, 2, 4, 6, 8, 10, 12, 14, 16];
+
   return (
     <div className="block-container-header">
       <button
@@ -685,14 +641,16 @@ function BlockHeaderRow({
       </div>
       <label className="block-radius-control" onClick={stopPropagation}>
         <span>圆角</span>
-        <input
-          type="number"
-          min="0"
-          max="16"
+        <select
           value={block.cardCornerRadius}
-          onChange={(event) => onChangeRadius(clamp(Number(event.currentTarget.value), 0, 16))}
-        />
-        <span>px</span>
+          onChange={(event) => onChangeRadius(Number(event.currentTarget.value))}
+        >
+          {radiusOptions.map((radius) => (
+            <option key={radius} value={radius}>
+              {radius}
+            </option>
+          ))}
+        </select>
       </label>
       {hasConflict && <span className="block-error-label">时间冲突</span>}
       <div className="block-move-buttons">
@@ -722,8 +680,6 @@ function PeriodRow({
   onDragOver,
   onDragEnd,
   onDrop,
-  onMoveUp,
-  onMoveDown,
   onDelete,
 }: {
   block: BlockSettings;
@@ -740,8 +696,6 @@ function PeriodRow({
   onDragOver: (event: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
   onDrop: (event: DragEvent<HTMLElement>) => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
   onDelete: () => void;
 }) {
   const className = ["period-row", selected ? "is-selected" : "", conflict ? "is-conflict" : "", dragging ? "is-dragging" : "", dropTarget ? "is-drop-target" : ""]
@@ -792,16 +746,8 @@ function PeriodRow({
       >
         ⋮⋮
       </button>
-      <div className="timeline-row-more">
-        <button type="button" onClick={stopAndRun(onMoveUp)} disabled={block.type === "placeholder"} title="上移">
-          ↑
-        </button>
-        <button type="button" onClick={stopAndRun(onMoveDown)} disabled={block.type === "placeholder"} title="下移">
-          ↓
-        </button>
-      </div>
       <button type="button" className="period-delete-button" onClick={stopAndRun(onDelete)} aria-label="删除课次">
-        删除
+        -
       </button>
     </article>
   );
@@ -913,14 +859,6 @@ function focusPeriod(periodId: string) {
     row?.scrollIntoView({ block: "center", behavior: "smooth" });
     row?.querySelector<HTMLInputElement>("input")?.focus();
   });
-}
-
-function clamp(value: number, min: number, max: number) {
-  if (Number.isNaN(value)) {
-    return min;
-  }
-
-  return Math.min(max, Math.max(min, value));
 }
 
 function stopPropagation(event: SyntheticEvent) {
