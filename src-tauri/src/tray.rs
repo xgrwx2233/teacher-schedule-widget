@@ -60,13 +60,9 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
 pub fn hide_schedule_widget(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     state.set_widget_visible(false);
-
-    if let Some(proxy) = app.get_webview_window(interaction_proxy::PROXY_WINDOW_LABEL) {
-        proxy
-            .set_ignore_cursor_events(true)
-            .map_err(|error| error.to_string())?;
-        proxy.hide().map_err(|error| error.to_string())?;
-    }
+    let hitboxes = app.state::<interaction_proxy::ProxyHitboxStore>();
+    let ui_state = app.state::<interaction_proxy::ProxyUiStateStore>();
+    interaction_proxy::clear_interaction_state(&app, &hitboxes, &ui_state)?;
 
     settings_windows::hide_auxiliary_windows(&app)?;
 

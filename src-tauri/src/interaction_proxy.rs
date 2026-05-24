@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
     time::Duration,
 };
@@ -106,6 +109,25 @@ pub fn clear_proxy_menu_open(
     Ok(())
 }
 
+pub fn clear_interaction_state(
+    app: &AppHandle,
+    hitbox_store: &ProxyHitboxStore,
+    ui_state: &ProxyUiStateStore,
+) -> Result<(), String> {
+    if let Ok(mut hitboxes) = hitbox_store.lock() {
+        hitboxes.clear();
+    }
+
+    if let Ok(mut state) = ui_state.lock() {
+        state.menu_open = false;
+        state.active_card = None;
+    }
+
+    set_proxy_click_through(app, true)?;
+    hide_proxy(app)?;
+    Ok(())
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyWidgetHit {
@@ -196,6 +218,7 @@ pub fn start_proxy_input_manager(
     hitboxes: ProxyHitboxStore,
     geometry: ProxyGeometryStore,
     ui_state: ProxyUiStateStore,
+    widget_visible: Arc<AtomicBool>,
 ) {
     thread::spawn(move || {
         let mut was_left_down = false;
@@ -204,6 +227,19 @@ pub fn start_proxy_input_manager(
         let mut last_debug_state = String::new();
 
         loop {
+            if !widget_visible.load(Ordering::Relaxed) {
+                if let Some(proxy) = app.get_webview_window(PROXY_WINDOW_LABEL) {
+                    let _ = proxy.set_ignore_cursor_events(true);
+                    let _ = proxy.hide();
+                }
+                passthrough = true;
+                was_left_down = false;
+                pressed_hit = None;
+                last_debug_state.clear();
+                thread::sleep(Duration::from_millis(50));
+                continue;
+            }
+
             let proxy = match app.get_webview_window(PROXY_WINDOW_LABEL) {
                 Some(window) => window,
                 None => {

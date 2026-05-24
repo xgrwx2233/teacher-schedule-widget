@@ -82,20 +82,25 @@ pub fn run() {
             interaction_proxy::show_proxy_for_widget(app.handle(), &window, &state)?;
             tray::create_tray(app.handle())?;
 
-            start_input_forwarder(window.clone(), state.attached_flag());
+            start_input_forwarder(
+                window.clone(),
+                state.attached_flag(),
+                state.widget_visible_flag(),
+            );
             interaction_proxy::start_proxy_input_manager(
                 app.handle().clone(),
                 window.clone(),
                 Arc::clone(&proxy_hitboxes),
                 Arc::clone(&proxy_geometry),
                 Arc::clone(&proxy_ui_state),
+                state.widget_visible_flag(),
             );
-    start_desktop_layer_guard(
-        app.handle().clone(),
-        window,
-        state.attached_flag(),
-        state.widget_visible_flag(),
-    );
+            start_desktop_layer_guard(
+                app.handle().clone(),
+                window,
+                state.attached_flag(),
+                state.widget_visible_flag(),
+            );
 
             Ok(())
         })
