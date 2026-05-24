@@ -71,6 +71,8 @@ export type ScheduleCourseBlock = {
   type: "course";
   phase: Exclude<SchedulePhase, "noon">;
   cardTone: "wheat" | "blue";
+  style?: CardStyle;
+  cardCornerRadius?: number;
   rows: ScheduleCourseRow[];
 };
 
@@ -84,6 +86,7 @@ export type SchedulePlaceholderBlock = {
   title: string;
   subtitle?: string;
   style?: CardStyle;
+  cardCornerRadius?: number;
 };
 
 export type ScheduleBlock = ScheduleCourseBlock | SchedulePlaceholderBlock;

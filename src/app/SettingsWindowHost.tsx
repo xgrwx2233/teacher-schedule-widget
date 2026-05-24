@@ -3,7 +3,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SettingsWindow } from "../components/SettingsWindow/SettingsWindow";
-import type { SettingsSection, WidgetSettingsState } from "../features/settings/settingsTypes";
+import {
+  defaultBlockSettingsState,
+  type SettingsSection,
+  type WidgetSettingsState,
+} from "../features/settings/settingsTypes";
 import {
   SETTINGS_WINDOW_CLOSE_EVENT,
   SETTINGS_WINDOW_STATE_EVENT,
@@ -20,6 +24,7 @@ const defaultSettings: WidgetSettingsState = {
     startDate: "2026-03-05",
     endDate: "2026-06-30",
   },
+  blockSettings: defaultBlockSettingsState,
 };
 
 export function SettingsWindowHost() {
@@ -61,13 +66,14 @@ export function SettingsWindowHost() {
     };
   }, [closeWindow, currentWindow]);
 
-  const emitUpdate = (nextSettings: WidgetSettingsState, nextSection = activeSection) => {
+  const emitUpdate = (nextSettings: WidgetSettingsState, nextSection = activeSection, applyBlockSettings = false) => {
     setSettings(nextSettings);
     setActiveSection(nextSection);
     void emitTo<SettingsWindowUpdatePayload>(WIDGET_WINDOW_LABEL, SETTINGS_WINDOW_UPDATE_EVENT, {
       windowLabel: currentWindow.label,
       settings: nextSettings,
       activeSection: nextSection,
+      applyBlockSettings,
     });
   };
 
@@ -88,6 +94,7 @@ export function SettingsWindowHost() {
         computedWeek={computedWeek}
         onActiveSectionChange={(section) => emitUpdate(settings, section)}
         onSettingsChange={(nextSettings) => emitUpdate(nextSettings)}
+        onApplyBlockSettings={(blockSettings) => emitUpdate({ ...settings, blockSettings }, "blocks", true)}
         onDragStart={startDrag}
         onClose={closeWindow}
       />

@@ -34,6 +34,7 @@ export type SettingsWindowUpdatePayload = {
   windowLabel: string;
   settings: WidgetSettingsState;
   activeSection: SettingsSection;
+  applyBlockSettings?: boolean;
 };
 
 export type SettingsWindowStateRequestPayload = {

@@ -20,6 +20,8 @@ import type {
 } from "../features/schedule/types";
 import {
   defaultCardDraft,
+  defaultBlockSettingsState,
+  type BlockSettingsState,
   type CardDraft,
   type SelectedCard,
   type SettingsSection,
@@ -72,6 +74,7 @@ const defaultSettings: WidgetSettingsState = {
     startDate: "2026-03-05",
     endDate: "2026-06-30",
   },
+  blockSettings: defaultBlockSettingsState,
 };
 
 export function App() {
@@ -261,6 +264,9 @@ export function App() {
     const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
       setSettings(event.payload.settings);
       setSettingsSection(event.payload.activeSection);
+      if (event.payload.applyBlockSettings) {
+        setSchedule((current) => applyBlockSettingsToSchedule(current, event.payload.settings.blockSettings));
+      }
     });
 
     const unlistenRequest = listen<SettingsWindowStateRequestPayload>(SETTINGS_WINDOW_STATE_REQUEST_EVENT, (event) => {
@@ -370,11 +376,6 @@ export function App() {
       if (menuOpenRef.current) {
         menuOpenRef.current = false;
         setMenuOpen(false);
-      }
-
-      if (hit.editableCard) {
-        setActiveCellId(hit.editableCard.type === "course" ? hit.editableCard.courseId : null);
-        void openCardSettings(hit.editableCard);
       }
     });
 
@@ -718,6 +719,187 @@ function applyCardDraft(schedule: Schedule, selectedCard: SelectedCard | null, d
   const style = toCardStyle(draft);
   const blocks = schedule.blocks.map((block) => applyDraftToBlock(block, selectedCard, draft, style));
   return { ...schedule, blocks };
+}
+
+function applyBlockSettingsToSchedule(schedule: Schedule, nextBlockSettings: BlockSettingsState): Schedule {
+  const dayIds = schedule.days.map((day) => day.id);
+  const courseTemplates = schedule.blocks.filter((block): block is ScheduleCourseBlock => block.type === "course");
+  const placeholderTemplates = schedule.blocks.filter(
+    (block): block is SchedulePlaceholderBlock => block.type === "placeholder",
+  );
+
+  const blocks = nextBlockSettings.blocks.map((settingBlock, index) => {
+    const existing = schedule.blocks.find((block) => block.id === settingBlock.id);
+
+    if (settingBlock.type === "course") {
+      const template =
+        existing?.type === "course"
+          ? existing
+          : courseTemplates[Math.min(index, courseTemplates.length - 1)] ?? courseTemplates[0];
+
+      if (!template) {
+        return buildCourseBlockFromSettings(settingBlock, dayIds, index);
+      }
+
+      return {
+        ...template,
+        id: settingBlock.id,
+        phase: template.phase,
+        cardTone: template.cardTone,
+        style: {
+          backgroundColor: settingBlock.cardBackgroundColor,
+        },
+        cardCornerRadius: settingBlock.cardCornerRadius,
+        rows: settingBlock.periods.map((periodSetting, rowIndex) => {
+          const row = template.rows.find((item) => item.period.id === periodSetting.id) ?? template.rows[rowIndex];
+
+          return {
+            ...(row ?? createEmptyCourseRow(settingBlock.id, periodSetting, dayIds, settingBlock.cardBackgroundColor)),
+            period: {
+              ...(row?.period ?? {}),
+              id: periodSetting.id,
+              label: periodSetting.name,
+              time: `${periodSetting.startTime}-${periodSetting.endTime}`,
+            },
+            courses: Object.fromEntries(
+              dayIds.map((weekday) => {
+                const course = row?.courses[weekday] ?? createEmptyCourse(settingBlock.id, periodSetting.id, weekday);
+                return [
+                  weekday,
+                  {
+                    ...course,
+                    style: {
+                      ...course.style,
+                      backgroundColor: settingBlock.cardBackgroundColor,
+                    },
+                  },
+                ];
+              }),
+            ) as Record<Weekday, CourseCell>,
+          };
+        }),
+      };
+    }
+
+    const template =
+      existing?.type === "placeholder"
+        ? existing
+        : placeholderTemplates[Math.min(index, placeholderTemplates.length - 1)] ?? placeholderTemplates[0];
+
+    if (!template) {
+      return buildPlaceholderBlockFromSettings(settingBlock);
+    }
+
+    const periodSetting = settingBlock.periods[0];
+    return {
+      ...template,
+      id: settingBlock.id,
+      period: {
+        ...template.period,
+        id: periodSetting?.id ?? template.period.id,
+        label: periodSetting?.name ?? template.period.label,
+        time: periodSetting ? `${periodSetting.startTime}-${periodSetting.endTime}` : template.period.time,
+      },
+      title: settingBlock.name,
+      style: {
+        ...template.style,
+        backgroundColor: settingBlock.cardBackgroundColor,
+      },
+      cardCornerRadius: settingBlock.cardCornerRadius,
+    };
+  });
+
+  return { ...schedule, blocks };
+}
+
+function buildCourseBlockFromSettings(
+  settingBlock: Extract<BlockSettingsState["blocks"][number], { type: "course" }>,
+  dayIds: Weekday[],
+  index: number,
+): ScheduleCourseBlock {
+  const rows = settingBlock.periods.map((period) => ({
+    id: `${settingBlock.id}-${period.id}`,
+    period: {
+      id: period.id,
+      label: period.name,
+      time: `${period.startTime}-${period.endTime}`,
+    },
+    courses: Object.fromEntries(
+      dayIds.map((weekday) => [
+        weekday,
+        createEmptyCourse(settingBlock.id, period.id, weekday, settingBlock.cardBackgroundColor),
+      ]),
+    ) as Record<Weekday, CourseCell>,
+  }));
+
+  return {
+    id: settingBlock.id,
+    type: "course",
+    phase: index === 0 ? "morning" : "afternoon",
+    cardTone: "wheat",
+    style: {
+      backgroundColor: settingBlock.cardBackgroundColor,
+    },
+    cardCornerRadius: settingBlock.cardCornerRadius,
+    rows,
+  };
+}
+
+function createEmptyCourseRow(
+  blockId: string,
+  period: { id: string; name: string; startTime: string; endTime: string },
+  dayIds: Weekday[],
+  backgroundColor: string,
+) {
+  return {
+    id: `${blockId}-${period.id}`,
+    period: {
+      id: period.id,
+      label: period.name,
+      time: `${period.startTime}-${period.endTime}`,
+    },
+    courses: Object.fromEntries(dayIds.map((weekday) => [weekday, createEmptyCourse(blockId, period.id, weekday, backgroundColor)])) as Record<
+      Weekday,
+      CourseCell
+    >,
+  };
+}
+
+function createEmptyCourse(blockId: string, periodId: string, weekday: Weekday, backgroundColor = "#fff8e1"): CourseCell {
+  return {
+    id: `${blockId}-${periodId}-${weekday}`,
+    title: "",
+    room: "",
+    style: {
+      backgroundColor,
+    },
+    scheduleRule: {
+      weekPattern: "all",
+      applyWholeTerm: true,
+    },
+  };
+}
+
+function buildPlaceholderBlockFromSettings(
+  settingBlock: Extract<BlockSettingsState["blocks"][number], { type: "placeholder" }>,
+): SchedulePlaceholderBlock {
+  const period = settingBlock.periods[0];
+  return {
+    id: settingBlock.id,
+    type: "placeholder",
+    phase: "noon",
+    period: {
+      id: period.id,
+      label: period.name,
+      time: `${period.startTime}-${period.endTime}`,
+    },
+    title: settingBlock.name,
+    subtitle: "",
+    style: {
+      backgroundColor: settingBlock.cardBackgroundColor,
+    },
+    cardCornerRadius: settingBlock.cardCornerRadius,
+  };
 }
 
 function applyDraftToBlock(
