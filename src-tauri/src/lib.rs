@@ -19,7 +19,8 @@ use std::{thread, time::Duration};
 use app_state::AppState;
 use desktop_layer::{attach_to_desktop_icon_layer, is_attached_to_desktop_icon_layer};
 use input_forwarder::start_input_forwarder;
-use tauri::{Manager, Position, Size};
+use tauri::{Manager, Position, Size, WindowEvent};
+use widget_manager::WidgetRegistryStore;
 use window_mode::{
     apply_initial_attached_mode, get_window_mode, switch_to_attached, switch_to_detached,
 };
@@ -32,6 +33,7 @@ pub fn run() {
     let proxy_hitboxes = Arc::new(Mutex::new(Vec::new()));
     let proxy_geometry = Arc::new(Mutex::new(interaction_proxy::ProxyGeometry::default()));
     let proxy_ui_state = Arc::new(Mutex::new(interaction_proxy::ProxyUiState::default()));
+    let widget_registry = WidgetRegistryStore::new();
 
     tauri::Builder::default()
         .manage(AppState::new(
@@ -42,6 +44,7 @@ pub fn run() {
         .manage(Arc::clone(&proxy_hitboxes))
         .manage(Arc::clone(&proxy_geometry))
         .manage(Arc::clone(&proxy_ui_state))
+        .manage(widget_registry.clone())
         .invoke_handler(tauri::generate_handler![
             switch_to_attached,
             switch_to_detached,
@@ -49,6 +52,7 @@ pub fn run() {
             tray::hide_schedule_widget,
             config_store::load_widget_settings,
             widget_manager::load_widget_registry,
+            widget_manager::sync_active_widget_bounds,
             settings_windows::open_settings_window,
             settings_windows::open_card_settings_window,
             settings_windows::open_widget_menu_window,
@@ -63,20 +67,27 @@ pub fn run() {
                 .get_webview_window("widget")
                 .ok_or("widget window was not created")?;
             let state = app.state::<AppState>();
+            let registry = app.state::<WidgetRegistryStore>();
+            let registry_store = widget_registry.clone();
+            let app_handle = app.handle().clone();
+            let attached_flag = state.attached_flag();
+            let visible_flag = state.widget_visible_flag();
 
             #[cfg(debug_assertions)]
             window.open_devtools();
 
-            window.set_position(Position::Physical(tauri::PhysicalPosition {
-                x: 520,
-                y: 52,
-            }))?;
-            window.set_size(Size::Physical(tauri::PhysicalSize {
-                width: 700,
-                height: 760,
-            }))?;
+            if let Some(bounds) = registry.active_widget_bounds() {
+                window.set_position(Position::Physical(tauri::PhysicalPosition {
+                    x: bounds.x,
+                    y: bounds.y,
+                }))?;
+                window.set_size(Size::Physical(tauri::PhysicalSize {
+                    width: bounds.width,
+                    height: bounds.height,
+                }))?;
+            }
 
-            apply_initial_attached_mode(&window, &state)?;
+            apply_initial_attached_mode(&window, &state, &registry)?;
             window.show()?;
             settings_windows::create_hidden_auxiliary_windows(app.handle())?;
             interaction_proxy::show_proxy_for_widget(app.handle(), &window, &state)?;
@@ -101,6 +112,32 @@ pub fn run() {
                 state.attached_flag(),
                 state.widget_visible_flag(),
             );
+
+            let listener_window = app
+                .get_webview_window("widget")
+                .ok_or("widget window was not created")?;
+            let listener_target = listener_window.clone();
+            listener_window.on_window_event(move |event| match event {
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                    if !attached_flag.load(Ordering::Relaxed) || !visible_flag.load(Ordering::Relaxed) {
+                        return;
+                    }
+
+                    if let Err(error) =
+                        widget_manager::save_window_bounds(&listener_target, &registry_store)
+                    {
+                        eprintln!("failed to persist widget bounds: {error}");
+                        return;
+                    }
+
+                    if let Some(proxy) = app_handle.get_webview_window(interaction_proxy::PROXY_WINDOW_LABEL) {
+                        if let Err(error) = interaction_proxy::sync_proxy_bounds(&proxy, &listener_target) {
+                            eprintln!("failed to resync proxy after window event: {error}");
+                        }
+                    }
+                }
+                _ => {}
+            });
 
             Ok(())
         })

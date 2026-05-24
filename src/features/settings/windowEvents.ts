@@ -1,4 +1,5 @@
 import type { CardDraft, SelectedCard, SettingsSection, WidgetSettingsState } from "./settingsTypes";
+import type { WindowMode } from "../windowMode/types";
 
 export const SETTINGS_WINDOW_LABEL = "settings";
 export const CARD_SETTINGS_WINDOW_LABEL = "card-settings";
@@ -16,8 +17,13 @@ export const CARD_SETTINGS_WINDOW_UPDATE_EVENT = "card-settings-window-update";
 export const CARD_SETTINGS_WINDOW_CLOSE_EVENT = "card-settings-window-close";
 
 export const WIDGET_MENU_ACTION_EVENT = "widget-menu-action";
+export const WIDGET_MENU_STATE_EVENT = "widget-menu-state";
 
 export type WidgetMenuAction = "settings" | "mode" | "hide";
+
+export type WidgetMenuStatePayload = {
+  mode: WindowMode;
+};
 
 export type SettingsWindowStatePayload = {
   settings: WidgetSettingsState;

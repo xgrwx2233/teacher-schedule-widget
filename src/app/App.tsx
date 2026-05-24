@@ -38,8 +38,10 @@ import {
   SETTINGS_WINDOW_STATE_REQUEST_EVENT,
   SETTINGS_WINDOW_UPDATE_EVENT,
   WIDGET_MENU_ACTION_EVENT,
+  WIDGET_MENU_STATE_EVENT,
   WIDGET_MENU_WINDOW_LABEL,
   type WidgetMenuAction,
+  type WidgetMenuStatePayload,
   type CardSettingsWindowStatePayload,
   type CardSettingsWindowUpdatePayload,
   type CardSettingsWindowStateRequestPayload,
@@ -165,6 +167,7 @@ export function App() {
     setWidgetRegistry((current) => updateActiveWidgetMode(current, state.mode));
     setMenuOpen(false);
     setHovered(false);
+    await emitWidgetMenuState(state.mode);
   }, []);
 
   const hideScheduleWidget = useCallback(async () => {
@@ -209,6 +212,7 @@ export function App() {
       await invoke("open_widget_menu_window");
       console.info("open widget menu window invoked");
       await positionWidgetMenuWindow();
+      await emitWidgetMenuState(modeRef.current);
       menuOpenRef.current = true;
       setMenuOpen(true);
     } catch (error) {
@@ -426,7 +430,7 @@ export function App() {
   }, [openCardSettings, openWidgetMenu]);
 
   useEffect(() => {
-    const unlistenPromise = listen<WidgetMenuAction>(WIDGET_MENU_ACTION_EVENT, (event) => {
+  const unlistenPromise = listen<WidgetMenuAction>(WIDGET_MENU_ACTION_EVENT, (event) => {
       if (event.payload === "settings") {
         void openSettings();
         return;
@@ -537,6 +541,10 @@ function updateActiveWidgetMode(registry: WidgetRegistryState, mode: WindowMode)
       widget.id === registry.activeWidgetId ? { ...widget, mode } : widget,
     ),
   };
+}
+
+async function emitWidgetMenuState(mode: WindowMode) {
+  await emitTo<WidgetMenuStatePayload>(WIDGET_MENU_WINDOW_LABEL, WIDGET_MENU_STATE_EVENT, { mode });
 }
 
 function collectProxyHitboxes() {

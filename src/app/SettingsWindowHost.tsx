@@ -1,7 +1,7 @@
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PointerEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { SettingsWindow } from "../components/SettingsWindow/SettingsWindow";
 import type { SettingsSection, WidgetSettingsState } from "../features/settings/settingsTypes";
 import {
@@ -28,6 +28,13 @@ export function SettingsWindowHost() {
   const [activeSection, setActiveSection] = useState<SettingsSection>("workdays");
   const computedWeek = useMemo(() => calculateWeekNumber(settings.term.startDate, new Date()), [settings.term.startDate]);
 
+  const closeWindow = useCallback(async () => {
+    await emitTo(WIDGET_WINDOW_LABEL, SETTINGS_WINDOW_CLOSE_EVENT, {
+      windowLabel: currentWindow.label,
+    });
+    await currentWindow.hide();
+  }, [currentWindow]);
+
   useEffect(() => {
     const unlistenState = listen<SettingsWindowStatePayload>(SETTINGS_WINDOW_STATE_EVENT, (event) => {
       setSettings(event.payload.settings);
@@ -42,6 +49,17 @@ export function SettingsWindowHost() {
       void unlistenState.then((unlisten) => unlisten());
     };
   }, [currentWindow.label]);
+
+  useEffect(() => {
+    const unlistenPromise = currentWindow.onCloseRequested(async (event) => {
+      event.preventDefault();
+      await closeWindow();
+    });
+
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [closeWindow, currentWindow]);
 
   const emitUpdate = (nextSettings: WidgetSettingsState, nextSection = activeSection) => {
     setSettings(nextSettings);
@@ -59,13 +77,6 @@ export function SettingsWindowHost() {
     }
 
     await currentWindow.startDragging();
-  };
-
-  const closeWindow = async () => {
-    await emitTo(WIDGET_WINDOW_LABEL, SETTINGS_WINDOW_CLOSE_EVENT, {
-      windowLabel: currentWindow.label,
-    });
-    await currentWindow.hide();
   };
 
   return (

@@ -38,6 +38,7 @@ enum DesktopInputKind {
 pub fn start_input_forwarder<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     attached_mode: Arc<AtomicBool>,
+    widget_visible: Arc<AtomicBool>,
 ) {
     thread::spawn(move || {
         let hwnd = match window.hwnd() {
@@ -53,7 +54,7 @@ pub fn start_input_forwarder<R: Runtime>(
         let mut last_local = POINT { x: -1, y: -1 };
 
         loop {
-            if !attached_mode.load(Ordering::Relaxed) {
+            if !attached_mode.load(Ordering::Relaxed) || !widget_visible.load(Ordering::Relaxed) {
                 was_inside = false;
                 was_left_down = false;
                 last_local = POINT { x: -1, y: -1 };

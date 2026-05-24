@@ -1,4 +1,8 @@
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+
+const SETTINGS_WINDOW_LABEL: &str = "settings";
+const CARD_SETTINGS_WINDOW_LABEL: &str = "card-settings";
+const WIDGET_MENU_WINDOW_LABEL: &str = "widget-menu";
 
 #[tauri::command]
 pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
@@ -23,7 +27,11 @@ pub fn create_hidden_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn hide_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
-    for label in ["settings", "card-settings", "widget-menu"] {
+    for label in [
+        SETTINGS_WINDOW_LABEL,
+        CARD_SETTINGS_WINDOW_LABEL,
+        WIDGET_MENU_WINDOW_LABEL,
+    ] {
         if let Some(window) = app.get_webview_window(label) {
             window.hide().map_err(|error| error.to_string())?;
         }
@@ -32,56 +40,42 @@ pub fn hide_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub fn ensure_settings_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
-    if let Some(window) = app.get_webview_window("settings") {
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
-        return Ok(window);
-    }
+pub fn ensure_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(app, SETTINGS_WINDOW_LABEL, create_settings_window)
+}
 
-    let window = create_settings_window(app)?;
+pub fn ensure_widget_menu_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(app, WIDGET_MENU_WINDOW_LABEL, create_widget_menu_window)
+}
+
+pub fn ensure_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(app, CARD_SETTINGS_WINDOW_LABEL, create_card_settings_window)
+}
+
+fn show_existing_or_create(
+    app: &AppHandle,
+    label: &str,
+    create: fn(&AppHandle) -> Result<WebviewWindow, String>,
+) -> Result<WebviewWindow, String> {
+    let window = if let Some(window) = app.get_webview_window(label) {
+        window
+    } else {
+        create(app)?
+    };
 
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
     Ok(window)
 }
 
-pub fn ensure_widget_menu_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
-    if let Some(window) = app.get_webview_window("widget-menu") {
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
-        return Ok(window);
-    }
-
-    let window = create_widget_menu_window(app)?;
-
-    window.show().map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())?;
-    Ok(window)
-}
-
-pub fn ensure_card_settings_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
-    if let Some(window) = app.get_webview_window("card-settings") {
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
-        return Ok(window);
-    }
-
-    let window = create_card_settings_window(app)?;
-
-    window.show().map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())?;
-    Ok(window)
-}
-
-fn create_settings_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
-    if let Some(window) = app.get_webview_window("settings") {
+fn create_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
         return Ok(window);
     }
 
     WebviewWindowBuilder::new(
         app,
-        "settings",
+        SETTINGS_WINDOW_LABEL,
         WebviewUrl::App("index.html#settings".into()),
     )
     .title("设置")
@@ -96,17 +90,17 @@ fn create_settings_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Strin
     .map_err(|error| error.to_string())
 }
 
-fn create_widget_menu_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
-    if let Some(window) = app.get_webview_window("widget-menu") {
+fn create_widget_menu_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(WIDGET_MENU_WINDOW_LABEL) {
         return Ok(window);
     }
 
     WebviewWindowBuilder::new(
         app,
-        "widget-menu",
+        WIDGET_MENU_WINDOW_LABEL,
         WebviewUrl::App("index.html#widget-menu".into()),
     )
-    .title("Menu")
+    .title("课程表菜单")
     .devtools(true)
     .decorations(false)
     .transparent(false)
@@ -119,14 +113,14 @@ fn create_widget_menu_window(app: &AppHandle) -> Result<tauri::WebviewWindow, St
     .map_err(|error| error.to_string())
 }
 
-fn create_card_settings_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
-    if let Some(window) = app.get_webview_window("card-settings") {
+fn create_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(CARD_SETTINGS_WINDOW_LABEL) {
         return Ok(window);
     }
 
     WebviewWindowBuilder::new(
         app,
-        "card-settings",
+        CARD_SETTINGS_WINDOW_LABEL,
         WebviewUrl::App("index.html#card-settings".into()),
     )
     .title("卡片设置")
