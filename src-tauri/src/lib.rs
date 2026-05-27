@@ -30,6 +30,8 @@ pub fn run() {
     let attached_mode = Arc::new(AtomicBool::new(true));
     let widget_visible = Arc::new(AtomicBool::new(true));
     let allow_exit = Arc::new(AtomicBool::new(false));
+    let block_settings_window_state = Arc::new(Mutex::new(None));
+    let block_type_confirm_window_state = Arc::new(Mutex::new(None));
     let proxy_hitboxes = Arc::new(Mutex::new(Vec::new()));
     let proxy_geometry = Arc::new(Mutex::new(interaction_proxy::ProxyGeometry::default()));
     let proxy_ui_state = Arc::new(Mutex::new(interaction_proxy::ProxyUiState::default()));
@@ -40,6 +42,8 @@ pub fn run() {
             Arc::clone(&attached_mode),
             Arc::clone(&widget_visible),
             Arc::clone(&allow_exit),
+            Arc::clone(&block_settings_window_state),
+            Arc::clone(&block_type_confirm_window_state),
         ))
         .manage(Arc::clone(&proxy_hitboxes))
         .manage(Arc::clone(&proxy_geometry))
@@ -55,6 +59,13 @@ pub fn run() {
             widget_manager::sync_active_widget_bounds,
             settings_windows::open_settings_window,
             settings_windows::open_card_settings_window,
+            settings_windows::open_block_settings_window,
+            settings_windows::open_block_type_confirm_window,
+            settings_windows::hide_block_settings_window,
+            settings_windows::set_block_settings_window_state,
+            settings_windows::get_block_settings_window_state,
+            settings_windows::set_block_type_confirm_window_state,
+            settings_windows::get_block_type_confirm_window_state,
             settings_windows::open_widget_menu_window,
             interaction_proxy::proxy_hitbox_probe,
             interaction_proxy::set_proxy_passthrough,

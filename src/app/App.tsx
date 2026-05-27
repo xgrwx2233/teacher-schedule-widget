@@ -21,6 +21,7 @@ import type {
 import {
   defaultCardDraft,
   defaultBlockSettingsState,
+  defaultAppearanceSettings,
   type BlockSettingsState,
   type CardDraft,
   type SelectedCard,
@@ -34,12 +35,14 @@ import {
   CARD_SETTINGS_WINDOW_STATE_EVENT,
   CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT,
   CARD_SETTINGS_WINDOW_UPDATE_EVENT,
+  BLOCK_SETTINGS_WINDOW_STATE_EVENT,
   SETTINGS_WINDOW_LABEL,
   SETTINGS_WINDOW_CLOSE_EVENT,
   SETTINGS_WINDOW_STATE_EVENT,
   SETTINGS_WINDOW_STATE_REQUEST_EVENT,
   SETTINGS_WINDOW_UPDATE_EVENT,
   WIDGET_MENU_ACTION_EVENT,
+  WIDGET_MENU_CLOSE_EVENT,
   WIDGET_MENU_STATE_EVENT,
   WIDGET_MENU_WINDOW_LABEL,
   type WidgetMenuAction,
@@ -47,6 +50,7 @@ import {
   type CardSettingsWindowStatePayload,
   type CardSettingsWindowUpdatePayload,
   type CardSettingsWindowStateRequestPayload,
+  type BlockSettingsWindowStatePayload,
   type SettingsWindowStatePayload,
   type SettingsWindowStateRequestPayload,
   type SettingsWindowUpdatePayload,
@@ -75,7 +79,10 @@ const defaultSettings: WidgetSettingsState = {
     endDate: "2026-06-30",
   },
   blockSettings: defaultBlockSettingsState,
+  appearance: defaultAppearanceSettings,
 };
+
+const DEFAULT_COURSE_ROW_HEIGHT = 66;
 
 export function App() {
   const appWindow = useMemo(() => getCurrentWindow(), []);
@@ -84,6 +91,7 @@ export function App() {
   const rootRef = useRef<HTMLElement | null>(null);
   const scaleFactorRef = useRef(1);
   const menuOpenRef = useRef(false);
+  const menuClosedAtRef = useRef(0);
   const modeRef = useRef<WindowMode>("attached");
 
   const [mode, setMode] = useState<WindowMode>("attached");
@@ -100,6 +108,8 @@ export function App() {
   const settingsWindowOpenRef = useRef(false);
   const cardSettingsWindowOpenRef = useRef(false);
   const settingsRef = useRef(settings);
+  const scheduleRef = useRef(schedule);
+  const courseRowHeightRef = useRef<number | null>(null);
   const settingsSectionRef = useRef(settingsSection);
   const selectedCardRef = useRef<SelectedCard | null>(selectedCard);
   const cardDraftRef = useRef(cardDraft);
@@ -116,6 +126,7 @@ export function App() {
     }),
     [computedWeek, schedule, settings.workdayMode],
   );
+  const widgetStyle = useMemo(() => buildWidgetStyle(settings.appearance, visibleSchedule), [settings.appearance, visibleSchedule]);
 
   useEffect(() => {
     void invoke<WindowModeState>("get_window_mode").then((state) => setMode(state.mode));
@@ -140,6 +151,10 @@ export function App() {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  useEffect(() => {
+    scheduleRef.current = schedule;
+  }, [schedule]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -198,6 +213,7 @@ export function App() {
   }, []);
 
   const closeWidgetMenu = useCallback(async () => {
+    menuClosedAtRef.current = Date.now();
     menuOpenRef.current = false;
     setMenuOpen(false);
     await invoke("clear_proxy_menu_open");
@@ -207,6 +223,10 @@ export function App() {
   const openWidgetMenu = useCallback(async () => {
     if (menuOpenRef.current) {
       await closeWidgetMenu();
+      return;
+    }
+
+    if (Date.now() - menuClosedAtRef.current < 300) {
       return;
     }
 
@@ -262,10 +282,34 @@ export function App() {
 
   useEffect(() => {
     const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
-      setSettings(event.payload.settings);
-      setSettingsSection(event.payload.activeSection);
+      let nextSettings = event.payload.settings;
+      let nextSchedule: Schedule | null = null;
+
       if (event.payload.applyBlockSettings) {
-        setSchedule((current) => applyBlockSettingsToSchedule(current, event.payload.settings.blockSettings));
+        const scaleFactor = window.devicePixelRatio || 1;
+        const measuredRowHeight = measureCurrentCourseRowHeight();
+        if (measuredRowHeight) {
+          courseRowHeightRef.current = courseRowHeightRef.current ?? measuredRowHeight;
+        }
+        const rowHeight = Math.round((courseRowHeightRef.current ?? measuredRowHeight ?? DEFAULT_COURSE_ROW_HEIGHT) * scaleFactor);
+        nextSchedule = applyBlockSettingsToSchedule(scheduleRef.current, event.payload.settings.blockSettings);
+        nextSettings = {
+          ...event.payload.settings,
+          appearance: {
+            ...event.payload.settings.appearance,
+            blockHeights: buildBlockHeightsFromRows(event.payload.settings.blockSettings),
+          },
+        };
+        scheduleRef.current = nextSchedule;
+        void resizeDetachedWidgetToSchedule(nextSchedule, rowHeight);
+      }
+
+      settingsRef.current = nextSettings;
+      settingsSectionRef.current = event.payload.activeSection;
+      setSettings(nextSettings);
+      setSettingsSection(event.payload.activeSection);
+      if (nextSchedule) {
+        setSchedule(nextSchedule);
       }
     });
 
@@ -283,6 +327,18 @@ export function App() {
     return () => {
       void unlistenUpdate.then((unlisten) => unlisten());
       void unlistenRequest.then((unlisten) => unlisten());
+      void unlistenClose.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlistenClose = listen(WIDGET_MENU_CLOSE_EVENT, () => {
+      menuClosedAtRef.current = Date.now();
+      menuOpenRef.current = false;
+      setMenuOpen(false);
+    });
+
+    return () => {
       void unlistenClose.then((unlisten) => unlisten());
     };
   }, []);
@@ -374,15 +430,15 @@ export function App() {
       }
 
       if (menuOpenRef.current) {
-        menuOpenRef.current = false;
-        setMenuOpen(false);
+        void closeWidgetMenu();
+        return;
       }
     });
 
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [hideScheduleWidget, openCardSettings, openSettings, openWidgetMenu, switchMode]);
+  }, [closeWidgetMenu, hideScheduleWidget, openCardSettings, openSettings, openWidgetMenu, switchMode]);
 
   useEffect(() => {
     const publishHitboxes = () => {
@@ -513,6 +569,7 @@ export function App() {
         hovered={hovered}
         activeCellId={activeCellId}
         menuButtonRef={menuButtonRef}
+        widgetStyle={widgetStyle}
         onToggleMenu={openWidgetMenu}
         onCourseClick={onCourseClick}
         onCardEdit={openCardSettings}
@@ -647,6 +704,65 @@ async function positionWidgetMenuWindow() {
   await menuWindow.setSize(new PhysicalSize(Math.round(width * scaleFactor), Math.round(height * scaleFactor)));
 }
 
+function measureCurrentCourseRowHeight(): number | null {
+  const row = document.querySelector<HTMLElement>(".course-block .block-column .column-item");
+  if (!row) {
+    return null;
+  }
+
+  return Math.round(row.getBoundingClientRect().height);
+}
+
+function buildBlockHeightsFromRows(blockSettings: BlockSettingsState): Record<string, number> {
+  return Object.fromEntries(
+    blockSettings.blocks.map((block) => [block.id, blockHeightUnits(block)]),
+  );
+}
+
+async function resizeDetachedWidgetToSchedule(schedule: Schedule, rowHeight: number) {
+  const widgetWindow = await WebviewWindow.getByLabel("widget");
+  if (!widgetWindow) {
+    return;
+  }
+
+  const scaleFactor = window.devicePixelRatio || 1;
+  const outer = await widgetWindow.outerSize();
+  const inner = await widgetWindow.innerSize();
+  const chromeWidth = Math.max(0, outer.width - inner.width);
+  const chromeHeight = Math.max(0, outer.height - inner.height);
+  const toolbarHeight = Math.round(34 * scaleFactor);
+  const dateRowHeight = Math.round(48 * scaleFactor);
+  const outerPadding = Math.round(16 * scaleFactor);
+  const contentPadding = Math.round(14 * scaleFactor);
+  const contentGap = Math.round(12 * scaleFactor);
+  const blockGap = Math.round(14 * scaleFactor);
+
+  const blockHeights = schedule.blocks.map((block) => {
+    if (block.type === "placeholder") {
+      return Math.round(rowHeight * 1.15);
+    }
+
+    return Math.max(rowHeight * Math.max(1, block.rows.length), rowHeight);
+  });
+
+  const innerHeight =
+    outerPadding * 2 +
+    toolbarHeight +
+    dateRowHeight +
+    blockHeights.reduce((sum, height) => sum + height, 0) +
+    Math.max(0, schedule.blocks.length - 1) * blockGap +
+    contentGap * 2 +
+    contentPadding * 2;
+  const innerWidth = inner.width;
+
+  await widgetWindow.setSize(new PhysicalSize(Math.round(innerWidth + chromeWidth), Math.round(innerHeight + chromeHeight)));
+  await invoke("sync_active_widget_bounds");
+}
+
+function blockHeightUnits(block: BlockSettingsState["blocks"][number]): number {
+  return block.type === "placeholder" ? 1.15 : Math.max(1, block.periods.length);
+}
+
 function calculateWeekNumber(startDate: string, currentDate: Date): number {
   const start = new Date(`${startDate}T00:00:00`);
   if (Number.isNaN(start.getTime())) {
@@ -657,6 +773,29 @@ function calculateWeekNumber(startDate: string, currentDate: Date): number {
   const currentDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
   const diffDays = Math.floor((currentDay - startDay) / 86400000);
   return Math.max(1, Math.floor(diffDays / 7) + 1);
+}
+
+function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedule: Schedule): CSSProperties {
+  const blockTracks = schedule.blocks
+    .map((block) => {
+      const fallback = block.type === "placeholder" ? 1.15 : Math.max(1, block.rows.length);
+      const height = appearance.blockHeights[block.id] ?? fallback;
+      const minHeight = block.type === "placeholder" ? "44px" : "0";
+      return `minmax(${minHeight}, ${height}fr)`;
+    })
+    .join(" ");
+
+  return {
+    "--column-gap": `${appearance.columnGap}px`,
+    "--row-divider": appearance.rowDividerColor,
+    "--row-divider-opacity": String(appearance.rowDividerOpacity),
+    "--row-divider-style": appearance.rowDividerStyle,
+    "--row-divider-thickness": `${appearance.rowDividerThickness}px`,
+    "--row-divider-offset": `${appearance.rowDividerHeight}px`,
+    "--block-card-bg": appearance.blockCardBackgroundColor,
+    "--block-card-radius": `${appearance.blockCardCornerRadius}px`,
+    "--schedule-block-tracks": blockTracks,
+  } as CSSProperties;
 }
 
 function createDraftForCard(
@@ -744,6 +883,7 @@ function applyBlockSettingsToSchedule(schedule: Schedule, nextBlockSettings: Blo
       return {
         ...template,
         id: settingBlock.id,
+        title: settingBlock.name,
         phase: template.phase,
         cardTone: template.cardTone,
         style: {
@@ -835,6 +975,7 @@ function buildCourseBlockFromSettings(
   return {
     id: settingBlock.id,
     type: "course",
+    title: settingBlock.name,
     phase: index === 0 ? "morning" : "afternoon",
     cardTone: "wheat",
     style: {

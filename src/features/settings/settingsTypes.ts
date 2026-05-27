@@ -42,13 +42,28 @@ export type BlockSettingsState = {
   blocks: BlockSettings[];
 };
 
+export type DividerStyle = "solid" | "dashed" | "dotted";
+
+export type AppearanceSettings = {
+  columnGap: number;
+  rowDividerHeight: number;
+  rowDividerStyle: DividerStyle;
+  rowDividerColor: string;
+  rowDividerOpacity: number;
+  rowDividerThickness: number;
+  blockCardBackgroundColor: string;
+  blockCardCornerRadius: number;
+  blockHeights: Record<string, number>;
+};
+
 export type WidgetSettingsState = {
   workdayMode: WorkdayMode;
   term: TermSettings;
   blockSettings: BlockSettingsState;
+  appearance: AppearanceSettings;
 };
 
-export type SettingsSection = "workdays" | "term" | "blocks";
+export type SettingsSection = "workdays" | "term" | "blocks" | "appearance";
 
 export type SelectedCard =
   | { type: "course"; courseId: string }
@@ -109,6 +124,22 @@ export const defaultBlockSettingsState: BlockSettingsState = {
       ],
     },
   ],
+};
+
+export const defaultAppearanceSettings: AppearanceSettings = {
+  columnGap: 10,
+  rowDividerHeight: 4,
+  rowDividerStyle: "solid",
+  rowDividerColor: "#665b4e",
+  rowDividerOpacity: 0.16,
+  rowDividerThickness: 1,
+  blockCardBackgroundColor: "#fff8e1",
+  blockCardCornerRadius: 10,
+  blockHeights: {
+    morning: 4,
+    lunch: 1.15,
+    afternoon: 4,
+  },
 };
 
 export const defaultCardDraft: CardDraft = {

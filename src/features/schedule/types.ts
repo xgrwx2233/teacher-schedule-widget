@@ -69,6 +69,7 @@ export type ScheduleCourseRow = {
 export type ScheduleCourseBlock = {
   id: string;
   type: "course";
+  title?: string;
   phase: Exclude<SchedulePhase, "noon">;
   cardTone: "wheat" | "blue";
   style?: CardStyle;

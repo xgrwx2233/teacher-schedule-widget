@@ -1,7 +1,8 @@
-import type { CSSProperties, DragEvent, PointerEvent, SyntheticEvent } from "react";
-import { useMemo, useState } from "react";
+﻿import type { CSSProperties, PointerEvent, SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { WorkdayMode } from "../../features/schedule/types";
 import type {
+  AppearanceSettings,
   BlockPeriodSettings,
   BlockSettings,
   BlockSettingsState,
@@ -18,8 +19,7 @@ type SettingsWindowProps = {
   onActiveSectionChange: (section: SettingsSection) => void;
   onSettingsChange: (settings: WidgetSettingsState) => void;
   onApplyBlockSettings: (blockSettings: BlockSettingsState) => void;
-  onDragStart?: (event: PointerEvent<HTMLElement>) => void;
-  onClose: () => void;
+  onOpenBlockSettings: (blockId: string, anchorRect?: DOMRect) => void;
 };
 
 type ConflictSummary = {
@@ -34,23 +34,11 @@ type DraggingPeriod = {
   periodId: string;
 } | null;
 
-type DialogPosition = {
-  x: number;
-  y: number;
-};
-
-type DialogDragState = {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  originX: number;
-  originY: number;
-} | null;
-
 const sectionItems: Array<{ id: SettingsSection; label: string }> = [
   { id: "workdays", label: "工作日" },
   { id: "term", label: "学期" },
   { id: "blocks", label: "课程块" },
+  { id: "appearance", label: "外观" },
 ];
 
 const workdayOptions: Array<{ id: WorkdayMode; label: string; description: string }> = [
@@ -67,8 +55,7 @@ export function SettingsWindow({
   onActiveSectionChange,
   onSettingsChange,
   onApplyBlockSettings,
-  onDragStart,
-  onClose,
+  onOpenBlockSettings,
 }: SettingsWindowProps) {
   if (!open) {
     return null;
@@ -77,18 +64,6 @@ export function SettingsWindow({
   return (
     <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="设置">
       <section className="settings-window settings-window-wide">
-        <header className="settings-header">
-          <div className="settings-titlebar" onPointerDown={onDragStart}>
-            <div>
-              <h2>设置</h2>
-              <p>修改后将同步到教师课程表挂件。</p>
-            </div>
-          </div>
-          <button className="settings-close-button" type="button" onClick={onClose} aria-label="关闭">
-            X
-          </button>
-        </header>
-
         <div className="settings-body">
           <nav className="settings-sidebar" aria-label="设置导航">
             {sectionItems.map((item) => (
@@ -165,8 +140,12 @@ export function SettingsWindow({
                 settings={settings}
                 onSettingsChange={onSettingsChange}
                 onApplyBlockSettings={onApplyBlockSettings}
-                onClose={onClose}
+                onOpenBlockSettings={onOpenBlockSettings}
               />
+            )}
+
+            {activeSection === "appearance" && (
+              <AppearancePanel settings={settings} onSettingsChange={onSettingsChange} />
             )}
           </main>
         </div>
@@ -175,33 +154,212 @@ export function SettingsWindow({
   );
 }
 
+function AppearancePanel({
+  settings,
+  onSettingsChange,
+}: {
+  settings: WidgetSettingsState;
+  onSettingsChange: (settings: WidgetSettingsState) => void;
+}) {
+  const appearance = settings.appearance;
+  const radiusOptions = [0, 2, 4, 6, 8, 10, 12, 14, 16];
+
+  const updateAppearance = (patch: Partial<AppearanceSettings>) => {
+    onSettingsChange({
+      ...settings,
+      appearance: { ...appearance, ...patch },
+    });
+  };
+
+  return (
+    <section className="settings-panel-section">
+      <h3>外观</h3>
+      <p>控制列间距、行间距、分割线与课程块统一外观。</p>
+
+      <div className="appearance-grid">
+        <label className="appearance-field">
+          <span>列间距</span>
+          <div className="appearance-control">
+            <input
+              type="range"
+              min="4"
+              max="20"
+              value={appearance.columnGap}
+              onChange={(event) => updateAppearance({ columnGap: Number(event.currentTarget.value) })}
+            />
+            <strong>{appearance.columnGap}px</strong>
+          </div>
+        </label>
+
+        <label className="appearance-field">
+          <span>行间距</span>
+          <div className="appearance-control">
+            <input
+              type="range"
+              min="0"
+              max="8"
+              value={appearance.rowDividerHeight}
+              onChange={(event) => updateAppearance({ rowDividerHeight: Number(event.currentTarget.value) })}
+            />
+            <strong>{appearance.rowDividerHeight}px</strong>
+          </div>
+        </label>
+
+        <label className="appearance-field">
+          <span>线型</span>
+          <select
+            value={appearance.rowDividerStyle}
+            onChange={(event) => updateAppearance({ rowDividerStyle: event.currentTarget.value as AppearanceSettings["rowDividerStyle"] })}
+          >
+            <option value="solid">实线</option>
+            <option value="dashed">虚线</option>
+            <option value="dotted">点线</option>
+          </select>
+        </label>
+
+        <label className="appearance-field">
+          <span>线色</span>
+          <input
+            type="color"
+            value={appearance.rowDividerColor}
+            onChange={(event) => updateAppearance({ rowDividerColor: event.currentTarget.value })}
+          />
+        </label>
+
+        <label className="appearance-field">
+          <span>透明度</span>
+          <div className="appearance-control">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={Math.round(appearance.rowDividerOpacity * 100)}
+              onChange={(event) => updateAppearance({ rowDividerOpacity: Number(event.currentTarget.value) / 100 })}
+            />
+            <strong>{Math.round(appearance.rowDividerOpacity * 100)}%</strong>
+          </div>
+        </label>
+
+        <label className="appearance-field">
+          <span>粗细</span>
+          <div className="appearance-control">
+            <input
+              type="range"
+              min="1"
+              max="3"
+              step="0.5"
+              value={appearance.rowDividerThickness}
+              onChange={(event) => updateAppearance({ rowDividerThickness: Number(event.currentTarget.value) })}
+            />
+            <strong>{appearance.rowDividerThickness}px</strong>
+          </div>
+        </label>
+
+        <label className="appearance-field">
+          <span>课程卡片背景色</span>
+          <input
+            type="color"
+            value={appearance.blockCardBackgroundColor}
+            onChange={(event) => updateAppearance({ blockCardBackgroundColor: event.currentTarget.value })}
+          />
+        </label>
+
+        <label className="appearance-field">
+          <span>课程卡片圆角</span>
+          <select
+            value={appearance.blockCardCornerRadius}
+            onChange={(event) => updateAppearance({ blockCardCornerRadius: Number(event.currentTarget.value) })}
+          >
+            {radiusOptions.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="appearance-field">
+          <span>块高</span>
+          <div className="appearance-block-heights">
+            {settings.blockSettings.blocks.map((block, index) => {
+              const value = appearance.blockHeights[block.id] ?? (block.type === "placeholder" ? 1.15 : block.periods.length);
+
+              return (
+                <div key={block.id} className="appearance-control">
+                  <small>{block.name || `块${index + 1}`}</small>
+                  <input
+                    type="range"
+                    min="0.8"
+                    max="6"
+                    step="0.05"
+                    value={value}
+                    onChange={(event) =>
+                      updateAppearance({
+                        blockHeights: {
+                          ...appearance.blockHeights,
+                          [block.id]: Number(event.currentTarget.value),
+                        },
+                      })
+                    }
+                  />
+                  <strong>{value.toFixed(2)}fr</strong>
+                </div>
+              );
+            })}
+          </div>
+        </label>
+      </div>
+    </section>
+  );
+}
+
 function BlockSettingsPanel({
   settings,
   onSettingsChange,
   onApplyBlockSettings,
-  onClose,
+  onOpenBlockSettings,
 }: {
   settings: WidgetSettingsState;
   onSettingsChange: (settings: WidgetSettingsState) => void;
   onApplyBlockSettings: (blockSettings: BlockSettingsState) => void;
-  onClose: () => void;
+  onOpenBlockSettings: (blockId: string, anchorRect?: DOMRect) => void;
 }) {
-  const [openStyleBlockId, setOpenStyleBlockId] = useState<string | null>(null);
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
   const [blockDropTargetId, setBlockDropTargetId] = useState<string | null>(null);
   const [draggingPeriod, setDraggingPeriod] = useState<DraggingPeriod>(null);
   const [periodDropTargetId, setPeriodDropTargetId] = useState<string | null>(null);
-  const [blockDialogPosition, setBlockDialogPosition] = useState<DialogPosition>({ x: 560, y: 156 });
-  const [blockDialogDrag, setBlockDialogDrag] = useState<DialogDragState>(null);
 
   const blockSettings = useMemo(() => normalizeBlockConflicts(settings.blockSettings), [settings.blockSettings]);
+  const settingsRef = useRef(settings);
+  const blockSettingsRef = useRef(blockSettings);
+  const draggingBlockIdRef = useRef(draggingBlockId);
+  const draggingPeriodRef = useRef(draggingPeriod);
   const activeBlock = blockSettings.blocks.find((block) => block.id === blockSettings.activeBlockId) ?? blockSettings.blocks[0] ?? null;
   const activePeriod = findPeriodInBlocks(blockSettings, blockSettings.activePeriodId) ?? activeBlock?.periods[0] ?? null;
   const conflictSummary = getConflictSummary(blockSettings);
-  const openStyleBlock = blockSettings.blocks.find((block) => block.id === openStyleBlockId) ?? null;
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  useEffect(() => {
+    blockSettingsRef.current = blockSettings;
+  }, [blockSettings]);
+
+  useEffect(() => {
+    draggingBlockIdRef.current = draggingBlockId;
+  }, [draggingBlockId]);
+
+  useEffect(() => {
+    draggingPeriodRef.current = draggingPeriod;
+  }, [draggingPeriod]);
 
   const commitBlockSettings = (nextBlockSettings: BlockSettingsState) => {
-    onSettingsChange({ ...settings, blockSettings: normalizeBlockConflicts(nextBlockSettings) });
+    const normalizedBlockSettings = normalizeBlockConflicts(nextBlockSettings);
+    const nextSettings = { ...settingsRef.current, blockSettings: normalizedBlockSettings };
+    blockSettingsRef.current = normalizedBlockSettings;
+    settingsRef.current = nextSettings;
+    onSettingsChange(nextSettings);
   };
 
   const selectBlock = (blockId: string) => {
@@ -229,6 +387,13 @@ function BlockSettingsPanel({
     blockId: string,
     patch: Partial<Pick<BlockSettings, "name" | "type" | "cardBackgroundColor" | "cardCornerRadius">>,
   ) => {
+    const currentBlock = blockSettings.blocks.find((block) => block.id === blockId);
+    const nextType = patch.type ?? currentBlock?.type;
+    const nextPeriods =
+      nextType === "placeholder"
+        ? [currentBlock?.periods[0] ?? createDefaultPeriod(`${blockId}-p1`, 0)]
+        : currentBlock?.periods ?? [];
+
     commitBlockSettings({
       ...blockSettings,
       blocks: blockSettings.blocks.map((block) => {
@@ -236,10 +401,10 @@ function BlockSettingsPanel({
           return block;
         }
 
-        const nextType = patch.type ?? block.type;
-        const nextPeriods = nextType === "placeholder" ? [block.periods[0] ?? createDefaultPeriod(`${block.id}-p1`, 0)] : block.periods;
         return { ...block, ...patch, periods: withPeriodOrder(nextPeriods) } as BlockSettings;
       }),
+      activeBlockId: blockId,
+      activePeriodId: nextPeriods[0]?.id ?? null,
     });
   };
 
@@ -263,7 +428,7 @@ function BlockSettingsPanel({
       type === "course"
         ? {
             id: nextId,
-            name: "新课程块",
+            name: "",
             type: "course",
             cardBackgroundColor: "#fff8e1",
             cardCornerRadius: 10,
@@ -271,7 +436,7 @@ function BlockSettingsPanel({
           }
         : {
             id: nextId,
-            name: "新占位块",
+            name: "",
             type: "placeholder",
             cardBackgroundColor: "#e3f2fd",
             cardCornerRadius: 10,
@@ -327,18 +492,14 @@ function BlockSettingsPanel({
     }
 
     const deletesBlock = block.type === "placeholder" || block.periods.length === 1;
-    const baseMessage =
+    const message =
       block.type === "placeholder"
-        ? "占位块只能包含一个课次，删除后将同时删除整个占位块。"
+        ? "占位块只能包含一个课次，删除后将同时删除整个占位块。如果该课次中已有课程卡片，删除后可能影响原课程表内容。是否继续？"
         : deletesBlock
-          ? "该块只剩 1 个课次，删除后将同时删除整个块。"
-          : `确认删除「${period.name || "课次"}」？`;
+          ? "该块只剩 1 个课次，删除后将同时删除整个块。如果该课次中已有课程卡片，删除后可能影响原课程表内容。是否继续？"
+          : `确认删除「${period.name || "课次"}」？如果该课次中已有课程卡片，删除后可能影响原课程表内容。是否继续？`;
 
-    if (!window.confirm(baseMessage)) {
-      return;
-    }
-
-    if (!window.confirm("如果该课次中已有课程卡片，删除后可能影响原课程表内容。是否继续？")) {
+    if (!window.confirm(message)) {
       return;
     }
 
@@ -367,7 +528,8 @@ function BlockSettingsPanel({
   };
 
   const movePeriodToTarget = (blockId: string, periodId: string, targetPeriodId: string) => {
-    const block = blockSettings.blocks.find((item) => item.id === blockId);
+    const currentBlockSettings = blockSettingsRef.current;
+    const block = currentBlockSettings.blocks.find((item) => item.id === blockId);
     if (!block || block.type !== "course" || periodId === targetPeriodId) {
       return;
     }
@@ -385,37 +547,105 @@ function BlockSettingsPanel({
   };
 
   const setPeriodsForBlock = (blockId: string, periods: BlockPeriodSettings[], activePeriodId: string) => {
+    const currentBlockSettings = blockSettingsRef.current;
     commitBlockSettings({
-      ...blockSettings,
+      ...currentBlockSettings,
       activeBlockId: blockId,
       activePeriodId,
-      blocks: blockSettings.blocks.map((current) =>
+      blocks: currentBlockSettings.blocks.map((current) =>
         current.id === blockId && current.type === "course" ? { ...current, periods: withPeriodOrder(periods) } : current,
       ),
     });
   };
 
-  const moveBlock = (blockId: string, direction: -1 | 1) => {
-    const index = blockSettings.blocks.findIndex((block) => block.id === blockId);
-    const target = index + direction;
-    if (target < 0 || target >= blockSettings.blocks.length) {
-      return;
-    }
-
-    moveBlockToIndex(blockId, target);
-  };
-
   const moveBlockToIndex = (blockId: string, targetIndex: number) => {
-    const index = blockSettings.blocks.findIndex((block) => block.id === blockId);
-    if (index < 0 || targetIndex < 0 || targetIndex >= blockSettings.blocks.length || index === targetIndex) {
+    const currentBlockSettings = blockSettingsRef.current;
+    const index = currentBlockSettings.blocks.findIndex((block) => block.id === blockId);
+    if (index < 0 || targetIndex < 0 || targetIndex >= currentBlockSettings.blocks.length || index === targetIndex) {
       return;
     }
 
-    const nextBlocks = [...blockSettings.blocks];
+    const nextBlocks = [...currentBlockSettings.blocks];
     const [item] = nextBlocks.splice(index, 1);
     nextBlocks.splice(targetIndex, 0, item);
-    commitBlockSettings({ ...blockSettings, blocks: nextBlocks, activeBlockId: blockId });
+    commitBlockSettings({ ...currentBlockSettings, blocks: nextBlocks, activeBlockId: blockId });
   };
+
+  useEffect(() => {
+    if (!draggingBlockId && !draggingPeriod) {
+      return;
+    }
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      if (!target) {
+        return;
+      }
+
+      const currentDraggingBlockId = draggingBlockIdRef.current;
+      if (currentDraggingBlockId) {
+        const targetBlockElement = target.closest<HTMLElement>("[data-block-card-id]");
+        const targetBlockId = targetBlockElement?.dataset.blockCardId;
+        if (!targetBlockId || targetBlockId === currentDraggingBlockId) {
+          setBlockDropTargetId(targetBlockId ?? null);
+          return;
+        }
+
+        const targetIndex = blockSettingsRef.current.blocks.findIndex((block) => block.id === targetBlockId);
+        const sourceIndex = blockSettingsRef.current.blocks.findIndex((block) => block.id === currentDraggingBlockId);
+        if (targetIndex >= 0 && sourceIndex >= 0 && shouldReorderByPointer(event.clientY, targetBlockElement, sourceIndex, targetIndex)) {
+          setBlockDropTargetId(targetBlockId);
+          moveBlockToIndex(currentDraggingBlockId, targetIndex);
+        }
+        return;
+      }
+
+      const currentDraggingPeriod = draggingPeriodRef.current;
+      if (!currentDraggingPeriod) {
+        return;
+      }
+
+      const targetPeriodElement = target.closest<HTMLElement>("[data-period-row-id]");
+      const targetPeriodId = targetPeriodElement?.dataset.periodRowId;
+      const targetBlockId = targetPeriodElement?.dataset.periodBlockId;
+      if (!targetPeriodId || targetBlockId !== currentDraggingPeriod.blockId) {
+        setPeriodDropTargetId(null);
+        return;
+      }
+
+      if (targetPeriodId === currentDraggingPeriod.periodId) {
+        setPeriodDropTargetId(targetPeriodId);
+        return;
+      }
+
+      setPeriodDropTargetId(targetPeriodId);
+      const currentBlock = blockSettingsRef.current.blocks.find((block) => block.id === currentDraggingPeriod.blockId);
+      const sourceIndex = currentBlock?.periods.findIndex((period) => period.id === currentDraggingPeriod.periodId) ?? -1;
+      const targetIndex = currentBlock?.periods.findIndex((period) => period.id === targetPeriodId) ?? -1;
+      if (currentBlock && sourceIndex >= 0 && targetIndex >= 0 && shouldReorderByPointer(event.clientY, targetPeriodElement, sourceIndex, targetIndex)) {
+        movePeriodToTarget(currentDraggingPeriod.blockId, currentDraggingPeriod.periodId, targetPeriodId);
+      }
+    };
+
+    const endDrag = () => {
+      setDraggingBlockId(null);
+      setBlockDropTargetId(null);
+      setDraggingPeriod(null);
+      setPeriodDropTargetId(null);
+      draggingBlockIdRef.current = null;
+      draggingPeriodRef.current = null;
+    };
+
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", endDrag);
+    document.addEventListener("pointercancel", endDrag);
+
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", endDrag);
+      document.removeEventListener("pointercancel", endDrag);
+    };
+  }, [draggingBlockId, draggingPeriod]);
 
   const applyChanges = () => {
     const normalized = normalizeBlockConflicts(blockSettings);
@@ -433,17 +663,10 @@ function BlockSettingsPanel({
     <section className="settings-panel-section block-settings-section">
       <div className="block-settings-toolbar timeline-toolbar">
         <div className="block-settings-toolbar-left">
-          <button type="button" className="toolbar-action" onClick={() => addBlock("course")}>
-            添加课程块
-          </button>
+          <button type="button" className="toolbar-action" onClick={() => addBlock("course")}>添加课程块</button>
         </div>
         <div className="block-settings-toolbar-right">
-          <button type="button" className="toolbar-action" onClick={onClose}>
-            关闭
-          </button>
-          <button type="button" className="toolbar-action primary" onClick={applyChanges}>
-            应用修改
-          </button>
+          <button type="button" className="toolbar-action primary" onClick={applyChanges}>应用修改</button>
         </div>
       </div>
 
@@ -455,6 +678,7 @@ function BlockSettingsPanel({
           return (
             <article
               key={block.id}
+              data-block-card-id={block.id}
               className={[
                 "block-container-card",
                 isSelected ? "is-selected" : "",
@@ -466,31 +690,19 @@ function BlockSettingsPanel({
                 .join(" ")}
               style={{ "--block-accent": hasConflict ? "#dc2626" : block.cardBackgroundColor } as CSSProperties}
               onClick={() => selectBlock(block.id)}
-              onDragOver={(event) => {
-                if (!draggingBlockId || draggingBlockId === block.id) {
-                  return;
-                }
-                event.preventDefault();
-                setBlockDropTargetId(block.id);
-              }}
-              onDragLeave={() => setBlockDropTargetId(null)}
-              onDrop={(event) => {
-                event.preventDefault();
-                if (draggingBlockId) {
-                  moveBlockToIndex(draggingBlockId, blockIndex);
-                }
-                setDraggingBlockId(null);
-                setBlockDropTargetId(null);
-              }}
             >
               <BlockHeaderRow
-                block={block}
-                blockIndex={blockIndex}
-                blockCount={blockSettings.blocks.length}
-                styleOpen={openStyleBlockId === block.id}
-                onToggleStyle={() => setOpenStyleBlockId(openStyleBlockId === block.id ? null : block.id)}
-                onMoveUp={() => moveBlock(block.id, -1)}
-                onMoveDown={() => moveBlock(block.id, 1)}
+                blockId={block.id}
+                blockName={block.name || `块${blockIndex + 1}`}
+                blockType={block.type}
+                onOpenBlockSettings={onOpenBlockSettings}
+                onDragHandlePointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDraggingBlockId(block.id);
+                  setBlockDropTargetId(block.id);
+                  draggingBlockIdRef.current = block.id;
+                }}
               />
 
               <div className="block-content-card">
@@ -508,211 +720,68 @@ function BlockSettingsPanel({
                       onChangeName={(name) => updatePeriod(block.id, period.id, { name })}
                       onChangeStartTime={(startTime) => updatePeriod(block.id, period.id, { startTime })}
                       onChangeEndTime={(endTime) => updatePeriod(block.id, period.id, { endTime })}
-                      onDragStart={(event) => {
+                      onDragHandlePointerDown={(event) => {
                         if (block.type === "placeholder") {
                           event.preventDefault();
                           return;
                         }
+                        event.preventDefault();
+                        event.stopPropagation();
                         setDraggingPeriod({ blockId: block.id, periodId: period.id });
-                        event.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDragOver={(event) => {
-                        if (!draggingPeriod || draggingPeriod.blockId !== block.id || draggingPeriod.periodId === period.id) {
-                          return;
-                        }
-                        event.preventDefault();
                         setPeriodDropTargetId(period.id);
-                      }}
-                      onDragEnd={() => {
-                        setDraggingPeriod(null);
-                        setPeriodDropTargetId(null);
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        if (draggingPeriod?.blockId === block.id) {
-                          movePeriodToTarget(block.id, draggingPeriod.periodId, period.id);
-                        }
-                        setDraggingPeriod(null);
-                        setPeriodDropTargetId(null);
+                        draggingPeriodRef.current = { blockId: block.id, periodId: period.id };
                       }}
                       onDelete={() => deletePeriod(block.id, period.id)}
+                      onAddBelow={() => addPeriodToBlock(block.id, period.id)}
                     />
                   ))}
                 </div>
-
-                {block.type === "course" && (
-                  <button
-                    type="button"
-                    className="block-add-period-button"
-                    onClick={stopAndRun(() => addPeriodToBlock(block.id, block.periods[block.periods.length - 1]?.id ?? null))}
-                  >
-                    + 在当前块中添加课次
-                  </button>
-                )}
               </div>
             </article>
           );
         })}
       </div>
-
-      {openStyleBlock && (
-        <BlockSettingsDialog
-          block={openStyleBlock}
-          position={blockDialogPosition}
-          dragging={blockDialogDrag}
-          onDragStart={(event) => {
-            event.stopPropagation();
-            event.preventDefault();
-            event.currentTarget.setPointerCapture(event.pointerId);
-            setBlockDialogDrag({
-              pointerId: event.pointerId,
-              startX: event.clientX,
-              startY: event.clientY,
-              originX: blockDialogPosition.x,
-              originY: blockDialogPosition.y,
-            });
-          }}
-          onDragMove={(event) => {
-            if (!blockDialogDrag || blockDialogDrag.pointerId !== event.pointerId) {
-              return;
-            }
-
-            setBlockDialogPosition({
-              x: Math.max(12, blockDialogDrag.originX + event.clientX - blockDialogDrag.startX),
-              y: Math.max(12, blockDialogDrag.originY + event.clientY - blockDialogDrag.startY),
-            });
-          }}
-          onDragEnd={(event) => {
-            if (blockDialogDrag?.pointerId === event.pointerId) {
-              setBlockDialogDrag(null);
-            }
-          }}
-          onChangeType={(type) => updateBlock(openStyleBlock.id, { type })}
-          onChangeBackground={(cardBackgroundColor) => updateBlock(openStyleBlock.id, { cardBackgroundColor })}
-          onChangeRadius={(cardCornerRadius) => updateBlock(openStyleBlock.id, { cardCornerRadius })}
-          onClose={() => setOpenStyleBlockId(null)}
-        />
-      )}
     </section>
   );
 }
 
 function BlockHeaderRow({
-  blockIndex,
-  blockCount,
-  styleOpen,
-  onToggleStyle,
-  onMoveUp,
-  onMoveDown,
+  blockId,
+  blockName,
+  blockType,
+  onOpenBlockSettings,
+  onDragHandlePointerDown,
 }: {
-  blockIndex: number;
-  blockCount: number;
-  styleOpen: boolean;
-  onToggleStyle: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
+  blockId: string;
+  blockName: string;
+  blockType: BlockType;
+  onOpenBlockSettings: (blockId: string, anchorRect?: DOMRect) => void;
+  onDragHandlePointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <div className="block-container-header">
-      <div className="block-style-area">
-        <button
-          className={styleOpen ? "block-settings-icon-button is-active" : "block-settings-icon-button"}
-          type="button"
-          onClick={stopAndRun(onToggleStyle)}
-          aria-label="块设置"
-        >
-          ⚙
-        </button>
-      </div>
-      <div className="block-move-buttons">
-        <button type="button" onClick={stopAndRun(onMoveUp)} disabled={blockIndex === 0} title="上移块">
-          ↑
-        </button>
-        <button type="button" onClick={stopAndRun(onMoveDown)} disabled={blockIndex === blockCount - 1} title="下移块">
-          ↓
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function BlockSettingsDialog({
-  block,
-  position,
-  dragging,
-  onDragStart,
-  onDragMove,
-  onDragEnd,
-  onChangeType,
-  onChangeBackground,
-  onChangeRadius,
-  onClose,
-}: {
-  block: BlockSettings;
-  position: DialogPosition;
-  dragging: DialogDragState;
-  onDragStart: (event: PointerEvent<HTMLElement>) => void;
-  onDragMove: (event: PointerEvent<HTMLElement>) => void;
-  onDragEnd: (event: PointerEvent<HTMLElement>) => void;
-  onChangeType: (type: BlockType) => void;
-  onChangeBackground: (color: string) => void;
-  onChangeRadius: (radius: number) => void;
-  onClose: () => void;
-}) {
-  const radiusOptions = [0, 2, 4, 6, 8, 10, 12, 14, 16];
-
-  return (
-    <section
-      className="block-settings-dialog"
-      style={{ left: position.x, top: position.y }}
-      onClick={stopPropagation}
-    >
-      <header
-        className={dragging ? "block-settings-dialog-header is-dragging" : "block-settings-dialog-header"}
-        onPointerDown={onDragStart}
-        onPointerMove={onDragMove}
-        onPointerUp={onDragEnd}
-        onPointerCancel={onDragEnd}
+      <button
+        type="button"
+        className="block-name-button"
+        title="点击修改块名和类型"
+        onClick={(event) => {
+          event.stopPropagation();
+          console.info("block name clicked", { blockId });
+          onOpenBlockSettings(blockId, event.currentTarget.getBoundingClientRect());
+        }}
       >
-        <div>
-          <strong>块信息设置</strong>
-          <span>课程卡片样式</span>
-        </div>
-        <button type="button" onClick={onClose} aria-label="关闭块设置">
-          ×
-        </button>
-      </header>
-      <div className="block-settings-dialog-body">
-        <label>
-          <span>块类型</span>
-          <select
-            className="block-type-select"
-            value={block.type}
-            onChange={(event) => onChangeType(event.currentTarget.value as BlockType)}
-          >
-            <option value="course">课程块</option>
-            <option value="placeholder">占位块</option>
-          </select>
-        </label>
-        <label>
-          <span>背景色</span>
-          <input type="color" value={block.cardBackgroundColor} onChange={(event) => onChangeBackground(event.currentTarget.value)} />
-        </label>
-        <label className="block-radius-control">
-          <span>圆角</span>
-          <select
-            value={block.cardCornerRadius}
-            onChange={(event) => onChangeRadius(Number(event.currentTarget.value))}
-          >
-            {radiusOptions.map((radius) => (
-              <option key={radius} value={radius}>
-                {radius}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-    </section>
+        <span className="block-name-text">{blockName}</span>
+        <small>{blockType === "course" ? "课程块" : "占位块"}</small>
+      </button>
+      <button
+        type="button"
+        className="block-settings-icon-button"
+        aria-label="块拖动"
+        onPointerDown={onDragHandlePointerDown}
+      >
+        ⋮⋮
+      </button>
+    </div>
   );
 }
 
@@ -727,11 +796,9 @@ function PeriodRow({
   onChangeName,
   onChangeStartTime,
   onChangeEndTime,
-  onDragStart,
-  onDragOver,
-  onDragEnd,
-  onDrop,
+  onDragHandlePointerDown,
   onDelete,
+  onAddBelow,
 }: {
   block: BlockSettings;
   period: BlockPeriodSettings;
@@ -743,11 +810,9 @@ function PeriodRow({
   onChangeName: (name: string) => void;
   onChangeStartTime: (startTime: string) => void;
   onChangeEndTime: (endTime: string) => void;
-  onDragStart: (event: DragEvent<HTMLButtonElement>) => void;
-  onDragOver: (event: DragEvent<HTMLElement>) => void;
-  onDragEnd: () => void;
-  onDrop: (event: DragEvent<HTMLElement>) => void;
+  onDragHandlePointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
   onDelete: () => void;
+  onAddBelow: () => void;
 }) {
   const className = ["period-row", selected ? "is-selected" : "", conflict ? "is-conflict" : "", dragging ? "is-dragging" : "", dropTarget ? "is-drop-target" : ""]
     .filter(Boolean)
@@ -757,13 +822,10 @@ function PeriodRow({
     <article
       className={className}
       data-period-row-id={period.id}
+      data-period-block-id={block.id}
       role="listitem"
       onClick={onSelect}
-      onDragOver={onDragOver}
-      onDragLeave={() => undefined}
-      onDrop={onDrop}
     >
-      <button type="button" className="period-select-dot" aria-label="选中课次" onClick={stopAndRun(onSelect)} />
       <input
         className="period-name-input"
         value={period.name}
@@ -789,14 +851,23 @@ function PeriodRow({
       <button
         type="button"
         className="timeline-row-handle"
-        draggable={block.type === "course"}
         title={block.type === "course" ? "同一课程块内拖动排序" : "占位块只有一个课次"}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
+        onPointerDown={onDragHandlePointerDown}
         onClick={stopPropagation}
       >
         ⋮⋮
       </button>
+      {block.type === "course" && (
+        <button
+          type="button"
+          className="period-add-button"
+          aria-label="在此行下方添加课次"
+          onClick={stopAndRun(onAddBelow)}
+          title="在此行下方添加课次"
+        >
+          +
+        </button>
+      )}
       <button type="button" className="period-delete-button" onClick={stopAndRun(onDelete)} aria-label="删除课次">
         -
       </button>
@@ -833,6 +904,17 @@ function withPeriodOrder(periods: BlockPeriodSettings[]): BlockPeriodSettings[] 
   return periods.map((period, order) => ({ ...period, order }));
 }
 
+function shouldReorderByPointer(pointerY: number, targetElement: HTMLElement, sourceIndex: number, targetIndex: number): boolean {
+  const rect = targetElement.getBoundingClientRect();
+  const middleY = rect.top + rect.height / 2;
+
+  if (sourceIndex < targetIndex) {
+    return pointerY > middleY;
+  }
+
+  return pointerY < middleY;
+}
+
 function shiftTime(time: string, minutes: number): string {
   const total = timeToMinutes(time) + minutes;
   const wrapped = (total + 1440) % 1440;
@@ -854,9 +936,7 @@ function normalizeBlockConflicts(blockSettings: BlockSettingsState): BlockSettin
 }
 
 function getConflictSummary(blockSettings: BlockSettingsState): ConflictSummary {
-  const periodRecords = blockSettings.blocks.flatMap((block) =>
-    block.periods.map((period) => ({ block, period })),
-  );
+  const periodRecords = blockSettings.blocks.flatMap((block) => block.periods.map((period) => ({ block, period })));
   const periodIds = new Set<string>();
   const blockIds = new Set<string>();
 

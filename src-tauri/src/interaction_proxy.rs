@@ -5,7 +5,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
@@ -223,6 +223,8 @@ pub fn start_proxy_input_manager(
     thread::spawn(move || {
         let mut was_left_down = false;
         let mut pressed_hit: Option<ProxyWidgetHit> = None;
+        let mut pending_card_click: Option<(ProxyWidgetHit, Instant)> = None;
+        let double_click_interval = Duration::from_millis(500);
         let mut passthrough = true;
         let mut last_debug_state = String::new();
 
@@ -235,6 +237,7 @@ pub fn start_proxy_input_manager(
                 passthrough = true;
                 was_left_down = false;
                 pressed_hit = None;
+                pending_card_click = None;
                 last_debug_state.clear();
                 thread::sleep(Duration::from_millis(50));
                 continue;
@@ -272,6 +275,7 @@ pub fn start_proxy_input_manager(
                 }
                 was_left_down = false;
                 pressed_hit = None;
+                pending_card_click = None;
                 thread::sleep(Duration::from_millis(16));
                 continue;
             }
@@ -358,7 +362,13 @@ pub fn start_proxy_input_manager(
                         widget_hit: Some(hit.clone()),
                     });
                     eprintln!("interaction proxy click: {:?}", hit);
-                    handle_proxy_click(&app, &ui_state, hit);
+                    handle_proxy_click(
+                        &app,
+                        &ui_state,
+                        hit,
+                        &mut pending_card_click,
+                        double_click_interval,
+                    );
                 }
             }
 
@@ -372,8 +382,45 @@ fn handle_proxy_click(
     app: &AppHandle,
     _ui_state: &ProxyUiStateStore,
     hit: ProxyWidgetHit,
+    pending_card_click: &mut Option<(ProxyWidgetHit, Instant)>,
+    double_click_interval: Duration,
 ) {
-    let _ = app.emit(PROXY_TRIGGER_EVENT, hit.clone());
+    if hit.kind == "menu-button" {
+        pending_card_click.take();
+        let _ = app.emit(PROXY_TRIGGER_EVENT, hit.clone());
+        return;
+    }
+
+    if !is_card_hit(&hit) {
+        pending_card_click.take();
+        return;
+    }
+
+    let now = Instant::now();
+    let double_clicked = pending_card_click
+        .as_ref()
+        .map(|(previous_hit, previous_time)| {
+            same_proxy_hit(previous_hit, &hit)
+                && now.duration_since(*previous_time) <= double_click_interval
+        })
+        .unwrap_or(false);
+
+    if double_clicked {
+        pending_card_click.take();
+        eprintln!("interaction proxy double click: {:?}", hit);
+        let _ = app.emit(PROXY_TRIGGER_EVENT, hit.clone());
+        return;
+    }
+
+    *pending_card_click = Some((hit, now));
+}
+
+fn is_card_hit(hit: &ProxyWidgetHit) -> bool {
+    matches!(hit.kind.as_str(), "course" | "period" | "placeholder")
+}
+
+fn same_proxy_hit(left: &ProxyWidgetHit, right: &ProxyWidgetHit) -> bool {
+    left.kind == right.kind && left.id == right.id
 }
 
 pub fn hide_proxy(app: &AppHandle) -> Result<(), String> {
@@ -514,7 +561,7 @@ fn top_window_kind(app: &AppHandle, widget: &WebviewWindow, screen_x: i32, scree
 }
 
 fn is_overlay_window(app: &AppHandle, hwnd: HWND) -> bool {
-    for label in ["settings", "card-settings", "widget-menu"] {
+    for label in ["settings", "card-settings", "block-settings", "block-type-confirm", "widget-menu"] {
         if let Some(window) = app.get_webview_window(label) {
             if let Ok(raw) = window.hwnd() {
                 if same_hwnd(hwnd, HWND(raw.0)) {

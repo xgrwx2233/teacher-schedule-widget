@@ -18,6 +18,7 @@ type ScheduleWidgetProps = {
   hovered: boolean;
   activeCellId: string | null;
   menuButtonRef: RefObject<HTMLButtonElement | null>;
+  widgetStyle?: CSSProperties;
   onToggleMenu: () => void;
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
@@ -33,6 +34,7 @@ export function ScheduleWidget({
   hovered,
   activeCellId,
   menuButtonRef,
+  widgetStyle,
   onToggleMenu,
   onCourseClick,
   onCardEdit,
@@ -45,6 +47,7 @@ export function ScheduleWidget({
     <section
       className={`schedule-shell mode-${mode} ${hovered ? "is-forward-hovered" : ""}`}
       aria-label={widgetTitle}
+      style={widgetStyle}
     >
       <div className="schedule-card">
         <header className="schedule-toolbar">
@@ -139,11 +142,13 @@ function CourseBlock({
 }) {
   const blockStyle = {
     "--block-row-count": block.rows.length,
+    "--card-radius": `var(--block-card-radius, 10px)`,
   } as CSSProperties;
 
   return (
     <section
       className={`schedule-block course-block ${block.phase}-block tone-${block.cardTone}`}
+      aria-label={block.title}
       style={blockStyle}
     >
       <div className="period-column block-column">

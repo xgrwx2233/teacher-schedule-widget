@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useState } from "react";
 import {
   WIDGET_MENU_ACTION_EVENT,
+  WIDGET_MENU_CLOSE_EVENT,
   WIDGET_MENU_STATE_EVENT,
   WIDGET_WINDOW_LABEL,
   type WidgetMenuAction,
@@ -23,15 +24,33 @@ export function WidgetMenuWindowHost() {
     const unlistenWindowState = listen<WidgetMenuStatePayload>(WIDGET_MENU_STATE_EVENT, (event) => {
       setMode(event.payload.mode);
     });
+    const unlistenClose = currentWindow.onCloseRequested(async (event) => {
+      event.preventDefault();
+      await invoke("clear_proxy_menu_open");
+      await emitTo(WIDGET_WINDOW_LABEL, WIDGET_MENU_CLOSE_EVENT);
+      await currentWindow.hide();
+    });
+    const unlistenFocus = currentWindow.onFocusChanged(async ({ payload: focused }) => {
+      if (focused) {
+        return;
+      }
+
+      await invoke("clear_proxy_menu_open");
+      await emitTo(WIDGET_WINDOW_LABEL, WIDGET_MENU_CLOSE_EVENT);
+      await currentWindow.hide();
+    });
 
     return () => {
       void unlistenWindowState.then((unlisten) => unlisten());
+      void unlistenClose.then((unlisten) => unlisten());
+      void unlistenFocus.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [currentWindow]);
 
   const runAction = async (action: WidgetMenuAction) => {
     await invoke("clear_proxy_menu_open");
     await emitTo(WIDGET_WINDOW_LABEL, WIDGET_MENU_ACTION_EVENT, action);
+    await emitTo(WIDGET_WINDOW_LABEL, WIDGET_MENU_CLOSE_EVENT);
     await currentWindow.hide();
   };
 
