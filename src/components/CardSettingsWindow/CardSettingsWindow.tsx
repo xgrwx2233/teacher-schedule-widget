@@ -18,7 +18,6 @@ export function CardSettingsWindow({ selectedCard, draft, onDraftChange }: CardS
         <div className="card-settings-body">
           {selectedCard.type === "course" && <CourseCardSettings draft={draft} onDraftChange={onDraftChange} />}
           {selectedCard.type === "period" && <PeriodCardSettings draft={draft} onDraftChange={onDraftChange} />}
-          {selectedCard.type === "placeholder" && <PlaceholderCardSettings draft={draft} onDraftChange={onDraftChange} />}
         </div>
       </section>
     </div>
@@ -120,52 +119,6 @@ function PeriodCardSettings({ draft, onDraftChange }: { draft: CardDraft; onDraf
           </label>
           <label>
             <span>起止时间</span>
-            <input value={draft.secondary} onChange={(event) => onDraftChange({ ...draft, secondary: event.currentTarget.value })} />
-          </label>
-          <label>
-            <span>背景色</span>
-            <input type="color" value={draft.backgroundColor} onChange={(event) => onDraftChange({ ...draft, backgroundColor: event.currentTarget.value })} />
-          </label>
-          <label>
-            <span>字体色</span>
-            <input type="color" value={draft.color} onChange={(event) => onDraftChange({ ...draft, color: event.currentTarget.value })} />
-          </label>
-          <label>
-            <span>字体</span>
-            <select value={draft.fontFamily} onChange={(event) => onDraftChange({ ...draft, fontFamily: event.currentTarget.value })}>
-              <option value="Microsoft YaHei">微软雅黑</option>
-              <option value="Segoe UI">Segoe UI</option>
-              <option value="SimSun">宋体</option>
-              <option value="KaiTi">楷体</option>
-            </select>
-          </label>
-          <label>
-            <span>字号</span>
-            <input type="number" min="10" max="28" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: Number(event.currentTarget.value) })} />
-          </label>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function PlaceholderCardSettings({ draft, onDraftChange }: { draft: CardDraft; onDraftChange: (draft: CardDraft) => void }) {
-  return (
-    <div className="card-settings-layout">
-      <section className="card-settings-preview">
-        <div className="preview-card preview-placeholder" style={previewStyle(draft)}>
-          <strong>{draft.title || "占位块标题"}</strong>
-          <span>{draft.secondary || "说明 / 副标题"}</span>
-        </div>
-      </section>
-      <section className="card-settings-form">
-        <div className="form-grid">
-          <label>
-            <span>标题</span>
-            <input value={draft.title} onChange={(event) => onDraftChange({ ...draft, title: event.currentTarget.value })} />
-          </label>
-          <label>
-            <span>副标题</span>
             <input value={draft.secondary} onChange={(event) => onDraftChange({ ...draft, secondary: event.currentTarget.value })} />
           </label>
           <label>

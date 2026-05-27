@@ -416,7 +416,7 @@ fn handle_proxy_click(
 }
 
 fn is_card_hit(hit: &ProxyWidgetHit) -> bool {
-    matches!(hit.kind.as_str(), "course" | "period" | "placeholder")
+    matches!(hit.kind.as_str(), "course" | "period")
 }
 
 fn same_proxy_hit(left: &ProxyWidgetHit, right: &ProxyWidgetHit) -> bool {
@@ -561,7 +561,7 @@ fn top_window_kind(app: &AppHandle, widget: &WebviewWindow, screen_x: i32, scree
 }
 
 fn is_overlay_window(app: &AppHandle, hwnd: HWND) -> bool {
-    for label in ["settings", "card-settings", "block-settings", "block-type-confirm", "widget-menu"] {
+    for label in ["settings", "card-settings", "widget-menu"] {
         if let Some(window) = app.get_webview_window(label) {
             if let Ok(raw) = window.hwnd() {
                 if same_hwnd(hwnd, HWND(raw.0)) {

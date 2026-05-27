@@ -1,12 +1,5 @@
 import type { CSSProperties, PointerEvent, ReactNode, RefObject } from "react";
-import type {
-  CardStyle,
-  PeriodInfo,
-  Schedule,
-  ScheduleCourseBlock,
-  SchedulePlaceholderBlock,
-  Weekday,
-} from "../../features/schedule/types";
+import type { CardStyle, PeriodInfo, Schedule, ScheduleCourseRow, ScheduleMergedRow, Weekday } from "../../features/schedule/types";
 import type { SelectedCard } from "../../features/settings/settingsTypes";
 import type { WindowMode } from "../../features/windowMode/types";
 
@@ -44,11 +37,7 @@ export function ScheduleWidget({
   const visibleWeekdays = schedule.days.map((day) => day.id);
 
   return (
-    <section
-      className={`schedule-shell mode-${mode} ${hovered ? "is-forward-hovered" : ""}`}
-      aria-label={widgetTitle}
-      style={widgetStyle}
-    >
+    <section className={`schedule-shell mode-${mode} ${hovered ? "is-forward-hovered" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
       <div className="schedule-card">
         <header className="schedule-toolbar">
           <div className="toolbar-left" aria-label="周次切换">
@@ -56,9 +45,9 @@ export function ScheduleWidget({
               &lt;
             </button>
             <button className="week-number-button" type="button" title={schedule.termLabel}>
-              第{schedule.weekNumber}周
+              第 {schedule.weekNumber} 周
             </button>
-            <button className="week-arrow-button" type="button" title="下一周">
+            <button className="week-arrow-button" type="button" title="后一周">
               &gt;
             </button>
           </div>
@@ -85,7 +74,7 @@ export function ScheduleWidget({
 
         <div className="date-row" role="row">
           <div className="date-cell arrow-cell" aria-hidden="true">
-            <div className="arrow-card">⌄</div>
+            <div className="arrow-card">↘</div>
           </div>
           {schedule.days.map((day) => (
             <div className="date-cell" key={day.id}>
@@ -98,43 +87,32 @@ export function ScheduleWidget({
         </div>
 
         <div className="schedule-blocks" role="table" aria-label="教师课程表">
-          {schedule.blocks.map((block) =>
-            block.type === "course" ? (
-              <CourseBlock
-                key={block.id}
-                block={block}
-                weekdays={visibleWeekdays}
-                activeCellId={activeCellId}
-                onCourseClick={onCourseClick}
-                onCardEdit={onCardEdit}
-              />
-            ) : (
-              <PlaceholderBlock
-                key={block.id}
-                block={block}
-                weekdayCount={visibleWeekdays.length}
-                onCardEdit={onCardEdit}
-              />
-            ),
-          )}
+          {schedule.blocks.map((block) => (
+            <ScheduleBlockView
+              key={block.id}
+              block={block}
+              weekdays={visibleWeekdays}
+              activeCellId={activeCellId}
+              onCourseClick={onCourseClick}
+              onCardEdit={onCardEdit}
+            />
+          ))}
         </div>
       </div>
 
-      {mode === "detached" && (
-        <div className="resize-grip" onPointerDown={onResizeStart} title="调整大小" />
-      )}
+      {mode === "detached" && <div className="resize-grip" onPointerDown={onResizeStart} title="调整大小" />}
     </section>
   );
 }
 
-function CourseBlock({
+function ScheduleBlockView({
   block,
   weekdays,
   activeCellId,
   onCourseClick,
   onCardEdit,
 }: {
-  block: ScheduleCourseBlock;
+  block: Schedule["blocks"][number];
   weekdays: Weekday[];
   activeCellId: string | null;
   onCourseClick: (courseId: string) => void;
@@ -146,11 +124,7 @@ function CourseBlock({
   } as CSSProperties;
 
   return (
-    <section
-      className={`schedule-block course-block ${block.phase}-block tone-${block.cardTone}`}
-      aria-label={block.title}
-      style={blockStyle}
-    >
+    <section className={`schedule-block tone-${block.cardTone}`} aria-label={block.title} style={blockStyle}>
       <div className="period-column block-column">
         {block.rows.map((row, index) => (
           <ColumnItem key={row.id} showDivider={index > 0}>
@@ -159,64 +133,67 @@ function CourseBlock({
         ))}
       </div>
 
-      {weekdays.map((weekday) => (
-        <div className="course-column block-column" key={`${block.id}-${weekday}`}>
-          {block.rows.map((row, index) => {
-            const course = row.courses[weekday];
-            return (
-              <ColumnItem key={course.id} showDivider={index > 0}>
-                <button
-                  className={`course-card ${course.id === activeCellId ? "is-active" : ""}`}
-                  style={toCardCssVars(course.style)}
-                  data-course-id={course.id}
-                  type="button"
-                  title={`${course.title} ${course.room ?? ""}`}
-                  onClick={() => {
-                    onCourseClick(course.id);
-                    onCardEdit({ type: "course", courseId: course.id });
-                  }}
-                >
-                  <span>{course.title}</span>
-                  {course.room && <small>{course.room}</small>}
-                </button>
+      <div className="schedule-row-cells">
+        {block.rows.map((row, index) => (
+          <div className={row.type === "course" ? "course-row-grid" : "merged-row-grid"} key={row.id}>
+            {row.type === "course" ? (
+              weekdays.map((weekday) => (
+                <ColumnItem key={`${row.id}-${weekday}`} showDivider={index > 0}>
+                  <CourseCard course={row.courses[weekday]} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
+                </ColumnItem>
+              ))
+            ) : (
+              <ColumnItem showDivider={index > 0}>
+                <MergedSlot row={row} />
               </ColumnItem>
-            );
-          })}
-        </div>
-      ))}
+            )}
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
 
-function PlaceholderBlock({
-  block,
-  weekdayCount,
+function CourseCard({
+  course,
+  activeCellId,
+  onCourseClick,
   onCardEdit,
 }: {
-  block: SchedulePlaceholderBlock;
-  weekdayCount: number;
+  course: ScheduleCourseRow["courses"][Weekday];
+  activeCellId: string | null;
+  onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
 }) {
   return (
-    <section className="schedule-block placeholder-block noon-block">
-      <div className="period-column block-column">
-        <ColumnItem>
-          <PeriodCard period={block.period} onClick={() => onCardEdit({ type: "period", periodId: block.period.id })} />
-        </ColumnItem>
-      </div>
-      <div className="merged-cell" style={{ gridColumn: `span ${weekdayCount}` }}>
-        <button
-          className="merged-card"
-          type="button"
-          data-placeholder-id={block.id}
-          style={toCardCssVars(block.style)}
-          onClick={() => onCardEdit({ type: "placeholder", blockId: block.id })}
-        >
-          <strong>{block.title}</strong>
-          {block.subtitle && <span>{block.subtitle}</span>}
-        </button>
-      </div>
-    </section>
+    <button
+      className={`course-card ${course.id === activeCellId ? "is-active" : ""}`}
+      style={toCardCssVars(course.style)}
+      data-course-id={course.id}
+      type="button"
+      title={`${course.title} ${course.room ?? ""}`}
+      onClick={() => {
+        onCourseClick(course.id);
+        onCardEdit({ type: "course", courseId: course.id });
+      }}
+    >
+      <span>{course.title}</span>
+      {course.room && <small>{course.room}</small>}
+    </button>
+  );
+}
+
+function MergedSlot({ row }: { row: ScheduleMergedRow }) {
+  return (
+    <button
+      className="merged-card"
+      type="button"
+      data-period-id={row.period.id}
+      style={toCardCssVars(row.style)}
+    >
+      <strong>{row.title}</strong>
+      {row.subtitle && <span>{row.subtitle}</span>}
+    </button>
   );
 }
 
@@ -237,13 +214,7 @@ function ColumnItem({
 
 function PeriodCard({ period, onClick }: { period: PeriodInfo; onClick: () => void }) {
   return (
-    <button
-      className="period-card"
-      type="button"
-      data-period-id={period.id}
-      style={toCardCssVars(period.style)}
-      onClick={onClick}
-    >
+    <button className="period-card" type="button" data-period-id={period.id} style={toCardCssVars(period.style)} onClick={onClick}>
       <strong>{period.label}</strong>
       <span>{period.time}</span>
     </button>

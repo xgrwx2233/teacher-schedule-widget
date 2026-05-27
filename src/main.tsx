@@ -1,15 +1,11 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
-import { BlockSettingsWindowHost } from "./app/BlockSettingsWindowHost";
-import { BlockTypeConfirmWindowHost } from "./app/BlockTypeConfirmWindowHost";
 import { CardSettingsWindowHost } from "./app/CardSettingsWindowHost";
 import { InteractionProxyHost } from "./app/InteractionProxyHost";
 import { SettingsWindowHost } from "./app/SettingsWindowHost";
 import { WidgetMenuWindowHost } from "./app/WidgetMenuWindowHost";
 import {
-  BLOCK_SETTINGS_WINDOW_LABEL,
-  BLOCK_TYPE_CONFIRM_WINDOW_LABEL,
   CARD_SETTINGS_WINDOW_LABEL,
   SETTINGS_WINDOW_LABEL,
   WIDGET_MENU_WINDOW_LABEL,
@@ -23,11 +19,7 @@ const windowLabel =
 const RootComponent =
   windowLabel === SETTINGS_WINDOW_LABEL
     ? SettingsWindowHost
-    : windowLabel === BLOCK_SETTINGS_WINDOW_LABEL
-      ? BlockSettingsWindowHost
-      : windowLabel === BLOCK_TYPE_CONFIRM_WINDOW_LABEL
-        ? BlockTypeConfirmWindowHost
-      : windowLabel === CARD_SETTINGS_WINDOW_LABEL
+    : windowLabel === CARD_SETTINGS_WINDOW_LABEL
         ? CardSettingsWindowHost
         : windowLabel === INTERACTION_PROXY_LABEL
           ? InteractionProxyHost

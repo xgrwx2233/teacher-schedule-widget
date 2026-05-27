@@ -12,9 +12,7 @@ import type {
   CourseScheduleRule,
   PeriodInfo,
   Schedule,
-  ScheduleBlock,
-  ScheduleCourseBlock,
-  SchedulePlaceholderBlock,
+  ScheduleRow,
   Weekday,
   WorkdayMode,
 } from "../features/schedule/types";
@@ -35,7 +33,6 @@ import {
   CARD_SETTINGS_WINDOW_STATE_EVENT,
   CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT,
   CARD_SETTINGS_WINDOW_UPDATE_EVENT,
-  BLOCK_SETTINGS_WINDOW_STATE_EVENT,
   SETTINGS_WINDOW_LABEL,
   SETTINGS_WINDOW_CLOSE_EVENT,
   SETTINGS_WINDOW_STATE_EVENT,
@@ -50,7 +47,6 @@ import {
   type CardSettingsWindowStatePayload,
   type CardSettingsWindowUpdatePayload,
   type CardSettingsWindowStateRequestPayload,
-  type BlockSettingsWindowStatePayload,
   type SettingsWindowStatePayload,
   type SettingsWindowStateRequestPayload,
   type SettingsWindowUpdatePayload,
@@ -282,35 +278,29 @@ export function App() {
 
   useEffect(() => {
     const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
-      let nextSettings = event.payload.settings;
-      let nextSchedule: Schedule | null = null;
+      const nextSchedule = applyBlockSettingsToSchedule(scheduleRef.current, event.payload.settings.blockSettings);
+      const nextSettings = {
+        ...event.payload.settings,
+        appearance: {
+          ...event.payload.settings.appearance,
+          blockHeights: buildBlockHeightsFromRows(event.payload.settings.blockSettings),
+        },
+      };
 
-      if (event.payload.applyBlockSettings) {
-        const scaleFactor = window.devicePixelRatio || 1;
-        const measuredRowHeight = measureCurrentCourseRowHeight();
-        if (measuredRowHeight) {
-          courseRowHeightRef.current = courseRowHeightRef.current ?? measuredRowHeight;
-        }
-        const rowHeight = Math.round((courseRowHeightRef.current ?? measuredRowHeight ?? DEFAULT_COURSE_ROW_HEIGHT) * scaleFactor);
-        nextSchedule = applyBlockSettingsToSchedule(scheduleRef.current, event.payload.settings.blockSettings);
-        nextSettings = {
-          ...event.payload.settings,
-          appearance: {
-            ...event.payload.settings.appearance,
-            blockHeights: buildBlockHeightsFromRows(event.payload.settings.blockSettings),
-          },
-        };
-        scheduleRef.current = nextSchedule;
-        void resizeDetachedWidgetToSchedule(nextSchedule, rowHeight);
+      const scaleFactor = window.devicePixelRatio || 1;
+      const measuredRowHeight = measureCurrentCourseRowHeight();
+      if (measuredRowHeight) {
+        courseRowHeightRef.current = courseRowHeightRef.current ?? measuredRowHeight;
       }
+      const rowHeight = Math.round((courseRowHeightRef.current ?? measuredRowHeight ?? DEFAULT_COURSE_ROW_HEIGHT) * scaleFactor);
 
       settingsRef.current = nextSettings;
+      scheduleRef.current = nextSchedule;
       settingsSectionRef.current = event.payload.activeSection;
       setSettings(nextSettings);
       setSettingsSection(event.payload.activeSection);
-      if (nextSchedule) {
-        setSchedule(nextSchedule);
-      }
+      setSchedule(nextSchedule);
+      void resizeDetachedWidgetToSchedule(nextSchedule, rowHeight);
     });
 
     const unlistenRequest = listen<SettingsWindowStateRequestPayload>(SETTINGS_WINDOW_STATE_REQUEST_EVENT, (event) => {
@@ -607,24 +597,21 @@ async function emitWidgetMenuState(mode: WindowMode) {
 
 function collectProxyHitboxes() {
   return Array.from(
-    document.querySelectorAll<HTMLElement>("[data-menu-button], [data-course-id], [data-period-id], [data-placeholder-id]"),
+    document.querySelectorAll<HTMLElement>("[data-menu-button], [data-course-id], [data-period-id]"),
   )
     .map((element) => {
       const rect = element.getBoundingClientRect();
       const courseId = element.dataset.courseId;
       const periodId = element.dataset.periodId;
-      const placeholderId = element.dataset.placeholderId;
       const kind = element.dataset.menuButton
         ? "menu-button"
         : courseId
           ? "course"
-          : periodId
-            ? "period"
-            : "placeholder";
+          : "period";
 
       return {
         kind,
-        id: courseId ?? periodId ?? placeholderId,
+        id: courseId ?? periodId,
         left: rect.left,
         top: rect.top,
         right: rect.right,
@@ -649,8 +636,6 @@ function isSameSelectedCard(left: SelectedCard, right: SelectedCard): boolean {
       return right.type === "course" && left.courseId === right.courseId;
     case "period":
       return right.type === "period" && left.periodId === right.periodId;
-    case "placeholder":
-      return right.type === "placeholder" && left.blockId === right.blockId;
   }
 }
 
@@ -679,10 +664,6 @@ function handleProxyWidgetHit(
   if (hit.kind === "period" && hit.id) {
     void openCardSettings({ type: "period", periodId: hit.id });
     return;
-  }
-
-  if (hit.kind === "placeholder" && hit.id) {
-    void openCardSettings({ type: "placeholder", blockId: hit.id });
   }
 }
 
@@ -738,10 +719,6 @@ async function resizeDetachedWidgetToSchedule(schedule: Schedule, rowHeight: num
   const blockGap = Math.round(14 * scaleFactor);
 
   const blockHeights = schedule.blocks.map((block) => {
-    if (block.type === "placeholder") {
-      return Math.round(rowHeight * 1.15);
-    }
-
     return Math.max(rowHeight * Math.max(1, block.rows.length), rowHeight);
   });
 
@@ -760,7 +737,7 @@ async function resizeDetachedWidgetToSchedule(schedule: Schedule, rowHeight: num
 }
 
 function blockHeightUnits(block: BlockSettingsState["blocks"][number]): number {
-  return block.type === "placeholder" ? 1.15 : Math.max(1, block.periods.length);
+  return block.periods.some((period) => period.type === "merged") ? 1.15 : Math.max(1, block.periods.length);
 }
 
 function calculateWeekNumber(startDate: string, currentDate: Date): number {
@@ -778,9 +755,9 @@ function calculateWeekNumber(startDate: string, currentDate: Date): number {
 function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedule: Schedule): CSSProperties {
   const blockTracks = schedule.blocks
     .map((block) => {
-      const fallback = block.type === "placeholder" ? 1.15 : Math.max(1, block.rows.length);
+      const fallback = block.rows.some((row) => row.type === "merged") ? 1.15 : Math.max(1, block.rows.length);
       const height = appearance.blockHeights[block.id] ?? fallback;
-      const minHeight = block.type === "placeholder" ? "44px" : "0";
+      const minHeight = block.rows.some((row) => row.type === "merged") ? "44px" : "0";
       return `minmax(${minHeight}, ${height}fr)`;
     })
     .join(" ");
@@ -834,20 +811,7 @@ function createDraftForCard(
       fontSize: period?.style?.fontSize ?? 12,
     };
   }
-
-  const block = schedule.blocks.find(
-    (item): item is SchedulePlaceholderBlock => item.type === "placeholder" && item.id === card.blockId,
-  );
-
-  return {
-    ...base,
-    title: block?.title ?? "",
-    secondary: block?.subtitle ?? "",
-    backgroundColor: block?.style?.backgroundColor ?? "#e3f2fd",
-    color: block?.style?.color ?? "#006b70",
-    fontFamily: block?.style?.fontFamily ?? base.fontFamily,
-    fontSize: block?.style?.fontSize ?? 18,
-  };
+  return base;
 }
 
 function applyCardDraft(schedule: Schedule, selectedCard: SelectedCard | null, draft: CardDraft): Schedule {
@@ -862,148 +826,69 @@ function applyCardDraft(schedule: Schedule, selectedCard: SelectedCard | null, d
 
 function applyBlockSettingsToSchedule(schedule: Schedule, nextBlockSettings: BlockSettingsState): Schedule {
   const dayIds = schedule.days.map((day) => day.id);
-  const courseTemplates = schedule.blocks.filter((block): block is ScheduleCourseBlock => block.type === "course");
-  const placeholderTemplates = schedule.blocks.filter(
-    (block): block is SchedulePlaceholderBlock => block.type === "placeholder",
-  );
-
-  const blocks = nextBlockSettings.blocks.map((settingBlock, index) => {
+  const blocks = nextBlockSettings.blocks.map((settingBlock) => {
     const existing = schedule.blocks.find((block) => block.id === settingBlock.id);
+    const rowTemplates = existing?.rows ?? [];
 
-    if (settingBlock.type === "course") {
-      const template =
-        existing?.type === "course"
-          ? existing
-          : courseTemplates[Math.min(index, courseTemplates.length - 1)] ?? courseTemplates[0];
-
-      if (!template) {
-        return buildCourseBlockFromSettings(settingBlock, dayIds, index);
-      }
-
-      return {
-        ...template,
-        id: settingBlock.id,
-        title: settingBlock.name,
-        phase: template.phase,
-        cardTone: template.cardTone,
-        style: {
-          backgroundColor: settingBlock.cardBackgroundColor,
-        },
-        cardCornerRadius: settingBlock.cardCornerRadius,
-        rows: settingBlock.periods.map((periodSetting, rowIndex) => {
-          const row = template.rows.find((item) => item.period.id === periodSetting.id) ?? template.rows[rowIndex];
-
+    return {
+      id: settingBlock.id,
+      title: settingBlock.name,
+      style: {
+        backgroundColor: settingBlock.cardBackgroundColor,
+      },
+      cardTone: existing?.cardTone ?? "wheat",
+      cardCornerRadius: settingBlock.cardCornerRadius,
+      rows: settingBlock.periods.map((periodSetting, rowIndex) => {
+        const templateRow = rowTemplates.find((item) => item.id === periodSetting.id) ?? rowTemplates[rowIndex];
+        if (periodSetting.type === "merged") {
           return {
-            ...(row ?? createEmptyCourseRow(settingBlock.id, periodSetting, dayIds, settingBlock.cardBackgroundColor)),
+            id: periodSetting.id,
+            type: "merged",
             period: {
-              ...(row?.period ?? {}),
+              ...(templateRow && templateRow.type === "merged" ? templateRow.period : {}),
               id: periodSetting.id,
               label: periodSetting.name,
               time: `${periodSetting.startTime}-${periodSetting.endTime}`,
             },
-            courses: Object.fromEntries(
-              dayIds.map((weekday) => {
-                const course = row?.courses[weekday] ?? createEmptyCourse(settingBlock.id, periodSetting.id, weekday);
-                return [
-                  weekday,
-                  {
-                    ...course,
-                    style: {
-                      ...course.style,
-                      backgroundColor: settingBlock.cardBackgroundColor,
-                    },
+            title: settingBlock.name || periodSetting.name,
+            subtitle: templateRow && templateRow.type === "merged" ? templateRow.subtitle : "",
+            style: {
+              backgroundColor: settingBlock.cardBackgroundColor,
+            },
+          } satisfies ScheduleRow;
+        }
+
+        const row = templateRow && templateRow.type === "course" ? templateRow : null;
+        return {
+          id: `${settingBlock.id}-${periodSetting.id}`,
+          type: "course",
+          period: {
+            ...(row?.period ?? {}),
+            id: periodSetting.id,
+            label: periodSetting.name,
+            time: `${periodSetting.startTime}-${periodSetting.endTime}`,
+          },
+          courses: Object.fromEntries(
+            dayIds.map((weekday) => {
+              const course = row?.courses[weekday] ?? createEmptyCourse(settingBlock.id, periodSetting.id, weekday);
+              return [
+                weekday,
+                {
+                  ...course,
+                  style: {
+                    ...course.style,
+                    backgroundColor: settingBlock.cardBackgroundColor,
                   },
-                ];
-              }),
-            ) as Record<Weekday, CourseCell>,
-          };
-        }),
-      };
-    }
-
-    const template =
-      existing?.type === "placeholder"
-        ? existing
-        : placeholderTemplates[Math.min(index, placeholderTemplates.length - 1)] ?? placeholderTemplates[0];
-
-    if (!template) {
-      return buildPlaceholderBlockFromSettings(settingBlock);
-    }
-
-    const periodSetting = settingBlock.periods[0];
-    return {
-      ...template,
-      id: settingBlock.id,
-      period: {
-        ...template.period,
-        id: periodSetting?.id ?? template.period.id,
-        label: periodSetting?.name ?? template.period.label,
-        time: periodSetting ? `${periodSetting.startTime}-${periodSetting.endTime}` : template.period.time,
-      },
-      title: settingBlock.name,
-      style: {
-        ...template.style,
-        backgroundColor: settingBlock.cardBackgroundColor,
-      },
-      cardCornerRadius: settingBlock.cardCornerRadius,
+                },
+              ];
+            }),
+          ) as Record<Weekday, CourseCell>,
+        } satisfies ScheduleRow;
+      }),
     };
   });
 
   return { ...schedule, blocks };
-}
-
-function buildCourseBlockFromSettings(
-  settingBlock: Extract<BlockSettingsState["blocks"][number], { type: "course" }>,
-  dayIds: Weekday[],
-  index: number,
-): ScheduleCourseBlock {
-  const rows = settingBlock.periods.map((period) => ({
-    id: `${settingBlock.id}-${period.id}`,
-    period: {
-      id: period.id,
-      label: period.name,
-      time: `${period.startTime}-${period.endTime}`,
-    },
-    courses: Object.fromEntries(
-      dayIds.map((weekday) => [
-        weekday,
-        createEmptyCourse(settingBlock.id, period.id, weekday, settingBlock.cardBackgroundColor),
-      ]),
-    ) as Record<Weekday, CourseCell>,
-  }));
-
-  return {
-    id: settingBlock.id,
-    type: "course",
-    title: settingBlock.name,
-    phase: index === 0 ? "morning" : "afternoon",
-    cardTone: "wheat",
-    style: {
-      backgroundColor: settingBlock.cardBackgroundColor,
-    },
-    cardCornerRadius: settingBlock.cardCornerRadius,
-    rows,
-  };
-}
-
-function createEmptyCourseRow(
-  blockId: string,
-  period: { id: string; name: string; startTime: string; endTime: string },
-  dayIds: Weekday[],
-  backgroundColor: string,
-) {
-  return {
-    id: `${blockId}-${period.id}`,
-    period: {
-      id: period.id,
-      label: period.name,
-      time: `${period.startTime}-${period.endTime}`,
-    },
-    courses: Object.fromEntries(dayIds.map((weekday) => [weekday, createEmptyCourse(blockId, period.id, weekday, backgroundColor)])) as Record<
-      Weekday,
-      CourseCell
-    >,
-  };
 }
 
 function createEmptyCourse(blockId: string, periodId: string, weekday: Weekday, backgroundColor = "#fff8e1"): CourseCell {
@@ -1021,49 +906,23 @@ function createEmptyCourse(blockId: string, periodId: string, weekday: Weekday, 
   };
 }
 
-function buildPlaceholderBlockFromSettings(
-  settingBlock: Extract<BlockSettingsState["blocks"][number], { type: "placeholder" }>,
-): SchedulePlaceholderBlock {
-  const period = settingBlock.periods[0];
-  return {
-    id: settingBlock.id,
-    type: "placeholder",
-    phase: "noon",
-    period: {
-      id: period.id,
-      label: period.name,
-      time: `${period.startTime}-${period.endTime}`,
-    },
-    title: settingBlock.name,
-    subtitle: "",
-    style: {
-      backgroundColor: settingBlock.cardBackgroundColor,
-    },
-    cardCornerRadius: settingBlock.cardCornerRadius,
-  };
-}
-
 function applyDraftToBlock(
-  block: ScheduleBlock,
+  block: Schedule["blocks"][number],
   selectedCard: SelectedCard,
   draft: CardDraft,
   style: CardStyle,
-): ScheduleBlock {
-  if (block.type === "placeholder") {
-    if (selectedCard.type === "placeholder" && selectedCard.blockId === block.id) {
-      return { ...block, title: draft.title, subtitle: draft.secondary, style };
-    }
-
-    if (selectedCard.type === "period" && selectedCard.periodId === block.period.id) {
-      return { ...block, period: { ...block.period, label: draft.title, time: draft.secondary, style } };
-    }
-
-    return block;
-  }
-
+): Schedule["blocks"][number] {
   return {
     ...block,
     rows: block.rows.map((row) => {
+      if (row.type === "merged") {
+        if (selectedCard.type === "period" && selectedCard.periodId === row.period.id) {
+          return { ...row, period: { ...row.period, label: draft.title, time: draft.secondary, style }, title: draft.title, subtitle: draft.secondary };
+        }
+
+        return row;
+      }
+
       if (selectedCard.type === "period" && selectedCard.periodId === row.period.id) {
         return { ...row, period: { ...row.period, label: draft.title, time: draft.secondary, style } };
       }
@@ -1099,11 +958,11 @@ function applyDraftToBlock(
 
 function findCourse(schedule: Schedule, courseId: string): CourseCell | undefined {
   for (const block of schedule.blocks) {
-    if (block.type !== "course") {
-      continue;
-    }
-
     for (const row of block.rows) {
+      if (row.type !== "course") {
+        continue;
+      }
+
       const course = Object.values(row.courses).find((item) => item.id === courseId);
       if (course) {
         return course;
@@ -1116,15 +975,9 @@ function findCourse(schedule: Schedule, courseId: string): CourseCell | undefine
 
 function findPeriod(schedule: Schedule, periodId: string): PeriodInfo | undefined {
   for (const block of schedule.blocks) {
-    if (block.type === "placeholder" && block.period.id === periodId) {
-      return block.period;
-    }
-
-    if (block.type === "course") {
-      const row = block.rows.find((item) => item.period.id === periodId);
-      if (row) {
-        return row.period;
-      }
+    const row = block.rows.find((item) => item.period.id === periodId);
+    if (row) {
+      return row.period;
     }
   }
 
@@ -1199,7 +1052,7 @@ function dedupePoints(points: Array<{ x: number; y: number }>): Array<{ x: numbe
 function hitTestForwardedElement(element: HTMLElement | null): ForwardedClickHit {
   const menuButton = Boolean(element?.closest("[data-menu-button]"));
   const menuActionElement = element?.closest<HTMLElement>("[data-menu-action]");
-  const editableElement = element?.closest<HTMLElement>("[data-course-id], [data-period-id], [data-placeholder-id]");
+  const editableElement = element?.closest<HTMLElement>("[data-course-id], [data-period-id]");
 
   const menuAction = readMenuAction(menuActionElement);
   const editableCard = readEditableCard(editableElement);
@@ -1223,16 +1076,11 @@ function readEditableCard(element: HTMLElement | null | undefined): SelectedCard
     return { type: "period", periodId };
   }
 
-  const blockId = element?.dataset.placeholderId;
-  if (blockId) {
-    return { type: "placeholder", blockId };
-  }
-
   return null;
 }
 
 function findEditableCardByGeometry(x: number, y: number): SelectedCard | null {
-  const elements = document.querySelectorAll<HTMLElement>("[data-course-id], [data-period-id], [data-placeholder-id]");
+  const elements = document.querySelectorAll<HTMLElement>("[data-course-id], [data-period-id]");
 
   for (const element of elements) {
     const rect = element.getBoundingClientRect();
