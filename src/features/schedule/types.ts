@@ -49,21 +49,11 @@ export type CourseCell = {
 
 export type ScheduleCourseRow = {
   id: string;
-  type: "course";
   period: PeriodInfo;
   courses: Record<Weekday, CourseCell>;
 };
 
 export type ScheduleRow = ScheduleCourseRow;
-
-export type ScheduleBlock = {
-  id: string;
-  title?: string;
-  cardTone: "wheat" | "blue";
-  style?: CardStyle;
-  cardCornerRadius?: number;
-  rows: ScheduleRow[];
-};
 
 export type Schedule = {
   id: string;
@@ -72,5 +62,5 @@ export type Schedule = {
   termLabel: string;
   activeWeekday: Weekday;
   days: ScheduleDay[];
-  blocks: ScheduleBlock[];
+  rows: ScheduleRow[];
 };

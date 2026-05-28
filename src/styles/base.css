@@ -1,4 +1,4 @@
-/*
+﻿/*
   Global reset for a transparent Tauri window.
   The widget background is drawn by .schedule-card, not by body, so the desktop
   wallpaper remains visible around rounded corners.
@@ -54,7 +54,7 @@ button {
 .widget-root {
   /*
     Layout tokens. These drive the entire timetable.
-    - --layout-columns is shared by the date row and every schedule block.
+    - --layout-columns is shared by the date row and every schedule grid.
     - clamp() keeps proportions polished when the detached window is resized.
   */
   --panel-opacity: 0.9;
@@ -65,7 +65,6 @@ button {
   --layout-columns: var(--period-column-width) repeat(var(--day-count, 5), minmax(0, 1fr));
   --column-gap: 10px;
   --content-gap: 12px;
-  --block-gap: 14px;
   --date-row-height: 48px;
   --period-column-min: 52px;
   --title-size: clamp(12px, 1.55vmin, 16px);
@@ -82,9 +81,7 @@ button {
   --row-divider-style: solid;
   --row-divider-thickness: 1px;
   --row-divider-offset: 4px;
-  --block-card-bg: #fff8e1;
-  --block-card-radius: 10px;
-  --schedule-block-tracks: minmax(0, 4fr) minmax(44px, 1.15fr) minmax(0, 4fr);
+  --course-card-radius: 10px;
   width: 100vw;
   height: 100vh;
   min-width: 360px;
@@ -111,7 +108,7 @@ button {
 .schedule-card {
   /*
     Main responsive grid:
-    toolbar is fixed, date row scales gently, timetable blocks consume all
+    toolbar is fixed, date row scales gently, timetable rows consume all
     remaining height. min-height: 0 is required so children can shrink cleanly.
   */
   width: 100%;
@@ -435,16 +432,7 @@ button {
   background: var(--card-bg, #e8f5e9);
   color: var(--card-fg, #2f6f4e);
   font-family: var(--card-font, inherit);
-}
-
-.preview-placeholder {
-  min-height: 128px;
-  background: var(--card-bg, #e3f2fd);
-  color: var(--card-fg, #006b70);
-  font-family: var(--card-font, inherit);
-}
-
-.card-settings-form {
+}.card-settings-form {
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -595,30 +583,7 @@ button {
   padding: 0 9px;
   background: #ffffff;
   color: #111827;
-}
-
-.appearance-block-heights {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-
-.appearance-block-heights .appearance-control {
-  grid-template-columns: 52px minmax(0, 1fr) 44px;
-  align-items: center;
-}
-
-.appearance-block-heights small {
-  min-width: 0;
-  color: #6b7280;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.appearance-control {
+}.appearance-control {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -658,17 +623,9 @@ button {
   background: #f9fafb;
 }
 
-.block-settings-section {
-  min-height: 0;
-  gap: 12px;
-}
 
-.block-settings-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
+
+
 
 .timeline-toolbar {
   position: sticky;
@@ -678,13 +635,7 @@ button {
   background: #ffffff;
 }
 
-.block-settings-toolbar-left,
-.block-settings-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
+
 
 .toolbar-action {
   height: 32px;
@@ -707,417 +658,7 @@ button {
 .toolbar-action:disabled {
   opacity: 0.42;
   cursor: not-allowed;
-}
-
-.block-container-list {
-  min-height: 0;
-  display: grid;
-  gap: 16px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.block-container-card {
-  --block-accent: #7c3aed;
-  position: relative;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  align-items: start;
-  gap: 12px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  overflow: visible;
-  transition:
-    transform 120ms ease,
-    opacity 120ms ease,
-    filter 120ms ease;
-}
-
-.block-container-card.is-selected {
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.block-container-card.has-conflict {
-  border-color: transparent;
-}
-
-.block-container-card.is-dragging {
-  opacity: 0.82;
-  filter: drop-shadow(0 8px 16px rgba(15, 23, 42, 0.14));
-  transform: scale(1.015);
-  user-select: none;
-  z-index: 2;
-}
-
-.block-container-card.is-drop-target {
-  outline: 0;
-}
-
-.block-container-card.is-drop-target::after {
-  content: "";
-  position: absolute;
-  top: -7px;
-  left: 2px;
-  right: 2px;
-  height: 2px;
-  border-radius: 999px;
-  background: #4f46e5;
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
-  pointer-events: none;
-}
-
-.block-container-card::before {
-  content: none;
-}
-
-.block-container-header {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  min-width: 0;
-  min-height: 32px;
-  padding: 2px 0;
-  border: 0;
-  border-radius: 0;
-  border-bottom: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.block-container-header::before {
-  content: none;
-}
-
-.block-drag-handle,
-.timeline-row-handle {
-  width: 34px;
-  min-width: 34px;
-  height: 28px;
-  border: 0;
-  padding: 0;
-  color: #94a3b8;
-  background: transparent;
-  cursor: grab;
-  font-size: 16px;
-  font-weight: 900;
-  letter-spacing: -2px;
-  user-select: none;
-}
-
-.block-type-select,
-.block-radius-control select,
-.period-delete-button,
-.timeline-period-row input {
-  min-width: 0;
-}
-
-.block-type-select {
-  height: 32px;
-  border: 1px solid #dbe1ea;
-  border-radius: 8px;
-  padding: 0 9px;
-  background: #ffffff;
-  color: #374151;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.block-style-area {
-  position: relative;
-  display: flex;
-  justify-content: flex-start;
-}
-
-.block-settings-icon-button {
-  width: 22px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #94a3b8;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-  font-size: 14px;
-  font-weight: 900;
-  letter-spacing: -2px;
-  transition:
-    background 120ms ease,
-    color 120ms ease,
-    transform 120ms ease;
-}
-
-.block-settings-icon-button:hover {
-  background: #f1f5f9;
-  color: #4f46e5;
-}
-
-.block-container-card.is-dragging .block-settings-icon-button {
-  cursor: grabbing;
-  color: #4f46e5;
-  transform: translateY(-1px);
-}
-
-.block-name-button {
-  min-width: 0;
-  flex: 0 0 48px;
-  width: 48px;
-  min-height: 28px;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 2px;
-  border: 0;
-  padding: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #1f2937;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1.25;
-  text-align: center;
-  word-break: keep-all;
-  box-shadow: none;
-}
-
-.block-name-button:hover {
-  background: transparent;
-  box-shadow: none;
-}
-
-.block-name-button small {
-  color: #7c3aed;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0;
-  opacity: 0.92;
-}
-
-.block-name-text {
-  max-width: 100%;
-  overflow: hidden;
-  color: #1f2937;
-  font-size: 15px;
-  line-height: 1.2;
-  font-weight: 850;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  text-align: center;
-}
-
-.block-name-button input {
-  width: 48px;
-  min-width: 0;
-  height: 26px;
-  border: 1px solid #d1d5db;
-  border-radius: 7px;
-  padding: 0 5px;
-  color: #111827;
-  font-size: 14px;
-  font-weight: 800;
-  text-align: center;
-}
-
-.block-settings-icon-button.is-active {
-  border-color: #c4b5fd;
-  background: #f5f3ff;
-  color: #6d28d9;
-}
-
-.block-delete-button {
-  width: 22px;
-  height: 24px;
-  flex: 0 0 22px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #e5e7eb;
-  border-radius: 7px;
-  background: #ffffff;
-  color: #9f1239;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.block-delete-button:hover {
-  border-color: #fecdd3;
-  background: #fff1f2;
-}
-
-.block-radius-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.block-radius-control select {
-  width: 58px;
-  height: 32px;
-  border: 1px solid #dbe1ea;
-  border-radius: 8px;
-  padding: 0 6px;
-  background: #ffffff;
-}
-
-.block-error-label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: #fef2f2;
-  color: #b91c1c;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.block-move-buttons button,
-.period-delete-button {
-  height: 28px;
-  min-width: 28px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #374151;
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.block-move-buttons {
-  display: grid;
-  gap: 4px;
-}
-
-.block-move-buttons button {
-  width: 28px;
-  height: 14px;
-  min-width: 28px;
-  padding: 0;
-  border-radius: 6px;
-  font-size: 10px;
-  line-height: 1;
-}
-
-.block-settings-dialog {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 0;
-  border: 1px solid #ddd6fe;
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow:
-    0 10px 24px rgba(15, 23, 42, 0.18),
-    0 0 0 2px rgba(124, 58, 237, 0.08);
-  overflow: hidden;
-}
-
-.block-settings-dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 8px 4px;
-  border-bottom: 1px solid #eef2f7;
-  background: #fafafa;
-  user-select: none;
-  -webkit-app-region: drag;
-}
-
-.block-settings-dialog-header button,
-.block-settings-dialog-header input,
-.block-settings-dialog-header select {
-  -webkit-app-region: no-drag;
-}
-
-.block-settings-dialog-title {
-  min-width: 0;
-  display: grid;
-  gap: 1px;
-}
-
-.block-settings-dialog-header strong {
-  color: #111827;
-  font-size: 12px;
-  line-height: 1.2;
-}
-
-.block-settings-dialog-header span {
-  color: #64748b;
-  font-size: 10px;
-}
-
-.block-settings-dialog-header button {
-  width: 20px;
-  height: 20px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #475569;
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-}
-
-.block-settings-dialog-header button:hover {
-  border-color: #d8b4fe;
-  color: #6d28d9;
-}
-
-.block-settings-dialog-body {
-  display: grid;
-  align-content: start;
-  gap: 7px;
-  padding: 8px;
-}
-
-.block-settings-dialog-body label {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
-  color: #374151;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.block-settings-dialog-body select,
-.block-settings-dialog-body input[type="color"] {
-  width: 100%;
-  height: 24px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  padding: 0 6px;
-  background: #ffffff;
-  color: #111827;
-  font-size: 11px;
-}
-
-.block-settings-dialog-body input[type="color"] {
-  padding: 2px;
-}
-
-.confirm-dialog-window {
+}.confirm-dialog-window {
   width: 100%;
   height: 100%;
   display: grid;
@@ -1179,136 +720,7 @@ button {
 .confirm-dialog-actions button {
   -webkit-app-region: no-drag;
   pointer-events: auto;
-}
-
-.block-content-card {
-  position: relative;
-  min-width: 0;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  overflow: hidden;
-}
-
-.block-content-card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 4px;
-  height: 100%;
-  background: var(--block-accent);
-}
-
-.block-container-card.is-selected .block-content-card {
-  border-color: rgba(124, 58, 237, 0.45);
-  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.12);
-}
-
-.block-container-card.has-conflict .block-content-card {
-  border-color: rgba(220, 38, 38, 0.35);
-}
-
-.block-period-list {
-  display: grid;
-}
-
-.period-row {
-  display: grid;
-  grid-template-columns: minmax(76px, 96px) 30px 24px 26px 26px;
-  align-items: center;
-  gap: 6px;
-  justify-content: end;
-  min-height: 54px;
-  padding: 7px 8px 7px 12px;
-  border-top: 1px solid #eef2f7;
-  background: #ffffff;
-  transition:
-    background 120ms ease,
-    transform 120ms ease,
-    opacity 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.period-row:first-child {
-  border-top: 0;
-}
-
-.period-row:hover {
-  background: #f8fafc;
-}
-
-.period-row.is-selected {
-  background: #f5f3ff;
-}
-
-.period-row.is-conflict {
-  background: #fff1f2;
-}
-
-.period-row.is-dragging {
-  opacity: 0.84;
-  transform: scale(1.01);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
-  user-select: none;
-  z-index: 2;
-}
-
-.period-row.is-drop-target {
-  outline: 0;
-  box-shadow: inset 0 2px 0 #4f46e5;
-}
-
-.period-row input {
-  height: 32px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  padding: 0 9px;
-  background: #ffffff;
-  color: #111827;
-  font-size: 12px;
-}
-
-.period-card-inline {
-  width: 100%;
-  min-width: 0;
-  height: auto;
-  min-height: 38px;
-  display: grid;
-  grid-template-rows: auto auto;
-  align-content: center;
-  justify-items: start;
-  gap: 3px;
-  padding: 3px 0;
-  border: 0;
-  background: transparent;
-  color: #111827;
-  text-align: left;
-}
-
-.period-card-inline strong {
-  max-width: 100%;
-  overflow: hidden;
-  color: #111827;
-  font-size: 15px;
-  font-weight: 850;
-  line-height: 1.12;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.period-card-inline span {
-  max-width: 100%;
-  overflow: visible;
-  color: #a3aab5;
-  font-size: 9px;
-  font-weight: 550;
-  line-height: 1.1;
-  white-space: nowrap;
-}
-
-.period-grid-preview {
+}.period-grid-preview {
   min-width: 0;
   width: 30px;
   height: 22px;
@@ -1363,89 +775,7 @@ button {
   font-size: 14px;
   font-weight: 700;
   text-align: center;
-}
-
-.period-row.is-conflict input {
-  border-color: #ef4444;
-}
-
-.period-add-button,
-.period-delete-button {
-  justify-self: end;
-  min-width: 26px;
-}
-
-.period-add-menu-wrap {
-  position: relative;
-  display: grid;
-  justify-items: end;
-}
-
-.period-add-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 20;
-  min-width: 86px;
-  display: grid;
-  gap: 3px;
-  padding: 5px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16);
-}
-
-.period-add-menu button {
-  height: 28px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #334155;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.period-add-menu button:hover {
-  background: #f1f5f9;
-}
-
-.period-add-button {
-  height: 26px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #4f46e5;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.period-delete-button {
-  color: #b91c1c;
-}
-
-.period-row .timeline-row-handle {
-  justify-self: center;
-  width: 24px;
-  min-width: 24px;
-  margin: 0;
-  touch-action: none;
-  user-select: none;
-  cursor: grab;
-  transition:
-    color 120ms ease,
-    transform 120ms ease;
-}
-
-.period-row.is-dragging .timeline-row-handle {
-  cursor: grabbing;
-  color: #4f46e5;
-  transform: translateY(-1px);
-}
-
-.date-row {
+}.date-row {
   min-height: 0;
   display: grid;
   grid-template-columns: var(--layout-columns);
@@ -1459,16 +789,6 @@ button {
   display: grid;
   place-items: stretch;
   padding: calc(var(--column-gap) / 2);
-}
-
-.arrow-card,
-.date-card,
-.period-card,
-.course-card,
-.merged-card {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
 }
 
 .arrow-card,
@@ -1494,27 +814,6 @@ button {
   background: rgba(var(--widget-border), 0.04);
 }
 
-.date-card span,
-.date-card small,
-.period-card strong,
-.period-card span,
-.course-card span,
-.course-card small,
-.merged-card strong,
-.merged-card span {
-  max-width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.date-card span {
-  font-size: var(--title-size);
-  font-weight: 800;
-  line-height: 1.05;
-}
-
 .date-card small {
   color: rgba(var(--widget-muted), 0.78);
   font-size: var(--meta-size);
@@ -1530,25 +829,21 @@ button {
   color: rgba(255, 255, 255, 0.82);
 }
 
-.schedule-blocks {
-  /*
-    The block stack fills the timetable area. Morning and afternoon use equal
-    flexible shares; lunch keeps a smaller but still responsive share.
-  */
-  min-height: 0;
-  display: grid;
-  grid-template-rows: var(--schedule-block-tracks);
-  gap: var(--block-gap);
-  overflow: hidden;
-}
-
-.schedule-block {
+.schedule-grid {
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-columns: var(--layout-columns);
-  gap: 0;
-  align-items: stretch;
+  overflow: hidden;
+}
+
+.timetable-period-column {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: repeat(var(--schedule-row-count, 1), minmax(0, 1fr));
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .schedule-row-cells {
@@ -1556,49 +851,8 @@ button {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: repeat(var(--block-row-count, 1), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--schedule-row-count, 1), minmax(0, 1fr));
   gap: 0;
-}
-
-.course-row-grid,
-.merged-row-grid {
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-}
-
-.course-row-grid {
-  grid-template-columns: repeat(var(--day-count, 5), minmax(0, 1fr));
-  gap: 0;
-}
-
-.merged-row-grid {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.block-column {
-  /*
-    Every block column owns its rows. Course blocks divide their height by
-    --block-row-count, so all cells stretch/shrink together during resizing.
-  */
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: repeat(var(--block-row-count, 1), minmax(0, 1fr));
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.column-item {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  place-items: stretch;
-  padding: calc(var(--column-gap) / 2);
-}
-
-.schedule-row-cells {
   background-image:
     linear-gradient(
       to right,
@@ -1610,8 +864,41 @@ button {
       transparent calc(100% - var(--grid-line-size)),
       var(--grid-line-color) calc(100% - var(--grid-line-size))
     );
-  background-size: calc(100% / var(--day-count, 5)) 100%, 100% calc(100% / var(--block-row-count, 1));
+  background-size: calc(100% / var(--day-count, 5)) 100%, 100% calc(100% / var(--schedule-row-count, 1));
 }
+
+.course-row-grid {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--day-count, 5), minmax(0, 1fr));
+  gap: 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.column-item {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: stretch;
+  padding: calc(var(--column-gap) / 2);
+}
+
+
 
 .row-divider {
   position: absolute;
@@ -1667,21 +954,11 @@ button {
   gap: clamp(1px, 0.4vmin, 3px);
   padding: var(--course-padding-y) var(--course-padding-x);
   border: 0;
-  border-radius: var(--block-card-radius, 10px);
+  border-radius: var(--course-card-radius, 10px);
   cursor: pointer;
   color: var(--card-fg, currentColor);
   font-family: var(--card-font, inherit);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.16);
-}
-
-.course-column .column-item:first-child .course-card {
-  border-top-left-radius: var(--block-card-radius, 10px);
-  border-top-right-radius: var(--block-card-radius, 10px);
-}
-
-.course-column .column-item:last-child .course-card {
-  border-bottom-left-radius: var(--block-card-radius, 10px);
-  border-bottom-right-radius: var(--block-card-radius, 10px);
 }
 
 .course-card span {
@@ -1696,68 +973,15 @@ button {
   line-height: 1.05;
 }
 
-.tone-wheat .course-card {
+.course-card {
   color: #b97916;
-  background: var(--card-bg, var(--block-card-bg, #fff8e1));
-}
-
-.tone-blue .course-card {
-  color: #2e7d52;
-  background: var(--card-bg, var(--block-card-bg, #e8f5e9));
+  background: var(--card-bg, #fff8e1);
 }
 
 .course-card.is-active {
   outline: 2px solid rgba(var(--accent), 0.4);
   outline-offset: -2px;
-}
-
-.placeholder-block .block-column {
-  grid-template-rows: minmax(0, 1fr);
-}
-
-.merged-cell {
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  place-items: stretch;
-}
-
-.merged-card {
-  height: 100%;
-  display: grid;
-  place-items: center;
-  gap: clamp(1px, 0.5vmin, 4px);
-  border-radius: var(--block-card-radius, 10px);
-  border: 0;
-  color: var(--card-fg, rgb(var(--lunch-text)));
-  background: var(--card-bg, var(--block-card-bg, #e3f2fd));
-  font-family: var(--card-font, inherit);
-  cursor: pointer;
-}
-
-.merged-card strong {
-  font-size: var(--card-font-size, clamp(16px, 2.5vmin, 24px));
-  font-weight: 900;
-  letter-spacing: 0;
-  line-height: 1.1;
-}
-
-.merged-card span {
-  color: rgba(var(--lunch-text), 0.68);
-  font-size: clamp(10px, 1.25vmin, 13px);
-  line-height: 1.1;
-}
-
-.resize-grip {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  width: 24px;
-  height: 24px;
-  cursor: nwse-resize;
-}
-
-.resize-grip::before,
+}.resize-grip::before,
 .resize-grip::after {
   content: "";
   position: absolute;
@@ -1787,7 +1011,7 @@ button {
     --column-gap: 8px;
     --content-gap: 10px;
     --block-gap: 12px;
-    --date-row-height: 42px;
+  --date-row-height: 42px;
     --title-size: clamp(10px, 1.35vmin, 13px);
     --meta-size: clamp(7px, 0.95vmin, 9px);
     --period-title-size: clamp(9px, 1.15vmin, 12px);
@@ -1802,7 +1026,7 @@ button {
   }
 }
 
-/* Settings window: modern course-block editor */
+/* Settings window: modern schedule editor */
 .settings-window-wide {
   width: min(96vw, 1180px);
   height: min(94vh, 800px);
@@ -1840,32 +1064,7 @@ button {
   background: linear-gradient(135deg, #eef0ff 0%, #e7ebff 100%);
   color: #3f46f6;
   box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.08);
-}
-
-.settings-nav-icon,
-.toolbar-action-icon,
-.ui-icon-button,
-.row-type-badge,
-.block-avatar {
-  display: inline-grid;
-  place-items: center;
-}
-
-.settings-window svg,
-.row-type-badge svg,
-.ui-icon-button svg,
-.toolbar-action-icon svg {
-  width: 1em;
-  height: 1em;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  flex: 0 0 auto;
-}
-
-.settings-nav-icon {
+}.settings-nav-icon {
   width: 26px;
   height: 26px;
   color: currentColor;
@@ -1914,125 +1113,41 @@ button {
   font-size: 22px;
 }
 
-.block-settings-section {
-  gap: 0;
-}
 
-.block-container-list {
-  gap: 28px;
-  padding: 4px 4px 24px 0;
-  overflow-x: hidden;
-}
 
-.block-container-card {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 0;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  background: #ffffff;
-  box-shadow:
-    0 10px 24px rgba(15, 23, 42, 0.06),
-    0 1px 2px rgba(15, 23, 42, 0.04);
-  overflow: hidden;
-}
 
-.block-container-card:hover {
-  box-shadow:
-    0 14px 30px rgba(15, 23, 42, 0.08),
-    0 1px 2px rgba(15, 23, 42, 0.04);
-}
 
-.block-container-card.is-selected {
-  border-color: #c7d2fe;
-  box-shadow:
-    0 0 0 2px rgba(79, 70, 229, 0.08),
-    0 14px 30px rgba(15, 23, 42, 0.08);
-}
 
-.block-container-card.has-conflict {
-  border-color: #fecaca;
-}
 
-.block-container-card.is-dragging {
-  opacity: 0.9;
-  transform: scale(1.006);
-}
 
-.block-header-panel {
-  min-width: 0;
-  min-height: 100%;
-  display: grid;
-  align-content: center;
-  gap: 34px;
-  padding: 32px 30px;
-  border-right: 1px solid #e5eaf2;
-}
 
-.block-summary {
-  display: grid;
-  gap: 12px;
-  justify-items: start;
-}
 
-.block-avatar {
-  width: 54px;
-  height: 54px;
-  border-radius: 999px;
-  font-size: 26px;
-}
 
-.block-avatar-sun {
-  color: #f59e0b;
-  background: #fff4d6;
-}
 
-.block-avatar-cloudSun {
-  color: #7c3aed;
-  background: #f1edff;
-}
 
-.block-avatar-cup {
-  color: #0f9f6e;
-  background: #e7f8ef;
-}
 
-.block-name-button {
-  width: 100%;
-  min-height: 36px;
-  flex: none;
-  justify-items: start;
-  color: #0f172a;
-  text-align: left;
-}
 
-.block-name-text {
-  max-width: 140px;
-  font-size: 28px;
-  font-weight: 900;
-  line-height: 1.1;
-  text-align: left;
-}
 
-.block-name-button input {
-  width: 140px;
-  height: 36px;
-  font-size: 22px;
-  text-align: left;
-}
 
-.block-count-text {
-  color: #64748b;
-  font-size: 17px;
-  font-weight: 650;
-}
 
-.block-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 .ui-icon-button {
   width: 44px;
@@ -2084,205 +1199,6 @@ button {
   cursor: grab;
 }
 
-.block-container-card.is-dragging .ui-icon-button-drag,
-.period-row.is-dragging .ui-icon-button-drag {
-  cursor: grabbing;
-  color: #3f46f6;
-}
-
-.block-content-card {
-  min-width: 0;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.block-content-card::before {
-  content: none;
-}
-
-.block-period-list {
-  min-width: 0;
-  display: grid;
-}
-
-.period-row {
-  min-width: 0;
-  min-height: 84px;
-  display: grid;
-  grid-template-columns: minmax(118px, 150px) 118px minmax(120px, 1fr) 156px;
-  align-items: center;
-  gap: 20px;
-  justify-content: stretch;
-  padding: 0 24px;
-  border-top: 1px solid #e5eaf2;
-  background: #ffffff;
-}
-
-.period-row:first-child {
-  border-top: 0;
-}
-
-.period-row:hover {
-  background: #f8faff;
-}
-
-.period-row.is-selected {
-  background: #f6f5ff;
-}
-
-.period-row.is-conflict {
-  background: #fff7f7;
-}
-
-.period-row.is-drop-target {
-  box-shadow: inset 0 2px 0 #4f46e5;
-}
-
-.period-card-inline {
-  min-width: 0;
-  min-height: 48px;
-  display: grid;
-  align-content: center;
-  justify-items: start;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #0f172a;
-  text-align: left;
-}
-
-.period-card-inline strong {
-  max-width: 100%;
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 18px;
-  font-weight: 900;
-  line-height: 1.1;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.period-card-inline span {
-  max-width: 100%;
-  overflow: hidden;
-  color: #64748b;
-  font-size: 16px;
-  font-weight: 520;
-  line-height: 1.1;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.row-type-badge {
-  width: 118px;
-  height: 44px;
-  grid-template-columns: auto auto;
-  justify-content: center;
-  gap: 10px;
-  border: 1px solid #e5eaf2;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #475569;
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.row-type-badge svg {
-  width: 28px;
-  height: 18px;
-}
-
-.row-type-course svg {
-  color: #8b83ff;
-}
-
-.row-type-merged svg {
-  color: #12a59a;
-}
-
-.row-type-badge.is-compact {
-  width: auto;
-  height: 30px;
-  padding: 0 8px;
-  border: 0;
-  font-size: 12px;
-}
-
-.cell-preview {
-  min-width: 0;
-  width: 100%;
-  display: grid;
-  align-items: center;
-}
-
-.cell-preview-course {
-  grid-template-columns: repeat(var(--cell-count, 5), minmax(22px, 1fr));
-  gap: clamp(4px, calc(44px / var(--cell-count, 5)), 8px);
-}
-
-.cell-preview-course span,
-.cell-preview-merged span {
-  height: 44px;
-  min-width: 0;
-  border-radius: 8px;
-}
-
-.cell-preview-course span {
-  border: 1px solid #c7d2fe;
-  background: #f8fbff;
-}
-
-.cell-preview-merged span {
-  width: 100%;
-  border: 1px solid #64c6be;
-  background: #f1fbf8;
-}
-
-.period-row-actions {
-  width: 156px;
-  min-width: 156px;
-  display: grid;
-  grid-template-columns: repeat(3, 44px);
-  justify-content: end;
-  gap: 12px;
-}
-
-.period-add-menu-wrap {
-  position: relative;
-  display: grid;
-}
-
-.period-add-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 20;
-  min-width: 126px;
-  display: grid;
-  gap: 4px;
-  padding: 6px;
-  border: 1px solid #e5eaf2;
-  border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
-}
-
-.period-add-menu button {
-  height: 36px;
-  display: flex;
-  align-items: center;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.period-add-menu button:hover {
-  background: #f8faff;
-}
-
 @media (max-width: 1040px) {
   .settings-body {
     grid-template-columns: 196px minmax(0, 1fr);
@@ -2292,28 +1208,9 @@ button {
     padding: 28px;
   }
 
-  .block-container-card {
-    grid-template-columns: 190px minmax(0, 1fr);
-  }
+  
 
-  .block-header-panel {
-    padding: 28px 24px;
-  }
-
-  .period-row {
-    grid-template-columns: minmax(100px, 132px) 108px minmax(100px, 1fr) 144px;
-    gap: 14px;
-    padding: 0 18px;
-  }
-
-  .period-row-actions {
-    width: 144px;
-    min-width: 144px;
-    gap: 6px;
-  }
-}
-
-/* Compact pass for the desktop course-block settings screen. */
+/* Compact pass for the desktop schedule settings screen. */
 .settings-window-wide {
   width: min(96vw, 1120px);
   height: min(94vh, 800px);
@@ -2365,167 +1262,31 @@ button {
   font-size: 20px;
 }
 
-.block-container-list {
-  gap: 20px;
-  min-width: 0;
-  max-width: 100%;
-  overflow-x: hidden;
-}
 
-.block-container-card {
-  grid-template-columns: 180px minmax(0, 1fr);
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  border-radius: 15px;
-}
 
-.block-header-panel {
-  gap: 22px;
-  padding: 22px 20px;
-  align-content: center;
-}
 
-.block-summary {
-  gap: 9px;
-}
 
-.block-avatar {
-  width: 46px;
-  height: 46px;
-  font-size: 22px;
-}
 
-.block-name-button {
-  min-height: 31px;
-}
 
-.block-name-text {
-  max-width: 126px;
-  font-size: 26px;
-  font-weight: 850;
-}
 
-.block-name-button input {
-  width: 126px;
-  height: 32px;
-  font-size: 20px;
-}
 
-.block-count-text {
-  font-size: 15px;
-  font-weight: 560;
-}
 
-.block-actions {
-  gap: 12px;
-}
+
+
+
+
+
+
+
+
+
+
 
 .ui-icon-button {
   width: 40px;
   height: 40px;
   border-radius: 11px;
   font-size: 20px;
-}
-
-.block-content-card,
-.block-period-list {
-  min-width: 0;
-  max-width: 100%;
-  overflow: visible;
-}
-
-.period-row {
-  min-width: 0;
-  max-width: 100%;
-  min-height: 68px;
-  grid-template-columns: minmax(112px, 148px) 104px minmax(112px, 1fr) 36px 40px 40px;
-  gap: 12px;
-  padding: 0 16px;
-  overflow: visible;
-}
-
-.period-card-inline {
-  min-width: 0;
-  min-height: 42px;
-  gap: 3px;
-}
-
-.period-card-inline strong {
-  font-size: 19px;
-  font-weight: 800;
-}
-
-.period-card-inline span {
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.row-type-badge {
-  width: 104px;
-  height: 34px;
-  gap: 7px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 650;
-  overflow: hidden;
-}
-
-.row-type-badge svg {
-  width: 24px;
-  height: 16px;
-}
-
-.cell-preview {
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-}
-
-.cell-preview-course {
-  grid-template-columns: repeat(var(--cell-count, 5), minmax(18px, 34px));
-  justify-content: start;
-  gap: clamp(4px, calc(34px / var(--cell-count, 5)), 7px);
-}
-
-.cell-preview-course span,
-.cell-preview-merged span {
-  height: 32px;
-  border-radius: 7px;
-}
-
-.cell-preview-merged span {
-  width: min(88%, 260px);
-}
-
-.period-row-actions {
-  display: contents;
-}
-
-.period-row > .ui-icon-button-drag {
-  grid-column: 4;
-  justify-self: center;
-}
-
-.period-add-menu-wrap {
-  grid-column: 5;
-  justify-self: center;
-}
-
-.period-row > .ui-icon-button-delete {
-  grid-column: 6;
-  justify-self: center;
-}
-
-.period-row .ui-icon-button {
-  width: 40px;
-  height: 40px;
-}
-
-.period-row .ui-icon-button-drag {
-  width: 36px;
-  border-color: transparent;
-  background: transparent;
 }
 
 @media (max-width: 1040px) {
@@ -2541,58 +1302,7 @@ button {
 
   .settings-content {
     padding: 26px 28px;
-  }
-
-  .block-container-card {
-    grid-template-columns: 166px minmax(0, 1fr);
-  }
-
-  .block-header-panel {
-    padding: 20px 18px;
-  }
-
-  .block-name-text {
-    font-size: 24px;
-  }
-
-  .period-row {
-    grid-template-columns: minmax(96px, 128px) 96px minmax(92px, 1fr) 34px 38px 38px;
-    gap: 10px;
-    padding: 0 12px;
-  }
-
-  .row-type-badge {
-    width: 96px;
-  }
-
-  .period-row .ui-icon-button {
-    width: 38px;
-    height: 38px;
-  }
-}
-
-/* Compact course-block editor. */
-.settings-window,
-.settings-window-wide,
-.settings-body,
-.settings-content,
-.settings-sidebar,
-.block-settings-section,
-.block-container-list,
-.block-container-card,
-.block-header-panel,
-.block-content-card,
-.block-period-list,
-.period-row,
-.period-card-inline,
-.row-type-badge,
-.period-row-actions {
-  box-sizing: border-box;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.settings-window-wide {
+  }.settings-window-wide {
   width: min(96vw, 1040px);
   height: min(94vh, 740px);
 }
@@ -2622,143 +1332,28 @@ button {
   font-size: 16px;
 }
 
-.block-container-list {
-  gap: 16px;
-}
 
-.block-container-card {
-  grid-template-columns: 100px minmax(0, 1fr);
-  overflow: hidden;
-}
 
-.block-header-panel {
-  padding: 12px 8px;
-  gap: 10px;
-}
 
-.block-summary {
-  gap: 0;
-  width: 100%;
-  justify-items: center;
-  align-items: center;
-  text-align: center;
-}
 
-.block-name-text {
-  max-width: 76px;
-  font-size: 17px;
-  font-weight: 800;
-  text-align: center;
-}
 
-.block-name-button {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
 
-.block-name-button input {
-  width: 76px;
-  height: 28px;
-  font-size: 16px;
-}
 
-.block-actions {
-  gap: 6px;
-  justify-content: center;
-}
+
+
+
+
+
+
+
+
 
 .ui-icon-button {
   width: 32px;
   height: 32px;
   border-radius: 10px;
   font-size: 16px;
-}
-
-.block-content-card {
-  overflow: visible;
-}
-
-.period-row {
-  /* 调整这里可控制：课次名+起止时间宽度、行类型标签间隔、整行行高 */
-  min-height: 48px;
-  grid-template-columns: 108px 104px;
-  gap: 6px;
-  padding: 0 10px;
-  overflow: visible;
-  align-items: center;
-}
-
-.period-card-inline {
-  /* 调整这里可控制：右侧课次名+起止时间的高度与竖直居中 */
-  min-height: 28px;
-  height: 100%;
-  gap: 0;
-  justify-self: start;
-  align-self: center;
-  align-content: center;
-  justify-content: start;
-  justify-items: start;
-  padding: 0;
-  text-align: left;
-}
-
-.period-card-inline strong {
-  font-size: 14px;
-  font-weight: 760;
-  line-height: 1.05;
-}
-
-.period-card-inline span {
-  font-size: 11px;
-  line-height: 1.05;
-}
-
-.row-type-badge {
-  /* 调整这里可控制：课程行/合并行标签的宽高与左侧间距 */
-  width: 76px;
-  height: 28px;
-  justify-self: start;
-  justify-content: start;
-  gap: 4px;
-  padding-left: 6px;
-  border-radius: 10px;
-  font-size: 12px;
-  align-self: center;
-}
-
-.period-row-actions {
-  /* 调整这里可控制：拖拽 / 添加 / 删除 图标大小与间距 */
-  width: 104px;
-  min-width: 104px;
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  justify-content: flex-start;
-  align-items: center;
-  gap: 3px;
-  align-self: center;
-}
-
-.period-row-actions > * {
-  flex: 0 0 auto;
-}
-
-.period-row-actions .ui-icon-button-drag,
-.period-row-actions .period-add-menu-wrap,
-.period-row-actions .ui-icon-button-delete {
-  grid-column: auto;
-  justify-self: auto;
-}
-
-.period-row .ui-icon-button-drag {
-  width: 30px;
-  border-color: transparent;
-  background: transparent;
-}
-
-.schedule-table-section {
+}.schedule-table-section {
   display: grid;
   gap: 14px;
 }
@@ -2947,23 +1542,6 @@ button {
   white-space: nowrap;
 }
 
-.period-add-menu-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.period-add-menu {
-  min-width: 100px;
-}
-
-.cell-preview,
-.cell-preview-course,
-.cell-preview-merged {
-  display: none;
-}
-
 @media (max-width: 1040px) {
   .settings-body {
     grid-template-columns: 194px minmax(0, 1fr);
@@ -2977,29 +1555,7 @@ button {
     padding: 22px 24px 20px;
   }
 
-  .block-container-card {
-    grid-template-columns: 92px minmax(0, 1fr);
-  }
+  
 
-  .period-row {
-    grid-template-columns: 98px 102px;
-    gap: 4px;
-    padding: 0 8px;
-  }
 
-  .row-type-badge {
-    width: 78px;
-  }
 
-  .period-row-actions {
-    width: 102px;
-    min-width: 102px;
-    gap: 2px;
-  }
-
-  .period-row .ui-icon-button,
-  .block-actions .ui-icon-button {
-    width: 28px;
-    height: 28px;
-  }
-}

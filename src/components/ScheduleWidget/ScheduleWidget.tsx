@@ -1,5 +1,5 @@
 import type { CSSProperties, PointerEvent, ReactNode, RefObject } from "react";
-import type { CardStyle, CourseCell, PeriodInfo, Schedule, ScheduleCourseRow, Weekday } from "../../features/schedule/types";
+import type { CardStyle, CourseCell, PeriodInfo, Schedule, Weekday } from "../../features/schedule/types";
 import type { SelectedCard } from "../../features/settings/settingsTypes";
 import type { WindowMode } from "../../features/windowMode/types";
 
@@ -45,7 +45,7 @@ export function ScheduleWidget({
               &lt;
             </button>
             <button className="week-number-button" type="button" title={schedule.termLabel}>
-              第 {schedule.weekNumber} 周
+              第{schedule.weekNumber}周
             </button>
             <button className="week-arrow-button" type="button" title="后一周">
               &gt;
@@ -74,7 +74,7 @@ export function ScheduleWidget({
 
         <div className="date-row" role="row">
           <div className="date-cell arrow-cell" aria-hidden="true">
-            <div className="arrow-card">↘</div>
+            <div className="arrow-card">↓</div>
           </div>
           {schedule.days.map((day) => (
             <div className="date-cell" key={day.id}>
@@ -86,71 +86,37 @@ export function ScheduleWidget({
           ))}
         </div>
 
-        <div className="schedule-blocks" role="table" aria-label="教师课程表">
-          {schedule.blocks.map((block) => (
-            <ScheduleBlockView
-              key={block.id}
-              block={block}
-              weekdays={visibleWeekdays}
-              activeCellId={activeCellId}
-              onCourseClick={onCourseClick}
-              onCardEdit={onCardEdit}
-            />
-          ))}
+        <div className="schedule-grid" role="table" aria-label="教师课程表">
+          <div className="timetable-period-column">
+            {schedule.rows.map((row, index) => (
+              <ColumnItem key={row.id} showDivider={index > 0}>
+                <PeriodCard period={row.period} onClick={() => onCardEdit({ type: "period", periodId: row.period.id })} />
+              </ColumnItem>
+            ))}
+          </div>
+
+          <div className="schedule-row-cells">
+            {schedule.rows.map((row, index) => (
+              <div className="course-row-grid" key={row.id}>
+                {visibleWeekdays.map((weekday) => {
+                  const course = row.courses[weekday];
+                  if (!course || course.mergedInto) {
+                    return null;
+                  }
+
+                  return (
+                    <ColumnItem key={`${row.id}-${weekday}`} showDivider={index > 0} span={course.colSpan ?? 1}>
+                      <CourseCard course={course} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
+                    </ColumnItem>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {mode === "detached" && <div className="resize-grip" onPointerDown={onResizeStart} title="调整大小" />}
-    </section>
-  );
-}
-
-function ScheduleBlockView({
-  block,
-  weekdays,
-  activeCellId,
-  onCourseClick,
-  onCardEdit,
-}: {
-  block: Schedule["blocks"][number];
-  weekdays: Weekday[];
-  activeCellId: string | null;
-  onCourseClick: (courseId: string) => void;
-  onCardEdit: (card: SelectedCard) => void;
-}) {
-  const blockStyle = {
-    "--block-row-count": block.rows.length,
-    "--card-radius": `var(--block-card-radius, 10px)`,
-  } as CSSProperties;
-
-  return (
-    <section className={`schedule-block tone-${block.cardTone}`} aria-label={block.title} style={blockStyle}>
-      <div className="period-column block-column">
-        {block.rows.map((row, index) => (
-          <ColumnItem key={row.id} showDivider={index > 0}>
-            <PeriodCard period={row.period} onClick={() => onCardEdit({ type: "period", periodId: row.period.id })} />
-          </ColumnItem>
-        ))}
-      </div>
-
-      <div className="schedule-row-cells">
-        {block.rows.map((row, index) => (
-          <div className="course-row-grid" key={row.id}>
-            {weekdays.map((weekday) => {
-              const course = row.courses[weekday];
-              if (!course || course.mergedInto) {
-                return null;
-              }
-
-              return (
-                <ColumnItem key={`${row.id}-${weekday}`} showDivider={index > 0} span={course.colSpan ?? 1}>
-                  <CourseCard course={course} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
-                </ColumnItem>
-              );
-            })}
-          </div>
-        ))}
-      </div>
     </section>
   );
 }

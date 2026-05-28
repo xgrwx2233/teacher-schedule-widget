@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SettingsWindow } from "../components/SettingsWindow/SettingsWindow";
 import {
   defaultAppearanceSettings,
-  defaultBlockSettingsState,
   type SettingsSection,
   type WidgetSettingsState,
 } from "../features/settings/settingsTypes";
@@ -26,7 +25,6 @@ const defaultSettings: WidgetSettingsState = {
     startDate: "2026-03-05",
     endDate: "2026-06-30",
   },
-  blockSettings: defaultBlockSettingsState,
   appearance: defaultAppearanceSettings,
 };
 
