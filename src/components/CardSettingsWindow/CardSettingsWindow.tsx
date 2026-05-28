@@ -1,13 +1,16 @@
 import type { CSSProperties } from "react";
-import type { CardDraft, SelectedCard } from "../../features/settings/settingsTypes";
+import type { CardDraft, CourseCardMergeState, SelectedCard } from "../../features/settings/settingsTypes";
 
 type CardSettingsWindowProps = {
   selectedCard: SelectedCard | null;
   draft: CardDraft;
+  mergeState: CourseCardMergeState;
   onDraftChange: (draft: CardDraft) => void;
+  onMergeRight: () => void;
+  onSplit: () => void;
 };
 
-export function CardSettingsWindow({ selectedCard, draft, onDraftChange }: CardSettingsWindowProps) {
+export function CardSettingsWindow({ selectedCard, draft, mergeState, onDraftChange, onMergeRight, onSplit }: CardSettingsWindowProps) {
   if (!selectedCard) {
     return null;
   }
@@ -16,7 +19,9 @@ export function CardSettingsWindow({ selectedCard, draft, onDraftChange }: CardS
     <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="卡片设置">
       <section className="card-settings-window">
         <div className="card-settings-body">
-          {selectedCard.type === "course" && <CourseCardSettings draft={draft} onDraftChange={onDraftChange} />}
+          {selectedCard.type === "course" && (
+            <CourseCardSettings draft={draft} mergeState={mergeState} onDraftChange={onDraftChange} onMergeRight={onMergeRight} onSplit={onSplit} />
+          )}
           {selectedCard.type === "period" && <PeriodCardSettings draft={draft} onDraftChange={onDraftChange} />}
         </div>
       </section>
@@ -24,7 +29,19 @@ export function CardSettingsWindow({ selectedCard, draft, onDraftChange }: CardS
   );
 }
 
-function CourseCardSettings({ draft, onDraftChange }: { draft: CardDraft; onDraftChange: (draft: CardDraft) => void }) {
+function CourseCardSettings({
+  draft,
+  mergeState,
+  onDraftChange,
+  onMergeRight,
+  onSplit,
+}: {
+  draft: CardDraft;
+  mergeState: CourseCardMergeState;
+  onDraftChange: (draft: CardDraft) => void;
+  onMergeRight: () => void;
+  onSplit: () => void;
+}) {
   return (
     <div className="card-settings-layout">
       <section className="card-settings-preview">
@@ -97,6 +114,15 @@ function CourseCardSettings({ draft, onDraftChange }: { draft: CardDraft; onDraf
             </label>
           </div>
         )}
+        <div className="card-merge-actions">
+          <button type="button" disabled={!mergeState.canMergeRight} onClick={onMergeRight}>
+            合并右侧
+          </button>
+          <button type="button" disabled={!mergeState.canSplit} onClick={onSplit}>
+            拆分
+          </button>
+          {mergeState.reason && <span>{mergeState.reason}</span>}
+        </div>
       </section>
     </div>
   );

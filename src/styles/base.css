@@ -77,6 +77,7 @@ button {
   --course-padding-y: clamp(4px, 0.9vmin, 6px);
   --course-padding-x: clamp(4px, 0.9vmin, 6px);
   --row-divider: rgba(102, 91, 78, 0.16);
+  --row-divider-rgb: 102 91 78;
   --row-divider-opacity: 0.16;
   --row-divider-style: solid;
   --row-divider-thickness: 1px;
@@ -127,6 +128,11 @@ button {
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(8px);
   overflow: hidden;
+}
+
+.schedule-card {
+  --grid-line-color: rgba(var(--row-divider-rgb), var(--row-divider-opacity));
+  --grid-line-size: var(--row-divider-thickness);
 }
 
 .schedule-toolbar {
@@ -449,6 +455,39 @@ button {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.card-merge-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.card-merge-actions button {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #4f46e5;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.card-merge-actions button:disabled {
+  border-color: #e5e7eb;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.card-merge-actions span {
+  min-width: 0;
+  color: #64748b;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-panel-section,
@@ -1410,7 +1449,7 @@ button {
   min-height: 0;
   display: grid;
   grid-template-columns: var(--layout-columns);
-  gap: var(--column-gap);
+  gap: 0;
   align-items: stretch;
 }
 
@@ -1419,6 +1458,7 @@ button {
   min-height: 0;
   display: grid;
   place-items: stretch;
+  padding: calc(var(--column-gap) / 2);
 }
 
 .arrow-card,
@@ -1507,7 +1547,7 @@ button {
   min-height: 0;
   display: grid;
   grid-template-columns: var(--layout-columns);
-  gap: var(--column-gap);
+  gap: 0;
   align-items: stretch;
 }
 
@@ -1529,7 +1569,7 @@ button {
 
 .course-row-grid {
   grid-template-columns: repeat(var(--day-count, 5), minmax(0, 1fr));
-  gap: var(--column-gap);
+  gap: 0;
 }
 
 .merged-row-grid {
@@ -1555,6 +1595,22 @@ button {
   min-height: 0;
   display: grid;
   place-items: stretch;
+  padding: calc(var(--column-gap) / 2);
+}
+
+.schedule-row-cells {
+  background-image:
+    linear-gradient(
+      to right,
+      transparent calc(100% - var(--grid-line-size)),
+      var(--grid-line-color) calc(100% - var(--grid-line-size))
+    ),
+    linear-gradient(
+      to bottom,
+      transparent calc(100% - var(--grid-line-size)),
+      var(--grid-line-color) calc(100% - var(--grid-line-size))
+    );
+  background-size: calc(100% / var(--day-count, 5)) 100%, 100% calc(100% / var(--block-row-count, 1));
 }
 
 .row-divider {
@@ -1577,9 +1633,10 @@ button {
   grid-template-rows: minmax(0, 1fr) auto;
   align-items: center;
   justify-items: end;
-  padding: clamp(3px, 0.75vmin, 7px) 0 clamp(3px, 0.75vmin, 7px) 2px;
+  padding: clamp(3px, 0.75vmin, 7px) clamp(2px, 0.8vmin, 6px);
   border: 0;
-  background: transparent;
+  border-radius: 10px;
+  background: rgba(var(--widget-border), 0.04);
   color: var(--card-fg, rgba(var(--widget-text), 0.9));
   font-family: var(--card-font, inherit);
   text-align: right;
@@ -1610,10 +1667,11 @@ button {
   gap: clamp(1px, 0.4vmin, 3px);
   padding: var(--course-padding-y) var(--course-padding-x);
   border: 0;
-  border-radius: 0;
+  border-radius: var(--block-card-radius, 10px);
   cursor: pointer;
   color: var(--card-fg, currentColor);
   font-family: var(--card-font, inherit);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.16);
 }
 
 .course-column .column-item:first-child .course-card {
@@ -2625,7 +2683,7 @@ button {
 .period-row {
   /* 调整这里可控制：课次名+起止时间宽度、行类型标签间隔、整行行高 */
   min-height: 48px;
-  grid-template-columns: 108px 84px 104px;
+  grid-template-columns: 108px 104px;
   gap: 6px;
   padding: 0 10px;
   overflow: visible;
@@ -2700,6 +2758,195 @@ button {
   background: transparent;
 }
 
+.schedule-table-section {
+  display: grid;
+  gap: 14px;
+}
+
+.schedule-page-head {
+  display: block;
+}
+
+.schedule-page-copy {
+  min-width: 0;
+}
+
+.schedule-page-copy h3 {
+  margin: 0;
+  color: #1f2937;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.schedule-page-copy p {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.schedule-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.schedule-config-card {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 12px;
+  border: 1px solid #e5eaf2;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.schedule-config-card header {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.schedule-config-card h4 {
+  margin: 0;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.schedule-config-card p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.schedule-option-row {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-choice {
+  min-width: 0;
+  min-height: 46px;
+  padding: 7px 10px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f2937;
+  text-align: left;
+  cursor: pointer;
+}
+
+.schedule-choice:hover {
+  border-color: #c7d2fe;
+  background: #f8faff;
+}
+
+.schedule-choice.is-selected {
+  border-color: #818cf8;
+  background: #eef2ff;
+  color: #4f46e5;
+  box-shadow: none;
+}
+
+.schedule-choice strong {
+  min-width: 0;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.schedule-choice-preview {
+  display: flex;
+  gap: 5px;
+  flex-wrap: nowrap;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.35;
+}
+
+.schedule-choice.is-selected .schedule-choice-preview {
+  color: #6b7280;
+}
+
+.schedule-choice-preview i {
+  font-style: normal;
+}
+
+.period-stepper {
+  min-width: 0;
+  height: 34px;
+  width: min(100%, 180px);
+  justify-self: start;
+  display: grid;
+  grid-template-columns: 34px 54px auto 34px;
+  align-items: center;
+  gap: 8px;
+}
+
+.period-stepper-button {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  color: #4f46e5;
+  background: #ffffff;
+  font-size: 18px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.period-stepper-button:hover:not(:disabled) {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+}
+
+.period-stepper-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.period-stepper-value {
+  min-width: 0;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.period-stepper-value strong {
+  color: #111827;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.period-stepper-unit {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
 .period-add-menu-wrap {
   position: relative;
   display: flex;
@@ -2735,7 +2982,7 @@ button {
   }
 
   .period-row {
-    grid-template-columns: 98px 78px 102px;
+    grid-template-columns: 98px 102px;
     gap: 4px;
     padding: 0 8px;
   }

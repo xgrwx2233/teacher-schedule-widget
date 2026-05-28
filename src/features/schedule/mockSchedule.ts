@@ -1,4 +1,4 @@
-import type { CourseCell, Schedule, ScheduleCourseRow, ScheduleMergedRow, Weekday } from "./types";
+import type { CourseCell, Schedule, ScheduleCourseRow, Weekday } from "./types";
 
 export const allScheduleDays: Schedule["days"] = [
   { id: "monday", label: "周一", dateLabel: "05/18" },
@@ -40,16 +40,6 @@ function row(
     type: "course",
     period: { id, label, time },
     courses,
-  };
-}
-
-function mergedRow(id: string, label: string, time: string, title: string, subtitle: string): ScheduleMergedRow {
-  return {
-    id,
-    type: "merged",
-    period: { id, label, time },
-    title,
-    subtitle,
   };
 }
 
@@ -118,7 +108,31 @@ export const mockSchedule: Schedule = {
       id: "lunch",
       title: "午休",
       cardTone: "blue",
-      rows: [mergedRow("lunch", "午休", "12:00-14:00", "午休", "备课 / 休息")],
+      rows: [
+        row(
+          "lunch",
+          "午休",
+          "12:00-14:00",
+          {
+            monday: "午休",
+            tuesday: "午休",
+            wednesday: "午休",
+            thursday: "午休",
+            friday: "午休",
+            saturday: "午休",
+            sunday: "午休",
+          },
+          {
+            monday: "备课 / 休息",
+            tuesday: "备课 / 休息",
+            wednesday: "备课 / 休息",
+            thursday: "备课 / 休息",
+            friday: "备课 / 休息",
+            saturday: "备课 / 休息",
+            sunday: "备课 / 休息",
+          },
+        ),
+      ],
     },
     {
       id: "afternoon",

@@ -5,7 +5,7 @@ export type TermSettings = {
   endDate: string;
 };
 
-export type BlockRowType = "course" | "merged";
+export type BlockRowType = "course";
 
 export type BlockPeriodSettings = {
   id: string;
@@ -47,16 +47,23 @@ export type AppearanceSettings = {
 
 export type WidgetSettingsState = {
   workdayMode: WorkdayMode;
+  periodCount: number;
   term: TermSettings;
   blockSettings: BlockSettingsState;
   appearance: AppearanceSettings;
 };
 
-export type SettingsSection = "workdays" | "term" | "blocks" | "appearance";
+export type SettingsSection = "schedule" | "term" | "appearance";
 
 export type SelectedCard =
   | { type: "course"; courseId: string }
   | { type: "period"; periodId: string };
+
+export type CourseCardMergeState = {
+  canMergeRight: boolean;
+  canSplit: boolean;
+  reason?: string;
+};
 
 export type CardDraft = {
   title: string;
@@ -93,7 +100,7 @@ export const defaultBlockSettingsState: BlockSettingsState = {
       cardBackgroundColor: "#e3f2fd",
       cardCornerRadius: 12,
       periods: [
-        { id: "lunch", name: "午休", startTime: "12:00", endTime: "14:00", order: 0, conflict: false, type: "merged" },
+        { id: "lunch", name: "午休", startTime: "12:00", endTime: "14:00", order: 0, conflict: false, type: "course" },
       ],
     },
     {

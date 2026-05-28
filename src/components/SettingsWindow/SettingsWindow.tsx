@@ -1,14 +1,11 @@
 import type { CSSProperties, PointerEvent, SyntheticEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import courseRowIcon from "../../../images/course-row.svg";
 import deleteIcon from "../../../images/delete.svg";
 import dragIcon from "../../../images/drag.svg";
-import mergedRowIcon from "../../../images/merged-row.svg";
 import type { WorkdayMode } from "../../features/schedule/types";
 import type {
   AppearanceSettings,
   BlockPeriodSettings,
-  BlockRowType,
   BlockSettings,
   BlockSettingsState,
   SettingsSection,
@@ -36,21 +33,18 @@ type SettingsIconName =
   | "drag"
   | "sun"
   | "cloudSun"
-  | "cup"
-  | "courseRow"
-  | "mergedRow";
+  | "cup";
 
 const sectionItems: Array<{ id: SettingsSection; label: string; icon: SettingsIconName }> = [
-  { id: "workdays", label: "工作日", icon: "calendar" },
+  { id: "schedule", label: "课程表", icon: "calendar" },
   { id: "term", label: "学期", icon: "book" },
-  { id: "blocks", label: "课程块", icon: "grid" },
   { id: "appearance", label: "外观", icon: "palette" },
 ];
 
-const workdayOptions: Array<{ id: WorkdayMode; label: string; description: string }> = [
-  { id: "mon-fri", label: "周一到周五", description: "日期栏显示周一到周五。" },
-  { id: "mon-sat", label: "周一到周六", description: "日期栏显示周一到周六。" },
-  { id: "mon-sun", label: "周一到周日", description: "日期栏显示周一到周日。" },
+const workdayOptions: Array<{ id: WorkdayMode; label: string; count: number; description: string }> = [
+  { id: "mon-fri", label: "周一到周五", count: 5, description: "箭头格 + 5 个日期格。" },
+  { id: "mon-sat", label: "周一到周六", count: 6, description: "箭头格 + 6 个日期格。" },
+  { id: "mon-sun", label: "周一到周日", count: 7, description: "箭头格 + 7 个日期格。" },
 ];
 
 export function SettingsWindow({
@@ -82,25 +76,7 @@ export function SettingsWindow({
           </nav>
 
           <main className="settings-content">
-            {activeSection === "workdays" && (
-              <section className="settings-panel-section">
-                <h3>工作日</h3>
-                <p>控制日期栏显示范围。</p>
-                <div className="segmented-list">
-                  {workdayOptions.map((option) => (
-                    <button
-                      key={option.id}
-                      className={settings.workdayMode === option.id ? "choice-card is-selected" : "choice-card"}
-                      type="button"
-                      onClick={() => onSettingsChange({ ...settings, workdayMode: option.id })}
-                    >
-                      <strong>{option.label}</strong>
-                      <span>{option.description}</span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
+            {activeSection === "schedule" && <ScheduleTablePanel settings={settings} onSettingsChange={onSettingsChange} />}
 
             {activeSection === "term" && (
               <section className="settings-panel-section">
@@ -138,13 +114,95 @@ export function SettingsWindow({
               </section>
             )}
 
-            {activeSection === "blocks" && <BlockSettingsPanel settings={settings} onSettingsChange={onSettingsChange} />}
-
             {activeSection === "appearance" && <AppearancePanel settings={settings} onSettingsChange={onSettingsChange} />}
           </main>
         </div>
       </section>
     </div>
+  );
+}
+
+function ScheduleTablePanel({
+  settings,
+  onSettingsChange,
+}: {
+  settings: WidgetSettingsState;
+  onSettingsChange: (settings: WidgetSettingsState) => void;
+}) {
+  const periodCount = clampPeriodCount(settings.periodCount);
+
+  return (
+    <section className="settings-panel-section schedule-table-section">
+      <div className="schedule-page-head">
+        <div className="schedule-page-copy">
+          <h3>课程表</h3>
+          <p>设置工作日列数与每天节数，课程表网格将实时同步。</p>
+        </div>
+      </div>
+
+      <div className="schedule-config-grid">
+        <section className="schedule-config-card">
+          <header>
+            <div>
+              <h4>工作日</h4>
+              <p>控制日期栏的日期格数量。</p>
+            </div>
+          </header>
+
+          <div className="schedule-option-row" role="list" aria-label="工作日范围">
+            {workdayOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={settings.workdayMode === option.id ? "schedule-choice is-selected" : "schedule-choice"}
+                onClick={() => onSettingsChange({ ...settings, workdayMode: option.id })}
+              >
+                <strong>{option.label}</strong>
+                <span className="schedule-choice-preview" aria-hidden="true">
+                  {Array.from({ length: option.count }).map((_, index) => (
+                    <i key={index}>{["一", "二", "三", "四", "五", "六", "日"][index]}</i>
+                  ))}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="schedule-config-card">
+          <header>
+            <div>
+              <h4>节数</h4>
+              <p>控制一天有多少节课，即课程表行数。</p>
+            </div>
+          </header>
+
+          <div className="period-stepper" aria-label="节数控制器">
+            <button
+              type="button"
+              className="period-stepper-button"
+              aria-label="减少节数"
+              disabled={periodCount <= 4}
+              onClick={() => onSettingsChange({ ...settings, periodCount: clampPeriodCount(periodCount - 1) })}
+            >
+              <span aria-hidden="true">−</span>
+            </button>
+            <div className="period-stepper-value">
+              <strong>{periodCount}</strong>
+            </div>
+            <span className="period-stepper-unit">节 / 天</span>
+            <button
+              type="button"
+              className="period-stepper-button"
+              aria-label="增加节数"
+              disabled={periodCount >= 12}
+              onClick={() => onSettingsChange({ ...settings, periodCount: clampPeriodCount(periodCount + 1) })}
+            >
+              <span aria-hidden="true">+</span>
+            </button>
+          </div>
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -252,6 +310,14 @@ function RangeField({
   );
 }
 
+function clampPeriodCount(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 8;
+  }
+
+  return Math.max(4, Math.min(12, Math.round(value)));
+}
+
 function BlockSettingsPanel({
   settings,
   onSettingsChange,
@@ -264,7 +330,6 @@ function BlockSettingsPanel({
   const [draggingPeriod, setDraggingPeriod] = useState<DraggingPeriod>(null);
   const [periodDropTargetId, setPeriodDropTargetId] = useState<string | null>(null);
   const [periodEditor, setPeriodEditor] = useState<PeriodEditor>(null);
-  const [addMenu, setAddMenu] = useState<{ blockId: string; afterPeriodId: string | null } | null>(null);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
 
   const blockSettings = useMemo(() => normalizeBlockConflicts(settings.blockSettings), [settings.blockSettings]);
@@ -340,7 +405,7 @@ function BlockSettingsPanel({
     });
   };
 
-  const addPeriodToBlock = (blockId: string, afterPeriodId: string | null, type: BlockRowType) => {
+  const addPeriodToBlock = (blockId: string, afterPeriodId: string | null) => {
     const block = blockSettings.blocks.find((item) => item.id === blockId);
     if (!block) {
       return;
@@ -352,10 +417,9 @@ function BlockSettingsPanel({
     const period = createDefaultPeriod(
       `${block.id}-p${Date.now()}`,
       insertIndex,
-      type === "course" ? `第${block.periods.length + 1}节` : "合并行",
+      `第${block.periods.length + 1}节`,
       shiftTime(previous?.endTime ?? "08:45", 10),
-      shiftTime(previous?.endTime ?? "08:45", type === "course" ? 55 : 120),
-      type,
+      shiftTime(previous?.endTime ?? "08:45", 55),
     );
     const periods = [...block.periods];
     periods.splice(insertIndex, 0, period);
@@ -365,7 +429,6 @@ function BlockSettingsPanel({
       activePeriodId: period.id,
       blocks: blockSettings.blocks.map((item) => (item.id === blockId ? { ...item, periods: withPeriodOrder(periods) } : item)),
     });
-    setAddMenu(null);
   };
 
   const deletePeriod = (blockId: string, periodId: string) => {
@@ -565,15 +628,9 @@ function BlockSettingsPanel({
                       conflict={conflictSummary.periodIds.has(period.id)}
                       dragging={draggingPeriod?.periodId === period.id}
                       dropTarget={periodDropTargetId === period.id && draggingPeriod?.periodId !== period.id}
-                      addMenuOpen={addMenu?.blockId === block.id && addMenu.afterPeriodId === period.id}
                       onSelect={() => selectPeriod(block.id, period.id)}
                       onOpenEditor={() => openPeriodEditor(block.id, period.id)}
-                      onToggleAddMenu={() =>
-                        setAddMenu((current) =>
-                          current?.blockId === block.id && current.afterPeriodId === period.id ? null : { blockId: block.id, afterPeriodId: period.id },
-                        )
-                      }
-                      onAddBelow={(type) => addPeriodToBlock(block.id, period.id, type)}
+                      onAddBelow={() => addPeriodToBlock(block.id, period.id)}
                       onDragHandlePointerDown={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -674,10 +731,8 @@ function PeriodRow({
   conflict,
   dragging,
   dropTarget,
-  addMenuOpen,
   onSelect,
   onOpenEditor,
-  onToggleAddMenu,
   onAddBelow,
   onDragHandlePointerDown,
   onDelete,
@@ -688,11 +743,9 @@ function PeriodRow({
   conflict: boolean;
   dragging: boolean;
   dropTarget: boolean;
-  addMenuOpen: boolean;
   onSelect: () => void;
   onOpenEditor: () => void;
-  onToggleAddMenu: () => void;
-  onAddBelow: (type: BlockRowType) => void;
+  onAddBelow: () => void;
   onDragHandlePointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
   onDelete: () => void;
 }) {
@@ -709,35 +762,12 @@ function PeriodRow({
         </span>
       </button>
 
-      <RowTypeBadge type={period.type} />
-
       <div className="period-row-actions">
         <IconButton kind="drag" label="拖动重排" onPointerDown={onDragHandlePointerDown} />
-        <div className="period-add-menu-wrap">
-          <IconButton kind="add" label="添加课次" onClick={stopAndRun(onToggleAddMenu)} />
-          {addMenuOpen && (
-            <div className="period-add-menu">
-              <button type="button" onClick={stopAndRun(() => onAddBelow("course"))}>
-                <RowTypeBadge type="course" compact />
-              </button>
-              <button type="button" onClick={stopAndRun(() => onAddBelow("merged"))}>
-                <RowTypeBadge type="merged" compact />
-              </button>
-            </div>
-          )}
-        </div>
+        <IconButton kind="add" label="添加课次" onClick={stopAndRun(onAddBelow)} />
         <IconButton kind="delete" label="删除课次" onClick={stopAndRun(onDelete)} />
       </div>
     </article>
-  );
-}
-
-function RowTypeBadge({ type, compact = false }: { type: BlockRowType; compact?: boolean }) {
-  return (
-    <span className={["row-type-badge", type === "course" ? "row-type-course" : "row-type-merged", compact ? "is-compact" : ""].filter(Boolean).join(" ")}>
-      <img src={type === "course" ? courseRowIcon : mergedRowIcon} alt="" aria-hidden="true" />
-      <span>{type === "course" ? "课程行" : "合并行"}</span>
-    </span>
   );
 }
 
@@ -852,21 +882,6 @@ function Icon({ name }: { name: SettingsIconName }) {
           <path d="M8 18.5h8" />
         </svg>
       );
-    case "courseRow":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="4" y="7" width="3" height="10" rx="0.8" />
-          <rect x="8.5" y="7" width="3" height="10" rx="0.8" />
-          <rect x="13" y="7" width="3" height="10" rx="0.8" />
-          <rect x="17.5" y="7" width="3" height="10" rx="0.8" />
-        </svg>
-      );
-    case "mergedRow":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="4" y="8" width="16" height="8" rx="2" />
-        </svg>
-      );
   }
 }
 
@@ -931,9 +946,8 @@ function createDefaultPeriod(
   name = `第${order + 1}节`,
   startTime = "08:00",
   endTime = "08:45",
-  type: BlockRowType = "course",
 ): BlockPeriodSettings {
-  return { id, name, startTime, endTime, order, conflict: false, type };
+  return { id, name, startTime, endTime, order, conflict: false, type: "course" };
 }
 
 function findPeriodInBlocks(blockSettings: BlockSettingsState, periodId: string | null): BlockPeriodSettings | null {

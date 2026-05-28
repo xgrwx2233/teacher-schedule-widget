@@ -1,4 +1,4 @@
-import type { CardDraft, SelectedCard, SettingsSection, WidgetSettingsState } from "./settingsTypes";
+import type { CardDraft, CourseCardMergeState, SelectedCard, SettingsSection, WidgetSettingsState } from "./settingsTypes";
 import type { WindowMode } from "../windowMode/types";
 
 export const SETTINGS_WINDOW_LABEL = "settings";
@@ -15,6 +15,7 @@ export const CARD_SETTINGS_WINDOW_STATE_EVENT = "card-settings-window-state";
 export const CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT = "card-settings-window-state-request";
 export const CARD_SETTINGS_WINDOW_UPDATE_EVENT = "card-settings-window-update";
 export const CARD_SETTINGS_WINDOW_CLOSE_EVENT = "card-settings-window-close";
+export const CARD_SETTINGS_WINDOW_ACTION_EVENT = "card-settings-window-action";
 
 export const WIDGET_MENU_ACTION_EVENT = "widget-menu-action";
 export const WIDGET_MENU_STATE_EVENT = "widget-menu-state";
@@ -44,12 +45,19 @@ export type SettingsWindowStateRequestPayload = {
 export type CardSettingsWindowStatePayload = {
   selectedCard: SelectedCard;
   draft: CardDraft;
+  mergeState: CourseCardMergeState;
 };
 
 export type CardSettingsWindowUpdatePayload = {
   windowLabel: string;
   selectedCard: SelectedCard;
   draft: CardDraft;
+};
+
+export type CardSettingsWindowActionPayload = {
+  windowLabel: string;
+  selectedCard: SelectedCard;
+  action: "merge-right" | "split";
 };
 
 export type CardSettingsWindowStateRequestPayload = {

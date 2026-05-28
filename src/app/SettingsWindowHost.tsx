@@ -21,6 +21,7 @@ import {
 
 const defaultSettings: WidgetSettingsState = {
   workdayMode: "mon-fri",
+  periodCount: 8,
   term: {
     startDate: "2026-03-05",
     endDate: "2026-06-30",
@@ -32,7 +33,7 @@ const defaultSettings: WidgetSettingsState = {
 export function SettingsWindowHost() {
   const currentWindow = useMemo(() => getCurrentWindow(), []);
   const [settings, setSettings] = useState<WidgetSettingsState>(defaultSettings);
-  const [activeSection, setActiveSection] = useState<SettingsSection>("workdays");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("schedule");
   const settingsRef = useRef(settings);
   const activeSectionRef = useRef(activeSection);
   const computedWeek = useMemo(() => calculateWeekNumber(settings.term.startDate, new Date()), [settings.term.startDate]);
@@ -46,10 +47,11 @@ export function SettingsWindowHost() {
 
   useEffect(() => {
     const unlistenState = listen<SettingsWindowStatePayload>(SETTINGS_WINDOW_STATE_EVENT, (event) => {
+      const activeSection = normalizeSettingsSection(event.payload.activeSection);
       settingsRef.current = event.payload.settings;
-      activeSectionRef.current = event.payload.activeSection;
+      activeSectionRef.current = activeSection;
       setSettings(event.payload.settings);
-      setActiveSection(event.payload.activeSection);
+      setActiveSection(activeSection);
     });
 
     void emitTo(WIDGET_WINDOW_LABEL, SETTINGS_WINDOW_STATE_REQUEST_EVENT, {
@@ -108,4 +110,8 @@ function calculateWeekNumber(startDate: string, currentDate: Date): number {
   const currentDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
   const diffDays = Math.floor((currentDay - startDay) / 86400000);
   return Math.max(1, Math.floor(diffDays / 7) + 1);
+}
+
+function normalizeSettingsSection(section: SettingsSection | string): SettingsSection {
+  return section === "term" || section === "appearance" ? section : "schedule";
 }

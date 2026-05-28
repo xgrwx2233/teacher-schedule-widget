@@ -1,5 +1,5 @@
 import type { CSSProperties, PointerEvent, ReactNode, RefObject } from "react";
-import type { CardStyle, PeriodInfo, Schedule, ScheduleCourseRow, ScheduleMergedRow, Weekday } from "../../features/schedule/types";
+import type { CardStyle, CourseCell, PeriodInfo, Schedule, ScheduleCourseRow, Weekday } from "../../features/schedule/types";
 import type { SelectedCard } from "../../features/settings/settingsTypes";
 import type { WindowMode } from "../../features/windowMode/types";
 
@@ -135,18 +135,19 @@ function ScheduleBlockView({
 
       <div className="schedule-row-cells">
         {block.rows.map((row, index) => (
-          <div className={row.type === "course" ? "course-row-grid" : "merged-row-grid"} key={row.id}>
-            {row.type === "course" ? (
-              weekdays.map((weekday) => (
-                <ColumnItem key={`${row.id}-${weekday}`} showDivider={index > 0}>
-                  <CourseCard course={row.courses[weekday]} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
+          <div className="course-row-grid" key={row.id}>
+            {weekdays.map((weekday) => {
+              const course = row.courses[weekday];
+              if (!course || course.mergedInto) {
+                return null;
+              }
+
+              return (
+                <ColumnItem key={`${row.id}-${weekday}`} showDivider={index > 0} span={course.colSpan ?? 1}>
+                  <CourseCard course={course} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
                 </ColumnItem>
-              ))
-            ) : (
-              <ColumnItem showDivider={index > 0}>
-                <MergedSlot row={row} />
-              </ColumnItem>
-            )}
+              );
+            })}
           </div>
         ))}
       </div>
@@ -160,7 +161,7 @@ function CourseCard({
   onCourseClick,
   onCardEdit,
 }: {
-  course: ScheduleCourseRow["courses"][Weekday];
+  course: CourseCell;
   activeCellId: string | null;
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
@@ -174,6 +175,8 @@ function CourseCard({
       title={`${course.title} ${course.room ?? ""}`}
       onClick={() => {
         onCourseClick(course.id);
+      }}
+      onDoubleClick={() => {
         onCardEdit({ type: "course", courseId: course.id });
       }}
     >
@@ -183,29 +186,17 @@ function CourseCard({
   );
 }
 
-function MergedSlot({ row }: { row: ScheduleMergedRow }) {
-  return (
-    <button
-      className="merged-card"
-      type="button"
-      data-period-id={row.period.id}
-      style={toCardCssVars(row.style)}
-    >
-      <strong>{row.title}</strong>
-      {row.subtitle && <span>{row.subtitle}</span>}
-    </button>
-  );
-}
-
 function ColumnItem({
   children,
   showDivider = false,
+  span = 1,
 }: {
   children: ReactNode;
   showDivider?: boolean;
+  span?: number;
 }) {
   return (
-    <div className="column-item">
+    <div className="column-item" style={{ gridColumn: span > 1 ? `span ${span}` : undefined }}>
       {showDivider && <div className="row-divider" aria-hidden="true" />}
       {children}
     </div>
@@ -214,7 +205,7 @@ function ColumnItem({
 
 function PeriodCard({ period, onClick }: { period: PeriodInfo; onClick: () => void }) {
   return (
-    <button className="period-card" type="button" data-period-id={period.id} style={toCardCssVars(period.style)} onClick={onClick}>
+    <button className="period-card" type="button" data-period-id={period.id} style={toCardCssVars(period.style)} onDoubleClick={onClick}>
       <strong>{period.label}</strong>
       <span>{period.time}</span>
     </button>

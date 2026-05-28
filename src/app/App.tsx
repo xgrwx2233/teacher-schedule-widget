@@ -22,6 +22,7 @@ import {
   defaultAppearanceSettings,
   type BlockSettingsState,
   type CardDraft,
+  type CourseCardMergeState,
   type SelectedCard,
   type SettingsSection,
   type WidgetSettingsState,
@@ -29,6 +30,7 @@ import {
 } from "../features/settings/settingsTypes";
 import {
   CARD_SETTINGS_WINDOW_LABEL,
+  CARD_SETTINGS_WINDOW_ACTION_EVENT,
   CARD_SETTINGS_WINDOW_CLOSE_EVENT,
   CARD_SETTINGS_WINDOW_STATE_EVENT,
   CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT,
@@ -45,6 +47,7 @@ import {
   type WidgetMenuAction,
   type WidgetMenuStatePayload,
   type CardSettingsWindowStatePayload,
+  type CardSettingsWindowActionPayload,
   type CardSettingsWindowUpdatePayload,
   type CardSettingsWindowStateRequestPayload,
   type SettingsWindowStatePayload,
@@ -70,6 +73,7 @@ declare global {
 
 const defaultSettings: WidgetSettingsState = {
   workdayMode: "mon-fri",
+  periodCount: 8,
   term: {
     startDate: "2026-03-05",
     endDate: "2026-06-30",
@@ -89,10 +93,11 @@ export function App() {
   const menuOpenRef = useRef(false);
   const menuClosedAtRef = useRef(0);
   const modeRef = useRef<WindowMode>("attached");
+  const lastForwardedCardClickRef = useRef<{ key: string; time: number } | null>(null);
 
   const [mode, setMode] = useState<WindowMode>("attached");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("workdays");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("schedule");
   const [settings, setSettings] = useState<WidgetSettingsState>(defaultSettings);
   const [schedule, setSchedule] = useState<Schedule>(mockSchedule);
   const [hovered, setHovered] = useState(false);
@@ -119,8 +124,9 @@ export function App() {
       ...schedule,
       weekNumber: computedWeek,
       days: getVisibleDays(settings.workdayMode),
+      blocks: limitScheduleRows(schedule.blocks, settings.periodCount),
     }),
-    [computedWeek, schedule, settings.workdayMode],
+    [computedWeek, schedule, settings.periodCount, settings.workdayMode],
   );
   const widgetStyle = useMemo(() => buildWidgetStyle(settings.appearance, visibleSchedule), [settings.appearance, visibleSchedule]);
 
@@ -270,6 +276,7 @@ export function App() {
       await emitTo<CardSettingsWindowStatePayload>(CARD_SETTINGS_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_EVENT, {
         selectedCard: card,
         draft,
+        mergeState: getCourseCardMergeState(schedule, card),
       });
     } catch (error) {
       console.error("failed to open card settings window", error);
@@ -279,6 +286,7 @@ export function App() {
   useEffect(() => {
     const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
       const nextSchedule = applyBlockSettingsToSchedule(scheduleRef.current, event.payload.settings.blockSettings);
+      const visibleScheduleForRows = applyPeriodCountToSchedule(nextSchedule, event.payload.settings.periodCount);
       const nextSettings = {
         ...event.payload.settings,
         appearance: {
@@ -296,17 +304,17 @@ export function App() {
 
       settingsRef.current = nextSettings;
       scheduleRef.current = nextSchedule;
-      settingsSectionRef.current = event.payload.activeSection;
+      settingsSectionRef.current = normalizeSettingsSection(event.payload.activeSection);
       setSettings(nextSettings);
-      setSettingsSection(event.payload.activeSection);
+      setSettingsSection(normalizeSettingsSection(event.payload.activeSection));
       setSchedule(nextSchedule);
-      void resizeDetachedWidgetToSchedule(nextSchedule, rowHeight);
+      void resizeDetachedWidgetToSchedule(visibleScheduleForRows, rowHeight);
     });
 
     const unlistenRequest = listen<SettingsWindowStateRequestPayload>(SETTINGS_WINDOW_STATE_REQUEST_EVENT, (event) => {
       void emitTo<SettingsWindowStatePayload>(event.payload.windowLabel, SETTINGS_WINDOW_STATE_EVENT, {
         settings: settingsRef.current,
-        activeSection: settingsSectionRef.current,
+        activeSection: normalizeSettingsSection(settingsSectionRef.current),
       });
     });
 
@@ -340,7 +348,7 @@ export function App() {
 
     void emitTo<SettingsWindowStatePayload>(SETTINGS_WINDOW_LABEL, SETTINGS_WINDOW_STATE_EVENT, {
       settings,
-      activeSection: settingsSection,
+      activeSection: normalizeSettingsSection(settingsSection),
     });
   }, [settings, settingsSection]);
 
@@ -348,7 +356,22 @@ export function App() {
     const unlistenUpdate = listen<CardSettingsWindowUpdatePayload>(CARD_SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
       setSelectedCard(event.payload.selectedCard);
       setCardDraft(event.payload.draft);
-      setSchedule((current) => applyCardDraft(current, event.payload.selectedCard, event.payload.draft));
+      setSchedule((current) => {
+        const nextSchedule = applyCardDraft(current, event.payload.selectedCard, event.payload.draft);
+        scheduleRef.current = nextSchedule;
+        void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, event.payload.draft, nextSchedule);
+        return nextSchedule;
+      });
+    });
+
+    const unlistenAction = listen<CardSettingsWindowActionPayload>(CARD_SETTINGS_WINDOW_ACTION_EVENT, (event) => {
+      const nextSchedule = applyCourseCardAction(scheduleRef.current, event.payload.selectedCard, event.payload.action);
+      const nextDraft = createDraftForCard(nextSchedule, event.payload.selectedCard, settingsRef.current.term);
+      scheduleRef.current = nextSchedule;
+      cardDraftRef.current = nextDraft;
+      setSchedule(nextSchedule);
+      setCardDraft(nextDraft);
+      void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, nextDraft, nextSchedule);
     });
 
     const unlistenRequest = listen<CardSettingsWindowStateRequestPayload>(CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT, (event) => {
@@ -360,6 +383,7 @@ export function App() {
       void emitTo<CardSettingsWindowStatePayload>(event.payload.windowLabel, CARD_SETTINGS_WINDOW_STATE_EVENT, {
         selectedCard: currentCard,
         draft: cardDraftRef.current,
+        mergeState: getCourseCardMergeState(scheduleRef.current, currentCard),
       });
     });
 
@@ -371,6 +395,7 @@ export function App() {
 
     return () => {
       void unlistenUpdate.then((unlisten) => unlisten());
+      void unlistenAction.then((unlisten) => unlisten());
       void unlistenRequest.then((unlisten) => unlisten());
       void unlistenClose.then((unlisten) => unlisten());
     };
@@ -422,6 +447,21 @@ export function App() {
       if (menuOpenRef.current) {
         void closeWidgetMenu();
         return;
+      }
+
+      if (hit.editableCard) {
+        const key = selectedCardKey(hit.editableCard);
+        const now = Date.now();
+        const previous = lastForwardedCardClickRef.current;
+        lastForwardedCardClickRef.current = { key, time: now };
+
+        if (hit.editableCard.type === "course") {
+          setActiveCellId(hit.editableCard.courseId);
+        }
+
+        if (previous?.key === key && now - previous.time <= 320) {
+          void openCardSettings(hit.editableCard);
+        }
       }
     });
 
@@ -582,6 +622,109 @@ function getVisibleDays(mode: WorkdayMode): Schedule["days"] {
   return allScheduleDays.slice(0, 5);
 }
 
+function normalizeSettingsSection(section: SettingsSection | string): SettingsSection {
+  return section === "term" || section === "appearance" ? section : "schedule";
+}
+
+function limitScheduleRows(scheduleBlocks: Schedule["blocks"], periodCount: number): Schedule["blocks"] {
+  const count = Math.max(1, Math.min(periodCount, 12));
+  let remaining = count;
+  const blocks: Schedule["blocks"] = [];
+
+  for (const block of scheduleBlocks) {
+    if (remaining <= 0) {
+      break;
+    }
+
+    const rows: ScheduleRow[] = [];
+    for (const row of block.rows) {
+      if (remaining <= 0) {
+        break;
+      }
+
+      rows.push(row);
+      remaining -= 1;
+    }
+
+    if (rows.length > 0) {
+      blocks.push({ ...block, rows });
+    }
+  }
+
+  if (remaining > 0) {
+    const fallbackBlock = scheduleBlocks[scheduleBlocks.length - 1];
+    if (fallbackBlock) {
+      const rows = [...fallbackBlock.rows];
+      while (remaining > 0) {
+        const previous = rows[rows.length - 1];
+        const index = rows.length + 1;
+        rows.push({
+          ...createFallbackRow(fallbackBlock.id, index, previous),
+        });
+        remaining -= 1;
+      }
+      blocks[blocks.length - 1] = { ...fallbackBlock, rows };
+    }
+  }
+
+  return blocks;
+}
+
+function applyPeriodCountToSchedule(schedule: Schedule, periodCount: number): Schedule {
+  return {
+    ...schedule,
+    blocks: limitScheduleRows(schedule.blocks, periodCount),
+  };
+}
+
+function createFallbackRow(blockId: string, order: number, previous?: ScheduleRow): ScheduleRow {
+  const minutes = previous ? timeToMinutes(previous.period.time.split("-")[1]) : 480 + (order - 1) * 55;
+  const start = minutes;
+  const end = minutes + 45;
+  const startLabel = minutesToTime(start);
+  const endLabel = minutesToTime(end);
+  return {
+    id: `${blockId}-auto-${order}`,
+    type: "course",
+    period: {
+      id: `${blockId}-auto-${order}`,
+      label: `第${order}节`,
+      time: `${startLabel}-${endLabel}`,
+    },
+    courses: Object.fromEntries(
+      allScheduleDays.map((day) => [
+        day.id,
+        {
+          id: `${blockId}-auto-${order}-${day.id}`,
+          title: "",
+          room: "",
+          colSpan: 1,
+          scheduleRule: {
+            weekPattern: "all",
+            applyWholeTerm: true,
+          },
+        } satisfies CourseCell,
+      ]),
+    ) as Record<Weekday, CourseCell>,
+  };
+}
+
+function minutesToTime(totalMinutes: number): string {
+  const normalized = ((totalMinutes % 1440) + 1440) % 1440;
+  const hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+    return 0;
+  }
+
+  return hours * 60 + minutes;
+}
+
 function updateActiveWidgetMode(registry: WidgetRegistryState, mode: WindowMode): WidgetRegistryState {
   return {
     ...registry,
@@ -639,10 +782,14 @@ function isSameSelectedCard(left: SelectedCard, right: SelectedCard): boolean {
   }
 }
 
+function selectedCardKey(card: SelectedCard): string {
+  return card.type === "course" ? `course:${card.courseId}` : `period:${card.periodId}`;
+}
+
 function handleProxyWidgetHit(
   hit: ProxyWidgetHit,
   openWidgetMenu: () => Promise<void>,
-  openCardSettings: (card: SelectedCard) => Promise<void>,
+  _openCardSettings: (card: SelectedCard) => Promise<void>,
   setActiveCellId: (value: string | null) => void,
   setMenuOpen: (value: boolean) => void,
   menuOpenRef: MutableRefObject<boolean>,
@@ -657,12 +804,10 @@ function handleProxyWidgetHit(
 
   if (hit.kind === "course" && hit.id) {
     setActiveCellId(hit.id);
-    void openCardSettings({ type: "course", courseId: hit.id });
     return;
   }
 
   if (hit.kind === "period" && hit.id) {
-    void openCardSettings({ type: "period", periodId: hit.id });
     return;
   }
 }
@@ -737,7 +882,7 @@ async function resizeDetachedWidgetToSchedule(schedule: Schedule, rowHeight: num
 }
 
 function blockHeightUnits(block: BlockSettingsState["blocks"][number]): number {
-  return block.periods.some((period) => period.type === "merged") ? 1.15 : Math.max(1, block.periods.length);
+  return Math.max(1, block.periods.length);
 }
 
 function calculateWeekNumber(startDate: string, currentDate: Date): number {
@@ -755,16 +900,16 @@ function calculateWeekNumber(startDate: string, currentDate: Date): number {
 function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedule: Schedule): CSSProperties {
   const blockTracks = schedule.blocks
     .map((block) => {
-      const fallback = block.rows.some((row) => row.type === "merged") ? 1.15 : Math.max(1, block.rows.length);
+      const fallback = Math.max(1, block.rows.length);
       const height = appearance.blockHeights[block.id] ?? fallback;
-      const minHeight = block.rows.some((row) => row.type === "merged") ? "44px" : "0";
-      return `minmax(${minHeight}, ${height}fr)`;
+      return `minmax(0, ${height}fr)`;
     })
     .join(" ");
 
   return {
     "--column-gap": `${appearance.columnGap}px`,
     "--row-divider": appearance.rowDividerColor,
+    "--row-divider-rgb": hexToRgbParts(appearance.rowDividerColor),
     "--row-divider-opacity": String(appearance.rowDividerOpacity),
     "--row-divider-style": appearance.rowDividerStyle,
     "--row-divider-thickness": `${appearance.rowDividerThickness}px`,
@@ -773,6 +918,16 @@ function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedul
     "--block-card-radius": `${appearance.blockCardCornerRadius}px`,
     "--schedule-block-tracks": blockTracks,
   } as CSSProperties;
+}
+
+function hexToRgbParts(value: string): string {
+  const normalized = value.trim();
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(normalized);
+  if (!match) {
+    return "102 91 78";
+  }
+
+  return `${parseInt(match[1], 16)} ${parseInt(match[2], 16)} ${parseInt(match[3], 16)}`;
 }
 
 function createDraftForCard(
@@ -824,6 +979,44 @@ function applyCardDraft(schedule: Schedule, selectedCard: SelectedCard | null, d
   return { ...schedule, blocks };
 }
 
+function emitCardSettingsState(windowLabel: string, selectedCard: SelectedCard, draft: CardDraft, schedule: Schedule) {
+  return emitTo<CardSettingsWindowStatePayload>(windowLabel, CARD_SETTINGS_WINDOW_STATE_EVENT, {
+    selectedCard,
+    draft,
+    mergeState: getCourseCardMergeState(schedule, selectedCard),
+  });
+}
+
+function getCourseCardMergeState(schedule: Schedule, selectedCard: SelectedCard): CourseCardMergeState {
+  if (selectedCard.type !== "course") {
+    return { canMergeRight: false, canSplit: false };
+  }
+
+  const location = findCourseLocation(schedule, selectedCard.courseId);
+  if (!location) {
+    return { canMergeRight: false, canSplit: false, reason: "未找到课程卡片" };
+  }
+
+  const course = location.course;
+  const canSplit = (course.colSpan ?? 1) > 1;
+  const rightCourse = findRightNeighbor(location);
+  const canMergeRight = Boolean(rightCourse && canMergeCourses(course, rightCourse));
+  const reason = canMergeRight || canSplit ? undefined : "右侧相邻卡片内容不一致";
+  return { canMergeRight, canSplit, reason };
+}
+
+function applyCourseCardAction(schedule: Schedule, selectedCard: SelectedCard, action: CardSettingsWindowActionPayload["action"]): Schedule {
+  if (selectedCard.type !== "course") {
+    return schedule;
+  }
+
+  if (action === "merge-right") {
+    return mergeCourseCardRight(schedule, selectedCard.courseId);
+  }
+
+  return splitCourseCard(schedule, selectedCard.courseId);
+}
+
 function applyBlockSettingsToSchedule(schedule: Schedule, nextBlockSettings: BlockSettingsState): Schedule {
   const dayIds = schedule.days.map((day) => day.id);
   const blocks = nextBlockSettings.blocks.map((settingBlock) => {
@@ -840,25 +1033,7 @@ function applyBlockSettingsToSchedule(schedule: Schedule, nextBlockSettings: Blo
       cardCornerRadius: settingBlock.cardCornerRadius,
       rows: settingBlock.periods.map((periodSetting, rowIndex) => {
         const templateRow = rowTemplates.find((item) => item.id === periodSetting.id) ?? rowTemplates[rowIndex];
-        if (periodSetting.type === "merged") {
-          return {
-            id: periodSetting.id,
-            type: "merged",
-            period: {
-              ...(templateRow && templateRow.type === "merged" ? templateRow.period : {}),
-              id: periodSetting.id,
-              label: periodSetting.name,
-              time: `${periodSetting.startTime}-${periodSetting.endTime}`,
-            },
-            title: settingBlock.name || periodSetting.name,
-            subtitle: templateRow && templateRow.type === "merged" ? templateRow.subtitle : "",
-            style: {
-              backgroundColor: settingBlock.cardBackgroundColor,
-            },
-          } satisfies ScheduleRow;
-        }
-
-        const row = templateRow && templateRow.type === "course" ? templateRow : null;
+        const row = templateRow ?? null;
         return {
           id: `${settingBlock.id}-${periodSetting.id}`,
           type: "course",
@@ -870,11 +1045,13 @@ function applyBlockSettingsToSchedule(schedule: Schedule, nextBlockSettings: Blo
           },
           courses: Object.fromEntries(
             dayIds.map((weekday) => {
-              const course = row?.courses[weekday] ?? createEmptyCourse(settingBlock.id, periodSetting.id, weekday);
+              const course = row?.courses[weekday] ?? createEmptyCourse(settingBlock.id, periodSetting.id, weekday, settingBlock.cardBackgroundColor, periodSetting.name, settingBlock.name);
               return [
                 weekday,
                 {
                   ...course,
+                  mergedInto: undefined,
+                  colSpan: course.colSpan ?? 1,
                   style: {
                     ...course.style,
                     backgroundColor: settingBlock.cardBackgroundColor,
@@ -891,11 +1068,12 @@ function applyBlockSettingsToSchedule(schedule: Schedule, nextBlockSettings: Blo
   return { ...schedule, blocks };
 }
 
-function createEmptyCourse(blockId: string, periodId: string, weekday: Weekday, backgroundColor = "#fff8e1"): CourseCell {
+function createEmptyCourse(blockId: string, periodId: string, weekday: Weekday, backgroundColor = "#fff8e1", title = "", room = ""): CourseCell {
   return {
     id: `${blockId}-${periodId}-${weekday}`,
-    title: "",
-    room: "",
+    title,
+    room,
+    colSpan: 1,
     style: {
       backgroundColor,
     },
@@ -915,14 +1093,6 @@ function applyDraftToBlock(
   return {
     ...block,
     rows: block.rows.map((row) => {
-      if (row.type === "merged") {
-        if (selectedCard.type === "period" && selectedCard.periodId === row.period.id) {
-          return { ...row, period: { ...row.period, label: draft.title, time: draft.secondary, style }, title: draft.title, subtitle: draft.secondary };
-        }
-
-        return row;
-      }
-
       if (selectedCard.type === "period" && selectedCard.periodId === row.period.id) {
         return { ...row, period: { ...row.period, label: draft.title, time: draft.secondary, style } };
       }
@@ -947,6 +1117,19 @@ function applyDraftToBlock(
                   endDate: draft.applyWholeTerm ? undefined : draft.endDate,
                 } satisfies CourseScheduleRule,
               }
+            : course.mergedInto === selectedCard.courseId
+              ? {
+                  ...course,
+                  title: draft.title,
+                  room: draft.secondary,
+                  style,
+                  scheduleRule: {
+                    weekPattern: draft.weekPattern,
+                    applyWholeTerm: draft.applyWholeTerm,
+                    startDate: draft.applyWholeTerm ? undefined : draft.startDate,
+                    endDate: draft.applyWholeTerm ? undefined : draft.endDate,
+                  } satisfies CourseScheduleRule,
+                }
             : course,
         ]),
       ) as Record<Weekday, CourseCell>;
@@ -956,21 +1139,130 @@ function applyDraftToBlock(
   };
 }
 
-function findCourse(schedule: Schedule, courseId: string): CourseCell | undefined {
-  for (const block of schedule.blocks) {
-    for (const row of block.rows) {
-      if (row.type !== "course") {
-        continue;
-      }
+type CourseLocation = {
+  blockIndex: number;
+  rowIndex: number;
+  weekday: Weekday;
+  weekdayIndex: number;
+  row: ScheduleRow;
+  course: CourseCell;
+  weekdays: Weekday[];
+};
 
-      const course = Object.values(row.courses).find((item) => item.id === courseId);
-      if (course) {
-        return course;
+function findCourseLocation(schedule: Schedule, courseId: string): CourseLocation | null {
+  const weekdays = schedule.days.map((day) => day.id);
+  for (const [blockIndex, block] of schedule.blocks.entries()) {
+    for (const [rowIndex, row] of block.rows.entries()) {
+      for (const [weekdayIndex, weekday] of weekdays.entries()) {
+        const course = row.courses[weekday];
+        if (course?.id === courseId) {
+          return { blockIndex, rowIndex, weekday, weekdayIndex, row, course, weekdays };
+        }
       }
     }
   }
 
-  return undefined;
+  return null;
+}
+
+function findRightNeighbor(location: CourseLocation): CourseCell | null {
+  const nextWeekday = location.weekdays[location.weekdayIndex + (location.course.colSpan ?? 1)];
+  return nextWeekday ? location.row.courses[nextWeekday] ?? null : null;
+}
+
+function canMergeCourses(left: CourseCell, right: CourseCell): boolean {
+  return !left.mergedInto && !right.mergedInto && (right.colSpan ?? 1) === 1 && left.title === right.title && (left.room ?? "") === (right.room ?? "");
+}
+
+function mergeCourseCardRight(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  const rightCourse = location ? findRightNeighbor(location) : null;
+  if (!location || !rightCourse || !canMergeCourses(location.course, rightCourse)) {
+    return schedule;
+  }
+
+  const rightWeekday = location.weekdays[location.weekdayIndex + (location.course.colSpan ?? 1)];
+  if (!rightWeekday) {
+    return schedule;
+  }
+
+  const blocks = schedule.blocks.map((block, blockIndex) => {
+    if (blockIndex !== location.blockIndex) {
+      return block;
+    }
+
+    return {
+      ...block,
+      rows: block.rows.map((row, rowIndex) => {
+        if (rowIndex !== location.rowIndex) {
+          return row;
+        }
+
+        return {
+          ...row,
+          courses: {
+            ...row.courses,
+            [location.weekday]: {
+              ...location.course,
+              colSpan: (location.course.colSpan ?? 1) + 1,
+            },
+            [rightWeekday]: {
+              ...rightCourse,
+              mergedInto: location.course.id,
+            },
+          },
+        };
+      }),
+    };
+  });
+
+  return { ...schedule, blocks };
+}
+
+function splitCourseCard(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  if (!location || (location.course.colSpan ?? 1) <= 1) {
+    return schedule;
+  }
+
+  const span = location.course.colSpan ?? 1;
+  const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + span);
+  const blocks = schedule.blocks.map((block, blockIndex) => {
+    if (blockIndex !== location.blockIndex) {
+      return block;
+    }
+
+    return {
+      ...block,
+      rows: block.rows.map((row, rowIndex) => {
+        if (rowIndex !== location.rowIndex) {
+          return row;
+        }
+
+        const courses = { ...row.courses };
+        courses[location.weekday] = { ...location.course, colSpan: 1 };
+        for (const weekday of coveredWeekdays) {
+          courses[weekday] = {
+            ...courses[weekday],
+            title: location.course.title,
+            room: location.course.room,
+            style: location.course.style,
+            scheduleRule: location.course.scheduleRule,
+            colSpan: 1,
+            mergedInto: undefined,
+          };
+        }
+
+        return { ...row, courses };
+      }),
+    };
+  });
+
+  return { ...schedule, blocks };
+}
+
+function findCourse(schedule: Schedule, courseId: string): CourseCell | undefined {
+  return findCourseLocation(schedule, courseId)?.course;
 }
 
 function findPeriod(schedule: Schedule, periodId: string): PeriodInfo | undefined {

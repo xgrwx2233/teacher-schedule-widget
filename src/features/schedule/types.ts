@@ -41,6 +41,8 @@ export type CourseCell = {
   title: string;
   room?: string;
   note?: string;
+  colSpan?: number;
+  mergedInto?: string;
   style?: CardStyle;
   scheduleRule?: CourseScheduleRule;
 };
@@ -52,16 +54,7 @@ export type ScheduleCourseRow = {
   courses: Record<Weekday, CourseCell>;
 };
 
-export type ScheduleMergedRow = {
-  id: string;
-  type: "merged";
-  period: PeriodInfo;
-  title: string;
-  subtitle?: string;
-  style?: CardStyle;
-};
-
-export type ScheduleRow = ScheduleCourseRow | ScheduleMergedRow;
+export type ScheduleRow = ScheduleCourseRow;
 
 export type ScheduleBlock = {
   id: string;
