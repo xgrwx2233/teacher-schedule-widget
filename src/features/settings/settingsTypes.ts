@@ -14,6 +14,8 @@ export type AppearanceSettings = {
   rowDividerColor: string;
   rowDividerOpacity: number;
   rowDividerThickness: number;
+  cardRadius: number;
+  cardShadowStrength: number;
 };
 
 export type WidgetSettingsState = {
@@ -55,7 +57,40 @@ export const defaultAppearanceSettings: AppearanceSettings = {
   rowDividerColor: "#665b4e",
   rowDividerOpacity: 0.16,
   rowDividerThickness: 1,
+  cardRadius: 12,
+  cardShadowStrength: 2,
 };
+
+export const cardShadowStrengthLabels = ["无阴影", "极轻", "轻", "标准", "明显"] as const;
+
+export function normalizeCardRadius(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return defaultAppearanceSettings.cardRadius;
+  }
+
+  return Math.max(0, Math.min(24, Math.round(value)));
+}
+
+export function normalizeCardShadowStrength(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return defaultAppearanceSettings.cardShadowStrength;
+  }
+
+  return Math.max(0, Math.min(4, Math.round(value)));
+}
+
+export function normalizeAppearanceSettings(appearance?: Partial<AppearanceSettings> | null): AppearanceSettings {
+  return {
+    columnGap: appearance?.columnGap ?? defaultAppearanceSettings.columnGap,
+    rowDividerHeight: appearance?.rowDividerHeight ?? defaultAppearanceSettings.rowDividerHeight,
+    rowDividerStyle: appearance?.rowDividerStyle ?? defaultAppearanceSettings.rowDividerStyle,
+    rowDividerColor: appearance?.rowDividerColor ?? defaultAppearanceSettings.rowDividerColor,
+    rowDividerOpacity: appearance?.rowDividerOpacity ?? defaultAppearanceSettings.rowDividerOpacity,
+    rowDividerThickness: appearance?.rowDividerThickness ?? defaultAppearanceSettings.rowDividerThickness,
+    cardRadius: normalizeCardRadius(appearance?.cardRadius),
+    cardShadowStrength: normalizeCardShadowStrength(appearance?.cardShadowStrength),
+  };
+}
 
 export const defaultCardDraft: CardDraft = {
   title: "",

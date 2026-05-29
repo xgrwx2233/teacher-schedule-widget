@@ -4,6 +4,10 @@ import type {
   SettingsSection,
   WidgetSettingsState,
 } from "../../features/settings/settingsTypes";
+import {
+  cardShadowStrengthLabels,
+  normalizeAppearanceSettings,
+} from "../../features/settings/settingsTypes";
 
 type SettingsWindowProps = {
   open: boolean;
@@ -200,20 +204,19 @@ function TermPanel({
 }
 
 function AppearancePanel({
-  settings: _settings,
-  onSettingsChange: _onSettingsChange,
+  settings,
+  onSettingsChange,
 }: {
   settings: WidgetSettingsState;
   onSettingsChange: (settings: WidgetSettingsState) => void;
 }) {
-  void _settings;
-  void _onSettingsChange;
   const [expandedSections, setExpandedSections] = useState({
     background: true,
     gridlines: false,
     cards: false,
   });
   const [backgroundMode, setBackgroundMode] = useState<"solid" | "glass">("glass");
+  const appearance = normalizeAppearanceSettings(settings.appearance);
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections((current) => ({ ...current, [section]: !current[section] }));
@@ -299,10 +302,28 @@ function AppearancePanel({
           onToggle={() => toggleSection("cards")}
         >
           <StaticSettingRow title="卡片圆角">
-            <StaticSlider value={12} suffix="px" />
+            <StaticSlider
+              value={appearance.cardRadius}
+              suffix="px"
+              min={0}
+              max={24}
+              onChange={(cardRadius) => onSettingsChange({
+                ...settings,
+                appearance: { ...appearance, cardRadius },
+              })}
+            />
           </StaticSettingRow>
           <StaticSettingRow title="卡片阴影强度">
-            <StaticSlider value={2} suffix=" 轻" min={0} max={4} />
+            <StaticSlider
+              value={appearance.cardShadowStrength}
+              suffix={` ${cardShadowStrengthLabels[appearance.cardShadowStrength]}`}
+              min={0}
+              max={4}
+              onChange={(cardShadowStrength) => onSettingsChange({
+                ...settings,
+                appearance: { ...appearance, cardShadowStrength },
+              })}
+            />
           </StaticSettingRow>
         </AppearanceAccordionCard>
       </div>
@@ -377,15 +398,17 @@ function StaticSlider({
   suffix,
   min = 0,
   max = 100,
+  onChange,
 }: {
   value: number;
   suffix: string;
   min?: number;
   max?: number;
+  onChange?: (value: number) => void;
 }) {
   return (
     <div className="appearance-static-slider">
-      <input type="range" min={min} max={max} value={value} readOnly />
+      <input type="range" min={min} max={max} value={value} onChange={(event) => onChange?.(Number(event.currentTarget.value))} />
       <strong>
         {value}
         {suffix}

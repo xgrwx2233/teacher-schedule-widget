@@ -81,7 +81,8 @@ button {
   --row-divider-style: solid;
   --row-divider-thickness: 1px;
   --row-divider-offset: 4px;
-  --course-card-radius: 10px;
+  --schedule-card-radius: 10px;
+  --schedule-card-shadow: 0 2px 5px rgba(0, 0, 0, 0.16);
   width: 100vw;
   height: 100vh;
   min-width: 360px;
@@ -796,7 +797,7 @@ button {
   height: 100%;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: var(--schedule-card-radius, 10px);
 }
 
 .arrow-card {
@@ -906,12 +907,13 @@ button {
   justify-items: end;
   padding: clamp(3px, 0.75vmin, 7px) clamp(2px, 0.8vmin, 6px);
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--schedule-card-radius, 10px);
   background: rgba(var(--widget-border), 0.04);
   color: var(--card-fg, rgba(var(--widget-text), 0.9));
   font-family: var(--card-font, inherit);
   text-align: right;
   cursor: pointer;
+  box-shadow: var(--schedule-card-shadow, none);
 }
 
 .period-card strong {
@@ -938,11 +940,11 @@ button {
   gap: clamp(1px, 0.4vmin, 3px);
   padding: var(--course-padding-y) var(--course-padding-x);
   border: 0;
-  border-radius: var(--course-card-radius, 10px);
+  border-radius: var(--schedule-card-radius, 10px);
   cursor: pointer;
   color: var(--card-fg, currentColor);
   font-family: var(--card-font, inherit);
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--schedule-card-shadow, none);
 }
 
 .course-card span {
@@ -1420,7 +1422,7 @@ button {
 
 .settings-window .appearance-static-slider {
   min-width: 0;
-  width: min(262px, 100%);
+  width: min(230px, 100%);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1428,7 +1430,7 @@ button {
 }
 
 .settings-window .appearance-static-slider input[type="range"] {
-  width: min(210px, 100%);
+  width: min(178px, 100%);
   min-width: 0;
   flex: 1 1 auto;
 }

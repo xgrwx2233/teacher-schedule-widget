@@ -19,6 +19,7 @@ import type {
 import {
   defaultCardDraft,
   defaultAppearanceSettings,
+  normalizeAppearanceSettings,
   type CardDraft,
   type CourseCardMergeState,
   type SelectedCard,
@@ -853,16 +854,35 @@ function calculateWeekNumber(startDate: string, currentDate: Date): number {
 }
 
 function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedule: Schedule): CSSProperties {
+  const normalizedAppearance = normalizeAppearanceSettings(appearance);
   return {
-    "--column-gap": `${appearance.columnGap}px`,
+    "--column-gap": `${normalizedAppearance.columnGap}px`,
     "--schedule-row-count": Math.max(1, schedule.rows.length),
-    "--row-divider": appearance.rowDividerColor,
-    "--row-divider-rgb": hexToRgbParts(appearance.rowDividerColor),
-    "--row-divider-opacity": String(appearance.rowDividerOpacity),
-    "--row-divider-style": appearance.rowDividerStyle,
-    "--row-divider-thickness": `${appearance.rowDividerThickness}px`,
-    "--row-divider-offset": `${appearance.rowDividerHeight}px`,
+    "--row-divider": normalizedAppearance.rowDividerColor,
+    "--row-divider-rgb": hexToRgbParts(normalizedAppearance.rowDividerColor),
+    "--row-divider-opacity": String(normalizedAppearance.rowDividerOpacity),
+    "--row-divider-style": normalizedAppearance.rowDividerStyle,
+    "--row-divider-thickness": `${normalizedAppearance.rowDividerThickness}px`,
+    "--row-divider-offset": `${normalizedAppearance.rowDividerHeight}px`,
+    "--schedule-card-radius": `${normalizedAppearance.cardRadius}px`,
+    "--schedule-card-shadow": mapCardShadowStrength(normalizedAppearance.cardShadowStrength),
   } as CSSProperties;
+}
+
+function mapCardShadowStrength(strength: number): string {
+  switch (strength) {
+    case 0:
+      return "none";
+    case 1:
+      return "0 2px 6px rgba(15, 23, 42, 0.05)";
+    case 2:
+      return "0 4px 12px rgba(15, 23, 42, 0.09)";
+    case 3:
+      return "0 8px 20px rgba(15, 23, 42, 0.13)";
+    case 4:
+    default:
+      return "0 12px 28px rgba(15, 23, 42, 0.18)";
+  }
 }
 
 function hexToRgbParts(value: string): string {
