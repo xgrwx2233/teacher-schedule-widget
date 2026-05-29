@@ -301,23 +301,23 @@ function Icon({ name }: { name: SettingsIconName }) {
   switch (name) {
     case "calendar":
       return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="4" y="5.5" width="16" height="14" rx="3" />
-          <path d="M8 3.5v4M16 3.5v4M4 10h16" />
-          <path d="M8 13h2M12 13h2M8 16h2M12 16h2" />
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+          <rect x="4" y="5.5" width="16" height="14" rx="3" stroke="currentColor" strokeWidth="1.9" />
+          <path d="M8 3.5v4M16 3.5v4M4 10h16" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M8 13h2M12 13h2M8 16h2M12 16h2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
         </svg>
       );
     case "book":
       return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M6 4.5h9a3 3 0 0 1 3 3v12H9a3 3 0 0 0-3 3V4.5Z" />
-          <path d="M6 4.5a3 3 0 0 0-3 3v12a3 3 0 0 1 3-3h6" />
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+          <path d="M7 4.5h8.5a3 3 0 0 1 3 3V19H8.5a3 3 0 0 0-3 3V7.5a3 3 0 0 1 1.5-3Z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
+          <path d="M7 4.5a3 3 0 0 0-3 3V19a3 3 0 0 1 3-3h6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );
     case "palette":
       return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 4.5a8 8 0 1 0 0 16h2.2a1.8 1.8 0 0 0 1.8-1.8 1.2 1.2 0 0 1 1.2-1.2H18a3.5 3.5 0 0 0 0-7h-1a1.8 1.8 0 0 1-1.8-1.8A4.2 4.2 0 0 0 12 4.5Z" />
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+          <path d="M12 4.5a8 8 0 1 0 0 16h2.2a1.8 1.8 0 0 0 1.8-1.8 1.2 1.2 0 0 1 1.2-1.2H18a3.5 3.5 0 0 0 0-7h-1a1.8 1.8 0 0 1-1.8-1.8A4.2 4.2 0 0 0 12 4.5Z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
           <circle cx="8.2" cy="9" r="0.9" fill="currentColor" stroke="none" />
           <circle cx="11.2" cy="7.4" r="0.9" fill="currentColor" stroke="none" />
           <circle cx="15" cy="8.4" r="0.9" fill="currentColor" stroke="none" />

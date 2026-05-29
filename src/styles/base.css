@@ -1026,347 +1026,120 @@ button {
   }
 }
 
-/* Settings window: modern schedule editor */
+/* Settings window: guarded desktop layout */
 .settings-window-wide {
-  width: min(96vw, 1180px);
-  height: min(94vh, 800px);
+  width: min(96vw, 1040px);
+  height: min(94vh, 740px);
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
   background: #ffffff;
+  overflow: hidden;
 }
 
-.settings-body {
-  grid-template-columns: 220px minmax(0, 1fr);
+.settings-window .settings-body {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 198px minmax(0, 1fr);
   background: #ffffff;
+  overflow: hidden;
 }
 
-.settings-sidebar {
+.settings-window .settings-sidebar {
+  width: 198px;
+  min-width: 198px;
+  max-width: 198px;
+  min-height: 0;
+  display: grid;
+  align-content: start;
   gap: 12px;
-  padding: 56px 20px 20px;
+  padding: 32px 14px 14px;
   border-right: 1px solid #e5eaf2;
   background: #f7f8fb;
+  overflow: hidden;
 }
 
-.settings-nav-item {
-  height: 70px;
+.settings-window .settings-content {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  padding: 24px 26px 20px;
+  background: #ffffff;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.settings-window .settings-content > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-window .settings-nav-item {
+  width: 100%;
+  height: 60px;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 20px;
-  border: 0;
-  border-radius: 14px;
+  gap: 14px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 13px;
   color: #4b5563;
   background: transparent;
   font-size: 18px;
   font-weight: 760;
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
 }
 
-.settings-nav-item.is-active {
+.settings-window .settings-nav-item.is-active {
   border-color: transparent;
   background: linear-gradient(135deg, #eef0ff 0%, #e7ebff 100%);
   color: #3f46f6;
   box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.08);
-}.settings-nav-icon {
-  width: 26px;
-  height: 26px;
-  color: currentColor;
-  font-size: 26px;
 }
 
-.settings-content {
-  padding: 32px 40px;
-  background: #ffffff;
-}
-
-.timeline-toolbar {
-  position: static;
-  padding: 0 0 24px;
-  background: transparent;
-}
-
-.toolbar-action-primary {
-  height: 52px;
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 22px;
-  border: 0;
-  border-radius: 12px;
-  color: #ffffff;
-  background: linear-gradient(135deg, #4f46e5 0%, #3f46f6 100%);
-  box-shadow: 0 12px 22px rgba(63, 70, 246, 0.22);
-  font-size: 16px;
-  font-weight: 800;
-}
-
-.toolbar-action-primary:hover {
-  filter: brightness(0.98);
-  box-shadow: 0 14px 26px rgba(63, 70, 246, 0.28);
-}
-
-.toolbar-action-primary:active {
-  transform: translateY(1px);
-  box-shadow: 0 8px 16px rgba(63, 70, 246, 0.22);
-}
-
-.toolbar-action-icon {
-  width: 22px;
-  height: 22px;
-  font-size: 22px;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-.ui-icon-button {
-  width: 44px;
-  height: 44px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #ffffff;
-  color: #64748b;
-  cursor: pointer;
-  font-size: 22px;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    transform 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.ui-icon-button:hover {
-  border-color: #cbd5e1;
-  background: #f8faff;
-  color: #334155;
-}
-
-.ui-icon-button:active {
-  transform: translateY(1px);
-}
-
-.ui-icon-button-add {
-  color: #3f46f6;
-  border-color: #d8defe;
-}
-
-.ui-icon-button-add:hover {
-  background: #f1f4ff;
-  border-color: #c7d2fe;
-}
-
-.ui-icon-button-delete {
-  color: #ff2d35;
-}
-
-.ui-icon-button-delete:hover {
-  border-color: #fecaca;
-  background: #fff1f2;
-}
-
-.ui-icon-button-drag {
-  cursor: grab;
-}
-
-@media (max-width: 1040px) {
-  .settings-body {
-    grid-template-columns: 196px minmax(0, 1fr);
-  }
-
-  .settings-content {
-    padding: 28px;
-  }
-
-  
-
-/* Compact pass for the desktop schedule settings screen. */
-.settings-window-wide {
-  width: min(96vw, 1120px);
-  height: min(94vh, 800px);
-}
-
-.settings-body {
-  grid-template-columns: 208px minmax(0, 1fr);
-  min-width: 0;
-}
-
-.settings-sidebar {
-  width: 208px;
-  padding: 44px 18px 18px;
-}
-
-.settings-nav-item {
-  height: 60px;
-  gap: 14px;
-  padding: 0 18px;
-  border-radius: 13px;
-  font-size: 18px;
-}
-
-.settings-nav-icon {
+.settings-window .settings-nav-icon {
   width: 23px;
   height: 23px;
-  font-size: 23px;
+  min-width: 23px;
+  max-width: 23px;
+  min-height: 23px;
+  max-height: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  flex: 0 0 23px;
+  overflow: hidden;
 }
 
-.settings-content {
+.settings-window .settings-nav-icon svg {
+  width: 23px;
+  height: 23px;
+  max-width: 23px;
+  max-height: 23px;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: 0 0 auto;
+}
+
+.settings-window .settings-panel-section,
+.settings-window .schedule-table-section {
   min-width: 0;
   max-width: 100%;
-  padding: 28px 32px;
-  overflow-x: hidden;
-}
-
-.toolbar-action-primary {
-  height: 46px;
-  gap: 10px;
-  padding: 0 24px;
-  border-radius: 11px;
-  font-size: 16px;
-  box-shadow: 0 10px 18px rgba(63, 70, 246, 0.2);
-}
-
-.toolbar-action-icon {
-  width: 20px;
-  height: 20px;
-  font-size: 20px;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-.ui-icon-button {
-  width: 40px;
-  height: 40px;
-  border-radius: 11px;
-  font-size: 20px;
-}
-
-@media (max-width: 1040px) {
-  .settings-body {
-    grid-template-columns: 200px minmax(0, 1fr);
-  }
-
-  .settings-sidebar {
-    width: 200px;
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-
-  .settings-content {
-    padding: 26px 28px;
-  }.settings-window-wide {
-  width: min(96vw, 1040px);
-  height: min(94vh, 740px);
-}
-
-.settings-body {
-  grid-template-columns: 198px minmax(0, 1fr);
-}
-
-.settings-sidebar {
-  width: 198px;
-  padding: 32px 14px 14px;
-}
-
-.settings-content {
-  padding: 24px 26px 20px;
-  overflow-x: hidden;
-}
-
-.timeline-toolbar {
-  padding-bottom: 18px;
-}
-
-.toolbar-action-primary {
-  height: 46px;
-  padding: 0 22px;
-  gap: 10px;
-  font-size: 16px;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-.ui-icon-button {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  font-size: 16px;
-}.schedule-table-section {
   display: grid;
   gap: 14px;
+  overflow: visible;
 }
 
-.schedule-page-head {
-  display: block;
-}
-
-.schedule-page-copy {
-  min-width: 0;
-}
-
-.schedule-page-copy h3 {
+.settings-window .settings-panel-section h3,
+.settings-window .schedule-page-copy h3 {
   margin: 0;
   color: #1f2937;
   font-size: 18px;
@@ -1374,21 +1147,62 @@ button {
   line-height: 1.2;
 }
 
-.schedule-page-copy p {
-  margin: 8px 0 0;
+.settings-window .settings-panel-section p,
+.settings-window .schedule-page-copy p {
+  margin: 0;
   color: #64748b;
   font-size: 13px;
   line-height: 1.45;
 }
 
-.schedule-config-grid {
+.settings-window .schedule-page-copy p {
+  margin-top: 8px;
+}
+
+.settings-window .form-grid,
+.settings-window .appearance-grid,
+.settings-window .schedule-config-grid {
+  min-width: 0;
+  max-width: 100%;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.schedule-config-card {
+.settings-window .form-grid label,
+.settings-window .appearance-field,
+.settings-window .schedule-config-card {
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-window .form-grid input,
+.settings-window .form-grid select,
+.settings-window .appearance-field input,
+.settings-window .appearance-field select {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-window .appearance-control {
+  min-width: 0;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-window .appearance-control strong {
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.settings-window .schedule-config-card {
   display: grid;
   gap: 12px;
   align-content: start;
@@ -1399,13 +1213,13 @@ button {
   box-shadow: none;
 }
 
-.schedule-config-card header {
+.settings-window .schedule-config-card header {
   min-width: 0;
   display: grid;
   gap: 4px;
 }
 
-.schedule-config-card h4 {
+.settings-window .schedule-config-card h4 {
   margin: 0;
   color: #374151;
   font-size: 12px;
@@ -1413,20 +1227,20 @@ button {
   line-height: 1.25;
 }
 
-.schedule-config-card p {
+.settings-window .schedule-config-card p {
   margin: 0;
   color: #6b7280;
   font-size: 12px;
   line-height: 1.35;
 }
 
-.schedule-option-row {
+.settings-window .schedule-option-row {
   min-width: 0;
   display: grid;
   gap: 8px;
 }
 
-.schedule-choice {
+.settings-window .schedule-choice {
   min-width: 0;
   min-height: 46px;
   padding: 7px 10px;
@@ -1441,49 +1255,49 @@ button {
   cursor: pointer;
 }
 
-.schedule-choice:hover {
+.settings-window .schedule-choice:hover {
   border-color: #c7d2fe;
   background: #f8faff;
 }
 
-.schedule-choice.is-selected {
+.settings-window .schedule-choice.is-selected {
   border-color: #818cf8;
   background: #eef2ff;
   color: #4f46e5;
   box-shadow: none;
 }
 
-.schedule-choice strong {
+.settings-window .schedule-choice strong {
   min-width: 0;
   color: inherit;
   font-size: 13px;
   font-weight: 650;
   line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.schedule-choice-preview {
+.settings-window .schedule-choice-preview {
+  min-width: 0;
   display: flex;
   gap: 5px;
   flex-wrap: nowrap;
   color: #6b7280;
   font-size: 12px;
   font-weight: 400;
-  letter-spacing: 0;
   line-height: 1.35;
+  overflow: hidden;
 }
 
-.schedule-choice.is-selected .schedule-choice-preview {
-  color: #6b7280;
-}
-
-.schedule-choice-preview i {
+.settings-window .schedule-choice-preview i {
   font-style: normal;
 }
 
-.period-stepper {
+.settings-window .period-stepper {
   min-width: 0;
-  height: 34px;
   width: min(100%, 180px);
+  height: 34px;
   justify-self: start;
   display: grid;
   grid-template-columns: 34px 54px auto 34px;
@@ -1491,7 +1305,7 @@ button {
   gap: 8px;
 }
 
-.period-stepper-button {
+.settings-window .period-stepper-button {
   width: 34px;
   height: 34px;
   display: inline-grid;
@@ -1505,17 +1319,17 @@ button {
   cursor: pointer;
 }
 
-.period-stepper-button:hover:not(:disabled) {
+.settings-window .period-stepper-button:hover:not(:disabled) {
   border-color: #c7d2fe;
   background: #eef2ff;
 }
 
-.period-stepper-button:disabled {
+.settings-window .period-stepper-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.period-stepper-value {
+.settings-window .period-stepper-value {
   min-width: 0;
   height: 34px;
   display: grid;
@@ -1526,15 +1340,14 @@ button {
   background: #ffffff;
 }
 
-.period-stepper-value strong {
+.settings-window .period-stepper-value strong {
   color: #111827;
   font-size: 20px;
   font-weight: 700;
   line-height: 1;
-  letter-spacing: 0;
 }
 
-.period-stepper-unit {
+.settings-window .period-stepper-unit {
   color: #6b7280;
   font-size: 12px;
   font-weight: 400;
@@ -1542,20 +1355,69 @@ button {
   white-space: nowrap;
 }
 
+.settings-window .ui-icon-button {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.settings-window .ui-icon-button svg {
+  width: 22px;
+  height: 22px;
+  max-width: 22px;
+  max-height: 22px;
+}
+
+.settings-window .ui-icon-button:hover {
+  border-color: #cbd5e1;
+  background: #f8faff;
+  color: #334155;
+}
+
+.settings-window .ui-icon-button-add {
+  color: #3f46f6;
+  border-color: #d8defe;
+}
+
+.settings-window .ui-icon-button-add:hover {
+  background: #f1f4ff;
+  border-color: #c7d2fe;
+}
+
+.settings-window .ui-icon-button-delete {
+  color: #ff2d35;
+}
+
+.settings-window .ui-icon-button-delete:hover {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.settings-window .ui-icon-button-drag {
+  cursor: grab;
+}
+
 @media (max-width: 1040px) {
-  .settings-body {
-    grid-template-columns: 194px minmax(0, 1fr);
+  .settings-window .settings-body {
+    grid-template-columns: 184px minmax(0, 1fr);
   }
 
-  .settings-sidebar {
-    width: 194px;
+  .settings-window .settings-sidebar {
+    width: 184px;
+    min-width: 184px;
+    max-width: 184px;
+    padding: 24px 12px 12px;
   }
 
-  .settings-content {
+  .settings-window .settings-content {
     padding: 22px 24px 20px;
   }
-
-  
-
-
-
+}
