@@ -6,6 +6,7 @@ export type TermSettings = {
 };
 
 export type DividerStyle = "solid" | "dashed" | "dotted";
+export type GridLineType = "none" | DividerStyle;
 
 export type AppearanceSettings = {
   columnGap: number;
@@ -16,6 +17,10 @@ export type AppearanceSettings = {
   rowDividerThickness: number;
   cardRadius: number;
   cardShadowStrength: number;
+  gridLineType: GridLineType;
+  gridLineColor: string;
+  gridLineWidth: number;
+  gridLineOpacity: number;
 };
 
 export type WidgetSettingsState = {
@@ -59,6 +64,10 @@ export const defaultAppearanceSettings: AppearanceSettings = {
   rowDividerThickness: 1,
   cardRadius: 12,
   cardShadowStrength: 2,
+  gridLineType: "solid",
+  gridLineColor: "#e5eaf2",
+  gridLineWidth: 1,
+  gridLineOpacity: 18,
 };
 
 export const cardShadowStrengthLabels = ["无阴影", "极轻", "轻", "标准", "明显"] as const;
@@ -89,6 +98,10 @@ export function normalizeAppearanceSettings(appearance?: Partial<AppearanceSetti
     rowDividerThickness: appearance?.rowDividerThickness ?? defaultAppearanceSettings.rowDividerThickness,
     cardRadius: normalizeCardRadius(appearance?.cardRadius),
     cardShadowStrength: normalizeCardShadowStrength(appearance?.cardShadowStrength),
+    gridLineType: appearance?.gridLineType ?? defaultAppearanceSettings.gridLineType,
+    gridLineColor: appearance?.gridLineColor ?? defaultAppearanceSettings.gridLineColor,
+    gridLineWidth: typeof appearance?.gridLineWidth === "number" ? appearance.gridLineWidth : defaultAppearanceSettings.gridLineWidth,
+    gridLineOpacity: typeof appearance?.gridLineOpacity === "number" ? appearance.gridLineOpacity : defaultAppearanceSettings.gridLineOpacity,
   };
 }
 

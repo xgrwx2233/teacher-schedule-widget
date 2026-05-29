@@ -9,9 +9,11 @@ type ScheduleWidgetProps = {
   mode: WindowMode;
   menuOpen: boolean;
   hovered: boolean;
+  isHeaderCollapsed: boolean;
   activeCellId: string | null;
   menuButtonRef: RefObject<HTMLButtonElement | null>;
   widgetStyle?: CSSProperties;
+  onToggleHeader: () => void;
   onToggleMenu: () => void;
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
@@ -25,9 +27,11 @@ export function ScheduleWidget({
   mode,
   menuOpen,
   hovered,
+  isHeaderCollapsed,
   activeCellId,
   menuButtonRef,
   widgetStyle,
+  onToggleHeader,
   onToggleMenu,
   onCourseClick,
   onCardEdit,
@@ -37,7 +41,7 @@ export function ScheduleWidget({
   const visibleWeekdays = schedule.days.map((day) => day.id);
 
   return (
-    <section className={`schedule-shell mode-${mode} ${hovered ? "is-forward-hovered" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
+    <section className={`schedule-shell mode-${mode} ${hovered ? "is-forward-hovered" : ""} ${isHeaderCollapsed ? "is-header-collapsed" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
       <div className="schedule-card">
         <header className="schedule-toolbar">
           <div className="toolbar-left" aria-label="周次切换">
@@ -73,8 +77,18 @@ export function ScheduleWidget({
         </header>
 
         <div className="date-row" role="row">
-          <div className="date-cell arrow-cell" aria-hidden="true">
-            <div className="arrow-card">↓</div>
+          <div className="date-cell arrow-cell">
+            <button
+              className="arrow-card header-toggle-button"
+              data-header-toggle="true"
+              type="button"
+              title={isHeaderCollapsed ? "展开顶部栏" : "收起顶部栏"}
+              aria-label={isHeaderCollapsed ? "展开顶部栏" : "收起顶部栏"}
+              aria-pressed={isHeaderCollapsed}
+              onClick={onToggleHeader}
+            >
+              {isHeaderCollapsed ? "↑" : "↓"}
+            </button>
           </div>
           {schedule.days.map((day) => (
             <div className="date-cell" key={day.id}>
@@ -88,24 +102,30 @@ export function ScheduleWidget({
 
         <div className="schedule-grid" role="table" aria-label="教师课程表">
           <div className="timetable-period-column">
-            {schedule.rows.map((row) => (
-              <ColumnItem key={row.id}>
+            {schedule.rows.map((row, index) => (
+              <ColumnItem key={row.id} variant="period" showRowDivider={index < schedule.rows.length - 1}>
                 <PeriodCard period={row.period} onClick={() => onCardEdit({ type: "period", periodId: row.period.id })} />
               </ColumnItem>
             ))}
           </div>
 
           <div className="schedule-row-cells">
-            {schedule.rows.map((row) => (
-              <div className="course-row-grid" key={row.id}>
-                {visibleWeekdays.map((weekday) => {
+            {schedule.rows.map((row, rowIndex) => (
+              <div className={rowIndex < schedule.rows.length - 1 ? "course-row-grid has-row-divider" : "course-row-grid"} key={row.id}>
+                {visibleWeekdays.map((weekday, weekdayIndex) => {
                   const course = row.courses[weekday];
-                  if (!course || course.mergedInto) {
+                  const endsAtLastColumn = weekdayIndex + 1 >= visibleWeekdays.length;
+                  if (!course) {
+                    return <ColumnItem key={`${row.id}-${weekday}`} showColumnDivider={!endsAtLastColumn} />;
+                  }
+                  if (course.mergedInto) {
                     return null;
                   }
+                  const span = course.colSpan ?? 1;
+                  const courseEndsAtLastColumn = weekdayIndex + span >= visibleWeekdays.length;
 
                   return (
-                    <ColumnItem key={`${row.id}-${weekday}`} span={course.colSpan ?? 1}>
+                    <ColumnItem key={`${row.id}-${weekday}`} span={span} showColumnDivider={!courseEndsAtLastColumn}>
                       <CourseCard course={course} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
                     </ColumnItem>
                   );
@@ -153,14 +173,27 @@ function CourseCard({
 }
 
 function ColumnItem({
-  children,
+  children = null,
   span = 1,
+  variant = "course",
+  showRowDivider = false,
+  showColumnDivider = false,
 }: {
-  children: ReactNode;
+  children?: ReactNode;
   span?: number;
+  variant?: "course" | "period";
+  showRowDivider?: boolean;
+  showColumnDivider?: boolean;
 }) {
+  const className = [
+    "column-item",
+    variant === "period" ? "is-period-item" : "is-course-item",
+    showRowDivider ? "has-row-divider" : "",
+    showColumnDivider ? "has-column-divider" : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <div className="column-item" style={{ gridColumn: span > 1 ? `span ${span}` : undefined }}>
+    <div className={className} style={{ gridColumn: span > 1 ? `span ${span}` : undefined }}>
       {children}
     </div>
   );

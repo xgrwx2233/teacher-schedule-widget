@@ -8,6 +8,7 @@ import {
   cardShadowStrengthLabels,
   normalizeAppearanceSettings,
 } from "../../features/settings/settingsTypes";
+import type { GridLineType } from "../../features/settings/settingsTypes";
 
 type SettingsWindowProps = {
   open: boolean;
@@ -271,7 +272,17 @@ function AppearancePanel({
           onToggle={() => toggleSection("gridlines")}
         >
           <StaticSettingRow title="线型">
-            <select className="appearance-combobox" defaultValue="solid" aria-label="线型">
+            <select
+              className="appearance-combobox"
+              value={appearance.gridLineType}
+              aria-label="线型"
+              onChange={(event) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: { ...appearance, gridLineType: event.currentTarget.value as GridLineType },
+                })
+              }
+            >
               <option value="none">无</option>
               <option value="solid">实线</option>
               <option value="dashed">虚线</option>
@@ -279,18 +290,49 @@ function AppearancePanel({
             </select>
           </StaticSettingRow>
           <StaticSettingRow title="线色">
-            <StaticColorPalette previewColor="#E5EAF2" />
+            <StaticColorPalette
+              previewColor={appearance.gridLineColor}
+              swatches={["#DBE7EF", "#F8FAFC", "#E7E2DB"]}
+              onPick={(gridLineColor) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: { ...appearance, gridLineColor },
+                })
+              }
+            />
           </StaticSettingRow>
           <StaticSettingRow title="粗细">
-            <StaticSlider value={1} suffix="px" min={0.5} max={2} />
+            <StaticSlider
+              value={appearance.gridLineWidth}
+              suffix="px"
+              min={0.5}
+              max={2}
+              step={0.5}
+              onChange={(gridLineWidth) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: { ...appearance, gridLineWidth },
+                })
+              }
+            />
           </StaticSettingRow>
           <StaticSettingRow title="透明度">
-            <StaticSlider value={18} suffix="%" />
+            <StaticSlider
+              value={appearance.gridLineOpacity}
+              suffix="%"
+              onChange={(gridLineOpacity) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: { ...appearance, gridLineOpacity },
+                })
+              }
+            />
           </StaticSettingRow>
           <StaticSettingRow title="高级设置">
-            <label className="appearance-switch">
+            <label className="appearance-switch is-disabled">
               <input type="checkbox" readOnly />
               <span>分别设置横线与竖线</span>
+              <small>后续支持</small>
             </label>
           </StaticSettingRow>
         </AppearanceAccordionCard>
@@ -382,13 +424,28 @@ function StaticSettingRow({
   );
 }
 
-function StaticColorPalette({ previewColor }: { previewColor: string }) {
+function StaticColorPalette({
+  previewColor,
+  swatches = ["#DBE7EF", "#F8FAFC", "#E7E2DB"],
+  onPick,
+}: {
+  previewColor: string;
+  swatches?: string[];
+  onPick?: (color: string) => void;
+}) {
   return (
     <div className="appearance-color-palette" aria-label="颜色选择">
-      {["#DBE7EF", "#F8FAFC", "#E7E2DB"].map((color) => (
-        <button key={color} type="button" className="appearance-color-dot" aria-label="预设颜色" style={{ backgroundColor: color }} />
+      {swatches.map((color) => (
+        <button key={color} type="button" className="appearance-color-dot" aria-label="预设颜色" style={{ backgroundColor: color }} onClick={() => onPick?.(color)} />
       ))}
-      <button type="button" className="appearance-color-preview" aria-label="自定义颜色" style={{ backgroundColor: previewColor }} />
+      {onPick ? (
+        <label className="appearance-color-preview" aria-label="自定义颜色">
+          <span style={{ backgroundColor: previewColor }} />
+          <input type="color" value={previewColor} onChange={(event) => onPick(event.currentTarget.value)} />
+        </label>
+      ) : (
+        <button type="button" className="appearance-color-preview" aria-label="自定义颜色" style={{ backgroundColor: previewColor }} />
+      )}
     </div>
   );
 }
@@ -398,19 +455,21 @@ function StaticSlider({
   suffix,
   min = 0,
   max = 100,
+  step = 1,
   onChange,
 }: {
   value: number;
   suffix: string;
   min?: number;
   max?: number;
+  step?: number;
   onChange?: (value: number) => void;
 }) {
   return (
     <div className="appearance-static-slider">
-      <input type="range" min={min} max={max} value={value} onChange={(event) => onChange?.(Number(event.currentTarget.value))} />
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange?.(Number(event.currentTarget.value))} />
       <strong>
-        {value}
+        {step % 1 === 0 ? value : value.toFixed(1)}
         {suffix}
       </strong>
     </div>

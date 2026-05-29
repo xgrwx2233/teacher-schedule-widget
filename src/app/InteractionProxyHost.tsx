@@ -95,8 +95,8 @@ function findWidgetHit(hitboxes: RectHitbox[], x: number, y: number): ProxyWidge
       continue;
     }
 
-    if (hitbox.kind === "menu-button") {
-      return { kind: "menu-button", id: hitbox.id };
+    if (hitbox.kind === "menu-button" || hitbox.kind === "header-toggle") {
+      return { kind: hitbox.kind, id: hitbox.id };
     }
 
     if (!hitbox.id) {

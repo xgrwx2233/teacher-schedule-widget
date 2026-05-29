@@ -99,6 +99,7 @@ export function App() {
   const [settings, setSettings] = useState<WidgetSettingsState>(defaultSettings);
   const [schedule, setSchedule] = useState<Schedule>(mockSchedule);
   const [hovered, setHovered] = useState(false);
+  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [selectedCard, setSelectedCard] = useState<SelectedCard | null>(null);
   const [cardDraft, setCardDraft] = useState<CardDraft>(defaultCardDraft);
@@ -418,6 +419,11 @@ export function App() {
         return;
       }
 
+      if (hit.headerToggle) {
+        setIsHeaderCollapsed((current) => !current);
+        return;
+      }
+
       if (menuOpenRef.current && hit.menuAction === "settings") {
         void openSettings();
         return;
@@ -487,9 +493,12 @@ export function App() {
   }, [menuOpen, visibleSchedule, activeCellId]);
 
   useEffect(() => {
+    const toggleHeader = () => setIsHeaderCollapsed((current) => !current);
+
     window.__teacherScheduleProxyTrigger = (hit: ProxyWidgetHit) => {
       handleProxyWidgetHit(
         hit,
+        toggleHeader,
         openWidgetMenu,
         openCardSettings,
         setActiveCellId,
@@ -503,6 +512,7 @@ export function App() {
       console.info("proxy trigger", hit);
       handleProxyWidgetHit(
         hit,
+        toggleHeader,
         openWidgetMenu,
         openCardSettings,
         setActiveCellId,
@@ -600,9 +610,11 @@ export function App() {
         mode={mode}
         menuOpen={menuOpen}
         hovered={hovered}
+        isHeaderCollapsed={isHeaderCollapsed}
         activeCellId={activeCellId}
         menuButtonRef={menuButtonRef}
         widgetStyle={widgetStyle}
+        onToggleHeader={() => setIsHeaderCollapsed((current) => !current)}
         onToggleMenu={openWidgetMenu}
         onCourseClick={onCourseClick}
         onCardEdit={openCardSettings}
@@ -710,7 +722,7 @@ async function emitWidgetMenuState(mode: WindowMode) {
 
 function collectProxyHitboxes() {
   return Array.from(
-    document.querySelectorAll<HTMLElement>("[data-menu-button], [data-course-id], [data-period-id]"),
+    document.querySelectorAll<HTMLElement>("[data-menu-button], [data-header-toggle], [data-course-id], [data-period-id]"),
   )
     .map((element) => {
       const rect = element.getBoundingClientRect();
@@ -718,9 +730,11 @@ function collectProxyHitboxes() {
       const periodId = element.dataset.periodId;
       const kind = element.dataset.menuButton
         ? "menu-button"
-        : courseId
-          ? "course"
-          : "period";
+        : element.dataset.headerToggle
+          ? "header-toggle"
+          : courseId
+            ? "course"
+            : "period";
 
       return {
         kind,
@@ -758,6 +772,7 @@ function selectedCardKey(card: SelectedCard): string {
 
 function handleProxyWidgetHit(
   hit: ProxyWidgetHit,
+  toggleHeader: () => void,
   openWidgetMenu: () => Promise<void>,
   openCardSettings: (card: SelectedCard) => Promise<void>,
   setActiveCellId: (value: string | null) => void,
@@ -766,6 +781,11 @@ function handleProxyWidgetHit(
 ) {
   if (hit.kind === "menu-button") {
     void openWidgetMenu();
+    return;
+  }
+
+  if (hit.kind === "header-toggle") {
+    toggleHeader();
     return;
   }
 
@@ -855,18 +875,47 @@ function calculateWeekNumber(startDate: string, currentDate: Date): number {
 
 function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedule: Schedule): CSSProperties {
   const normalizedAppearance = normalizeAppearanceSettings(appearance);
+  const gridLineOpacity = String(normalizedAppearance.gridLineOpacity / 100);
+  const gridLineBorder = buildGridLineBorder(
+    normalizedAppearance.gridLineType,
+    normalizedAppearance.gridLineColor,
+    normalizedAppearance.gridLineWidth,
+    normalizedAppearance.gridLineOpacity,
+  );
   return {
     "--column-gap": `${normalizedAppearance.columnGap}px`,
     "--schedule-row-count": Math.max(1, schedule.rows.length),
-    "--row-divider": normalizedAppearance.rowDividerColor,
-    "--row-divider-rgb": hexToRgbParts(normalizedAppearance.rowDividerColor),
-    "--row-divider-opacity": String(normalizedAppearance.rowDividerOpacity),
-    "--row-divider-style": normalizedAppearance.rowDividerStyle,
-    "--row-divider-thickness": `${normalizedAppearance.rowDividerThickness}px`,
+    "--row-divider": normalizedAppearance.gridLineColor,
+    "--row-divider-rgb": hexToRgbParts(normalizedAppearance.gridLineColor),
+    "--row-divider-opacity": gridLineOpacity,
+    "--row-divider-style": normalizedAppearance.gridLineType,
+    "--row-divider-thickness": `${normalizedAppearance.gridLineWidth}px`,
     "--row-divider-offset": `${normalizedAppearance.rowDividerHeight}px`,
     "--schedule-card-radius": `${normalizedAppearance.cardRadius}px`,
     "--schedule-card-shadow": mapCardShadowStrength(normalizedAppearance.cardShadowStrength),
+    "--schedule-grid-line-style": normalizedAppearance.gridLineType,
+    "--schedule-grid-line-color": normalizedAppearance.gridLineColor,
+    "--schedule-grid-line-width": `${normalizedAppearance.gridLineWidth}px`,
+    "--schedule-grid-line-opacity": gridLineOpacity,
+    "--schedule-grid-line-border": gridLineBorder,
   } as CSSProperties;
+}
+
+function buildGridLineBorder(type: "none" | "solid" | "dashed" | "dotted", color: string, width: number, opacity: number): string {
+  if (type === "none" || opacity <= 0 || width <= 0) {
+    return "none";
+  }
+
+  const rgb = hexToRgbParts(color)
+    .split(" ")
+    .map((channel) => Number.parseInt(channel, 10))
+    .filter((channel) => Number.isFinite(channel));
+
+  if (rgb.length !== 3) {
+    return `${Math.max(0.5, width)}px ${type} rgba(229, 234, 242, ${opacity / 100})`;
+  }
+
+  return `${Math.max(0.5, width)}px ${type} rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${opacity / 100})`;
 }
 
 function mapCardShadowStrength(strength: number): string {
@@ -1135,6 +1184,7 @@ function findPeriod(schedule: Schedule, periodId: string): PeriodInfo | undefine
 
 type ForwardedClickHit = {
   menuButton: boolean;
+  headerToggle: boolean;
   menuAction: "settings" | "mode" | "close" | null;
   editableCard: SelectedCard | null;
 };
@@ -1150,17 +1200,17 @@ function resolveForwardedClickHit(payload: DesktopInputEvent, scaleFactor: numbe
   for (const point of candidates) {
     const element = document.elementFromPoint(point.x, point.y) as HTMLElement | null;
     const hit = hitTestForwardedElement(element);
-    if (hit.menuButton || hit.menuAction || hit.editableCard) {
+    if (hit.menuButton || hit.headerToggle || hit.menuAction || hit.editableCard) {
       return hit;
     }
 
     const editableCard = findEditableCardByGeometry(point.x, point.y);
     if (editableCard) {
-      return { menuButton: false, menuAction: null, editableCard };
+      return { menuButton: false, headerToggle: false, menuAction: null, editableCard };
     }
   }
 
-  return { menuButton: false, menuAction: null, editableCard: null };
+  return { menuButton: false, headerToggle: false, menuAction: null, editableCard: null };
 }
 
 function createForwardedPointCandidates(
@@ -1200,13 +1250,14 @@ function dedupePoints(points: Array<{ x: number; y: number }>): Array<{ x: numbe
 
 function hitTestForwardedElement(element: HTMLElement | null): ForwardedClickHit {
   const menuButton = Boolean(element?.closest("[data-menu-button]"));
+  const headerToggle = Boolean(element?.closest("[data-header-toggle]"));
   const menuActionElement = element?.closest<HTMLElement>("[data-menu-action]");
   const editableElement = element?.closest<HTMLElement>("[data-course-id], [data-period-id]");
 
   const menuAction = readMenuAction(menuActionElement);
   const editableCard = readEditableCard(editableElement);
 
-  return { menuButton, menuAction, editableCard };
+  return { menuButton, headerToggle, menuAction, editableCard };
 }
 
 function readMenuAction(element: HTMLElement | null | undefined): ForwardedClickHit["menuAction"] {
