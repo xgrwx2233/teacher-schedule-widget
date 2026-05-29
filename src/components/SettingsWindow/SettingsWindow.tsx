@@ -1,6 +1,6 @@
+import { useState, type ReactNode } from "react";
 import type { WorkdayMode } from "../../features/schedule/types";
 import type {
-  AppearanceSettings,
   SettingsSection,
   WidgetSettingsState,
 } from "../../features/settings/settingsTypes";
@@ -200,40 +200,197 @@ function TermPanel({
 }
 
 function AppearancePanel({
-  settings,
-  onSettingsChange,
+  settings: _settings,
+  onSettingsChange: _onSettingsChange,
 }: {
   settings: WidgetSettingsState;
   onSettingsChange: (settings: WidgetSettingsState) => void;
 }) {
-  const appearance = settings.appearance;
-  const updateAppearance = (patch: Partial<AppearanceSettings>) => {
-    onSettingsChange({ ...settings, appearance: { ...appearance, ...patch } });
+  void _settings;
+  void _onSettingsChange;
+  const [expandedSections, setExpandedSections] = useState({
+    background: true,
+    gridlines: false,
+    cards: false,
+  });
+  const [backgroundMode, setBackgroundMode] = useState<"solid" | "glass">("glass");
+
+  const toggleSection = (section: keyof typeof expandedSections) => {
+    setExpandedSections((current) => ({ ...current, [section]: !current[section] }));
   };
 
+  const isGlassMode = backgroundMode === "glass";
+
   return (
-    <section className="settings-panel-section">
-      <h3>外观</h3>
-      <p>控制列间距、行间距与网格分割线外观。</p>
-      <div className="appearance-grid">
-        <RangeField label="列间距" min={4} max={20} value={appearance.columnGap} suffix="px" onChange={(columnGap) => updateAppearance({ columnGap })} />
-        <RangeField label="行间距" min={0} max={8} value={appearance.rowDividerHeight} suffix="px" onChange={(rowDividerHeight) => updateAppearance({ rowDividerHeight })} />
-        <label className="appearance-field">
-          <span>线型</span>
-          <select value={appearance.rowDividerStyle} onChange={(event) => updateAppearance({ rowDividerStyle: event.currentTarget.value as AppearanceSettings["rowDividerStyle"] })}>
-            <option value="solid">实线</option>
-            <option value="dashed">虚线</option>
-            <option value="dotted">点线</option>
-          </select>
-        </label>
-        <label className="appearance-field">
-          <span>线色</span>
-          <input type="color" value={appearance.rowDividerColor} onChange={(event) => updateAppearance({ rowDividerColor: event.currentTarget.value })} />
-        </label>
-        <RangeField label="透明度" min={0} max={100} value={Math.round(appearance.rowDividerOpacity * 100)} suffix="%" onChange={(value) => updateAppearance({ rowDividerOpacity: value / 100 })} />
-        <RangeField label="粗细" min={1} max={3} step={0.5} value={appearance.rowDividerThickness} suffix="px" onChange={(rowDividerThickness) => updateAppearance({ rowDividerThickness })} />
+    <section className="settings-panel-section appearance-panel-static">
+      <header className="appearance-page-header">
+        <h3>外观</h3>
+        <p>调整挂件背景、毛玻璃、卡片圆角、阴影与网格线样式。</p>
+      </header>
+
+      <div className="appearance-card-stack">
+        <AppearanceAccordionCard
+          title="窗口背景"
+          tooltip="控制挂件窗口本身的背景效果。"
+          expanded={expandedSections.background}
+          onToggle={() => toggleSection("background")}
+        >
+          <StaticSettingRow title="背景模式">
+            <div className="appearance-segmented appearance-segmented-pill" aria-label="背景模式">
+              <button type="button" className={backgroundMode === "solid" ? "is-active" : ""} onClick={() => setBackgroundMode("solid")}>
+                纯色
+              </button>
+              <button type="button" className={isGlassMode ? "is-active" : ""} onClick={() => setBackgroundMode("glass")}>
+                毛玻璃
+              </button>
+            </div>
+          </StaticSettingRow>
+          <StaticSettingRow title="背景色">
+            <StaticColorPalette previewColor="#DBE7EF" />
+          </StaticSettingRow>
+          <StaticSettingRow title="透明度">
+            <StaticSlider value={84} suffix="%" />
+          </StaticSettingRow>
+          {isGlassMode && (
+            <div className="appearance-fade-section">
+              <StaticSettingRow title="模糊强度">
+                <StaticSlider value={14} suffix="px" />
+              </StaticSettingRow>
+              <div className="appearance-card-hint">毛玻璃模式建议配合中高透明度使用，以保持文字清晰。</div>
+            </div>
+          )}
+        </AppearanceAccordionCard>
+
+        <AppearanceAccordionCard
+          title="网格线"
+          tooltip="设置课程表水平与垂直分割线的显示效果。"
+          expanded={expandedSections.gridlines}
+          onToggle={() => toggleSection("gridlines")}
+        >
+          <StaticSettingRow title="线型">
+            <select className="appearance-combobox" defaultValue="solid" aria-label="线型">
+              <option value="none">无</option>
+              <option value="solid">实线</option>
+              <option value="dashed">虚线</option>
+              <option value="dotted">点线</option>
+            </select>
+          </StaticSettingRow>
+          <StaticSettingRow title="线色">
+            <StaticColorPalette previewColor="#E5EAF2" />
+          </StaticSettingRow>
+          <StaticSettingRow title="粗细">
+            <StaticSlider value={1} suffix="px" min={0.5} max={2} />
+          </StaticSettingRow>
+          <StaticSettingRow title="透明度">
+            <StaticSlider value={18} suffix="%" />
+          </StaticSettingRow>
+          <StaticSettingRow title="高级设置">
+            <label className="appearance-switch">
+              <input type="checkbox" readOnly />
+              <span>分别设置横线与竖线</span>
+            </label>
+          </StaticSettingRow>
+        </AppearanceAccordionCard>
+
+        <AppearanceAccordionCard
+          title="卡片样式"
+          tooltip="统一控制课次卡片、课程卡片、日期卡片的圆角与阴影。"
+          expanded={expandedSections.cards}
+          onToggle={() => toggleSection("cards")}
+        >
+          <StaticSettingRow title="卡片圆角">
+            <StaticSlider value={12} suffix="px" />
+          </StaticSettingRow>
+          <StaticSettingRow title="卡片阴影强度">
+            <StaticSlider value={2} suffix=" 轻" min={0} max={4} />
+          </StaticSettingRow>
+        </AppearanceAccordionCard>
       </div>
     </section>
+  );
+}
+
+function AppearanceAccordionCard({
+  title,
+  tooltip,
+  expanded,
+  onToggle,
+  children,
+}: {
+  title: string;
+  tooltip: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className={expanded ? "appearance-settings-card is-expanded" : "appearance-settings-card"}>
+      <button type="button" className="appearance-accordion-trigger" aria-expanded={expanded} onClick={onToggle}>
+        <span className="appearance-card-title">
+          <h4>{title}</h4>
+          <span className="appearance-info-icon" title={tooltip} aria-label={`${title}说明`}>
+            ⓘ
+          </span>
+        </span>
+        <span className="appearance-chevron" aria-hidden="true">
+          ⌄
+        </span>
+      </button>
+      {expanded && <div className="appearance-setting-list">{children}</div>}
+    </section>
+  );
+}
+
+function StaticSettingRow({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="appearance-setting-row">
+      <div className="appearance-setting-copy">
+        <strong>{title}</strong>
+        {description && <span>{description}</span>}
+      </div>
+      <div className="appearance-setting-control">{children}</div>
+    </div>
+  );
+}
+
+function StaticColorPalette({ previewColor }: { previewColor: string }) {
+  return (
+    <div className="appearance-color-palette" aria-label="颜色选择">
+      {["#DBE7EF", "#F8FAFC", "#E7E2DB"].map((color) => (
+        <button key={color} type="button" className="appearance-color-dot" aria-label="预设颜色" style={{ backgroundColor: color }} />
+      ))}
+      <button type="button" className="appearance-color-preview" aria-label="自定义颜色" style={{ backgroundColor: previewColor }} />
+    </div>
+  );
+}
+
+function StaticSlider({
+  value,
+  suffix,
+  min = 0,
+  max = 100,
+}: {
+  value: number;
+  suffix: string;
+  min?: number;
+  max?: number;
+}) {
+  return (
+    <div className="appearance-static-slider">
+      <input type="range" min={min} max={max} value={value} readOnly />
+      <strong>
+        {value}
+        {suffix}
+      </strong>
+    </div>
   );
 }
 
@@ -255,37 +412,6 @@ function SidebarNavItem({
       </span>
       <span>{label}</span>
     </button>
-  );
-}
-
-function RangeField({
-  label,
-  min,
-  max,
-  step = 1,
-  value,
-  suffix,
-  onChange,
-}: {
-  label: string;
-  min: number;
-  max: number;
-  step?: number;
-  value: number;
-  suffix: string;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="appearance-field">
-      <span>{label}</span>
-      <div className="appearance-control">
-        <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.currentTarget.value))} />
-        <strong>
-          {value}
-          {suffix}
-        </strong>
-      </div>
-    </label>
   );
 }
 

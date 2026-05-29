@@ -88,15 +88,15 @@ export function ScheduleWidget({
 
         <div className="schedule-grid" role="table" aria-label="教师课程表">
           <div className="timetable-period-column">
-            {schedule.rows.map((row, index) => (
-              <ColumnItem key={row.id} showDivider={index > 0}>
+            {schedule.rows.map((row) => (
+              <ColumnItem key={row.id}>
                 <PeriodCard period={row.period} onClick={() => onCardEdit({ type: "period", periodId: row.period.id })} />
               </ColumnItem>
             ))}
           </div>
 
           <div className="schedule-row-cells">
-            {schedule.rows.map((row, index) => (
+            {schedule.rows.map((row) => (
               <div className="course-row-grid" key={row.id}>
                 {visibleWeekdays.map((weekday) => {
                   const course = row.courses[weekday];
@@ -105,7 +105,7 @@ export function ScheduleWidget({
                   }
 
                   return (
-                    <ColumnItem key={`${row.id}-${weekday}`} showDivider={index > 0} span={course.colSpan ?? 1}>
+                    <ColumnItem key={`${row.id}-${weekday}`} span={course.colSpan ?? 1}>
                       <CourseCard course={course} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
                     </ColumnItem>
                   );
@@ -154,16 +154,13 @@ function CourseCard({
 
 function ColumnItem({
   children,
-  showDivider = false,
   span = 1,
 }: {
   children: ReactNode;
-  showDivider?: boolean;
   span?: number;
 }) {
   return (
     <div className="column-item" style={{ gridColumn: span > 1 ? `span ${span}` : undefined }}>
-      {showDivider && <div className="row-divider" aria-hidden="true" />}
       {children}
     </div>
   );
