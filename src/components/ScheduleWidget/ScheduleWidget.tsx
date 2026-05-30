@@ -1,6 +1,6 @@
 import type { CSSProperties, PointerEvent, ReactNode, RefObject } from "react";
 import type { CardStyle, CourseCell, PeriodInfo, Schedule, Weekday } from "../../features/schedule/types";
-import type { SelectedCard } from "../../features/settings/settingsTypes";
+import type { SelectedCard, WidgetBackgroundMode } from "../../features/settings/settingsTypes";
 import type { WindowMode } from "../../features/windowMode/types";
 
 type ScheduleWidgetProps = {
@@ -13,6 +13,7 @@ type ScheduleWidgetProps = {
   activeCellId: string | null;
   menuButtonRef: RefObject<HTMLButtonElement | null>;
   widgetStyle?: CSSProperties;
+  backgroundMode: WidgetBackgroundMode;
   onToggleHeader: () => void;
   onToggleMenu: () => void;
   onCourseClick: (courseId: string) => void;
@@ -31,6 +32,7 @@ export function ScheduleWidget({
   activeCellId,
   menuButtonRef,
   widgetStyle,
+  backgroundMode,
   onToggleHeader,
   onToggleMenu,
   onCourseClick,
@@ -41,8 +43,9 @@ export function ScheduleWidget({
   const visibleWeekdays = schedule.days.map((day) => day.id);
 
   return (
-    <section className={`schedule-shell mode-${mode} ${hovered ? "is-forward-hovered" : ""} ${isHeaderCollapsed ? "is-header-collapsed" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
+    <section className={`schedule-shell mode-${mode} background-${backgroundMode} ${hovered ? "is-forward-hovered" : ""} ${isHeaderCollapsed ? "is-header-collapsed" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
       <div className="schedule-card">
+        <div className="schedule-background-overlay" aria-hidden="true" />
         <header className="schedule-toolbar">
           <div className="toolbar-left" aria-label="周次切换">
             <button className="week-arrow-button" type="button" title="前一周">

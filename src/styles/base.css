@@ -89,6 +89,10 @@ button {
   --schedule-grid-line-opacity: 0.18;
   --schedule-grid-line-border: 1px solid rgba(255, 255, 255, 0.16);
   --schedule-grid-radius: 12px;
+  --widget-background-mode: blur;
+  --widget-background-color: #dbe7ef;
+  --widget-background-opacity: 0.84;
+  --widget-blur-intensity: 14px;
   width: 100vw;
   height: 100vh;
   min-width: 360px;
@@ -128,10 +132,10 @@ button {
   padding: var(--content-padding);
   border: 1px solid rgba(var(--widget-border), 0.1);
   border-radius: 12px;
-  background: rgba(var(--widget-panel), var(--panel-opacity));
+  background: transparent;
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(8px);
   overflow: hidden;
+  position: relative;
 }
 
 .schedule-card {
@@ -139,7 +143,37 @@ button {
   --grid-line-size: var(--row-divider-thickness);
 }
 
+.schedule-shell.background-blur .schedule-card {
+  background: rgba(255, 255, 255, 0.001);
+  backdrop-filter: blur(var(--widget-blur-intensity));
+  -webkit-backdrop-filter: blur(var(--widget-blur-intensity));
+  transition:
+    background-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1),
+    backdrop-filter 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+.schedule-shell.background-solid .schedule-card {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.schedule-background-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: var(--widget-background-color);
+  opacity: var(--widget-background-opacity);
+  pointer-events: none;
+  transition:
+    background-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1),
+    opacity 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
 .schedule-toolbar {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   min-height: 0;
   height: var(--toolbar-height);
@@ -801,6 +835,8 @@ button {
 }
 
 .date-row {
+  position: relative;
+  z-index: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: var(--layout-columns);
@@ -873,6 +909,8 @@ button {
 }
 
 .schedule-grid {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   min-height: 0;
   display: grid;

@@ -216,14 +216,13 @@ function AppearancePanel({
     gridlines: false,
     cards: false,
   });
-  const [backgroundMode, setBackgroundMode] = useState<"solid" | "glass">("glass");
   const appearance = normalizeAppearanceSettings(settings.appearance);
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections((current) => ({ ...current, [section]: !current[section] }));
   };
 
-  const isGlassMode = backgroundMode === "glass";
+  const isBlurMode = appearance.backgroundMode === "blur";
 
   return (
     <section className="settings-panel-section appearance-panel-static">
@@ -241,24 +240,70 @@ function AppearancePanel({
         >
           <StaticSettingRow title="背景模式">
             <div className="appearance-segmented appearance-segmented-pill" aria-label="背景模式">
-              <button type="button" className={backgroundMode === "solid" ? "is-active" : ""} onClick={() => setBackgroundMode("solid")}>
+              <button
+                type="button"
+                className={appearance.backgroundMode === "solid" ? "is-active" : ""}
+                onClick={() =>
+                  onSettingsChange({
+                    ...settings,
+                    appearance: { ...appearance, backgroundMode: "solid" },
+                  })
+                }
+              >
                 纯色
               </button>
-              <button type="button" className={isGlassMode ? "is-active" : ""} onClick={() => setBackgroundMode("glass")}>
+              <button
+                type="button"
+                className={isBlurMode ? "is-active" : ""}
+                onClick={() =>
+                  onSettingsChange({
+                    ...settings,
+                    appearance: { ...appearance, backgroundMode: "blur" },
+                  })
+                }
+              >
                 毛玻璃
               </button>
             </div>
           </StaticSettingRow>
           <StaticSettingRow title="背景色">
-            <StaticColorPalette previewColor="#DBE7EF" />
+            <StaticColorPalette
+              previewColor={appearance.backgroundColor}
+              onPick={(backgroundColor) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: { ...appearance, backgroundColor },
+                })
+              }
+            />
           </StaticSettingRow>
           <StaticSettingRow title="透明度">
-            <StaticSlider value={84} suffix="%" />
+            <StaticSlider
+              value={appearance.backgroundOpacity}
+              suffix="%"
+              onChange={(backgroundOpacity) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: { ...appearance, backgroundOpacity },
+                })
+              }
+            />
           </StaticSettingRow>
-          {isGlassMode && (
+          {isBlurMode && (
             <div className="appearance-fade-section">
               <StaticSettingRow title="模糊强度">
-                <StaticSlider value={14} suffix="px" />
+                <StaticSlider
+                  value={appearance.blurIntensity}
+                  suffix="px"
+                  min={0}
+                  max={40}
+                  onChange={(blurIntensity) =>
+                    onSettingsChange({
+                      ...settings,
+                      appearance: { ...appearance, blurIntensity },
+                    })
+                  }
+                />
               </StaticSettingRow>
               <div className="appearance-card-hint">毛玻璃模式建议配合中高透明度使用，以保持文字清晰。</div>
             </div>

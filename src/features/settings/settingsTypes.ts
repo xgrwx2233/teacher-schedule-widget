@@ -7,6 +7,7 @@ export type TermSettings = {
 
 export type DividerStyle = "solid" | "dashed" | "dotted";
 export type GridLineType = "none" | DividerStyle;
+export type WidgetBackgroundMode = "solid" | "blur";
 
 export type AppearanceSettings = {
   columnGap: number;
@@ -15,6 +16,10 @@ export type AppearanceSettings = {
   rowDividerColor: string;
   rowDividerOpacity: number;
   rowDividerThickness: number;
+  backgroundMode: WidgetBackgroundMode;
+  backgroundColor: string;
+  backgroundOpacity: number;
+  blurIntensity: number;
   cardRadius: number;
   cardShadowStrength: number;
   gridLineType: GridLineType;
@@ -62,6 +67,10 @@ export const defaultAppearanceSettings: AppearanceSettings = {
   rowDividerColor: "#665b4e",
   rowDividerOpacity: 0.16,
   rowDividerThickness: 1,
+  backgroundMode: "blur",
+  backgroundColor: "#DBE7EF",
+  backgroundOpacity: 84,
+  blurIntensity: 14,
   cardRadius: 12,
   cardShadowStrength: 2,
   gridLineType: "solid",
@@ -96,6 +105,10 @@ export function normalizeAppearanceSettings(appearance?: Partial<AppearanceSetti
     rowDividerColor: appearance?.rowDividerColor ?? defaultAppearanceSettings.rowDividerColor,
     rowDividerOpacity: appearance?.rowDividerOpacity ?? defaultAppearanceSettings.rowDividerOpacity,
     rowDividerThickness: appearance?.rowDividerThickness ?? defaultAppearanceSettings.rowDividerThickness,
+    backgroundMode: appearance?.backgroundMode === "solid" ? "solid" : defaultAppearanceSettings.backgroundMode,
+    backgroundColor: appearance?.backgroundColor ?? defaultAppearanceSettings.backgroundColor,
+    backgroundOpacity: normalizePercent(appearance?.backgroundOpacity, defaultAppearanceSettings.backgroundOpacity),
+    blurIntensity: normalizeRange(appearance?.blurIntensity, defaultAppearanceSettings.blurIntensity, 0, 40),
     cardRadius: normalizeCardRadius(appearance?.cardRadius),
     cardShadowStrength: normalizeCardShadowStrength(appearance?.cardShadowStrength),
     gridLineType: appearance?.gridLineType ?? defaultAppearanceSettings.gridLineType,
@@ -103,6 +116,18 @@ export function normalizeAppearanceSettings(appearance?: Partial<AppearanceSetti
     gridLineWidth: typeof appearance?.gridLineWidth === "number" ? appearance.gridLineWidth : defaultAppearanceSettings.gridLineWidth,
     gridLineOpacity: typeof appearance?.gridLineOpacity === "number" ? appearance.gridLineOpacity : defaultAppearanceSettings.gridLineOpacity,
   };
+}
+
+function normalizePercent(value: number | undefined, fallback: number): number {
+  return normalizeRange(value, fallback, 0, 100);
+}
+
+function normalizeRange(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(min, Math.min(max, Math.round(value)));
 }
 
 export const defaultCardDraft: CardDraft = {

@@ -127,6 +127,7 @@ export function App() {
     }),
     [computedWeek, schedule, settings.periodCount, settings.workdayMode],
   );
+  const normalizedAppearance = useMemo(() => normalizeAppearanceSettings(settings.appearance), [settings.appearance]);
   const widgetStyle = useMemo(() => buildWidgetStyle(settings.appearance, visibleSchedule), [settings.appearance, visibleSchedule]);
 
   useEffect(() => {
@@ -614,6 +615,7 @@ export function App() {
         activeCellId={activeCellId}
         menuButtonRef={menuButtonRef}
         widgetStyle={widgetStyle}
+        backgroundMode={normalizedAppearance.backgroundMode}
         onToggleHeader={() => setIsHeaderCollapsed((current) => !current)}
         onToggleMenu={openWidgetMenu}
         onCourseClick={onCourseClick}
@@ -885,6 +887,10 @@ function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedul
   return {
     "--column-gap": `${normalizedAppearance.columnGap}px`,
     "--schedule-row-count": Math.max(1, schedule.rows.length),
+    "--widget-background-mode": normalizedAppearance.backgroundMode,
+    "--widget-background-color": normalizedAppearance.backgroundColor,
+    "--widget-background-opacity": String(normalizedAppearance.backgroundOpacity / 100),
+    "--widget-blur-intensity": `${normalizedAppearance.blurIntensity}px`,
     "--row-divider": normalizedAppearance.gridLineColor,
     "--row-divider-rgb": hexToRgbParts(normalizedAppearance.gridLineColor),
     "--row-divider-opacity": gridLineOpacity,
