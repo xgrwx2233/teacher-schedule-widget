@@ -878,6 +878,16 @@ function calculateWeekNumber(startDate: string, currentDate: Date): number {
 function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedule: Schedule): CSSProperties {
   const normalizedAppearance = normalizeAppearanceSettings(appearance);
   const gridLineOpacity = String(normalizedAppearance.gridLineOpacity / 100);
+  const blurIntensity = normalizedAppearance.backgroundMode === "blur" ? normalizedAppearance.blurIntensity : 0;
+  const blurMix = clamp01(blurIntensity / 40);
+  const backgroundFill = buildRgbaColor(
+    normalizedAppearance.backgroundColor,
+    normalizedAppearance.backgroundOpacity / 100,
+  );
+  const mist = blurMix * 0.48;
+  const mistHighlight = blurMix * 0.22;
+  const brightness = 100 + Math.round(blurMix * 4);
+  const saturation = 100 + Math.round(blurMix * 12);
   const gridLineBorder = buildGridLineBorder(
     normalizedAppearance.gridLineType,
     normalizedAppearance.gridLineColor,
@@ -889,8 +899,13 @@ function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedul
     "--schedule-row-count": Math.max(1, schedule.rows.length),
     "--widget-background-mode": normalizedAppearance.backgroundMode,
     "--widget-background-color": normalizedAppearance.backgroundColor,
+    "--widget-background-fill": backgroundFill,
     "--widget-background-opacity": String(normalizedAppearance.backgroundOpacity / 100),
     "--widget-blur-intensity": `${normalizedAppearance.blurIntensity}px`,
+    "--widget-blur-overlay": blurMix > 0 ? String(mist) : "0",
+    "--widget-blur-highlight": blurMix > 0 ? String(mistHighlight) : "0",
+    "--widget-background-brightness": `${brightness}%`,
+    "--widget-background-saturation": `${saturation}%`,
     "--row-divider": normalizedAppearance.gridLineColor,
     "--row-divider-rgb": hexToRgbParts(normalizedAppearance.gridLineColor),
     "--row-divider-opacity": gridLineOpacity,
@@ -922,6 +937,35 @@ function buildGridLineBorder(type: "none" | "solid" | "dashed" | "dotted", color
   }
 
   return `${Math.max(0.5, width)}px ${type} rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${opacity / 100})`;
+}
+
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
+function buildRgbaColor(value: string, alpha: number): string {
+  const rgb = hexToRgbParts(value)
+    .split(" ")
+    .map((channel) => Number.parseInt(channel, 10));
+
+  if (rgb.length !== 3 || rgb.some((channel) => !Number.isFinite(channel))) {
+    return `rgba(219, 231, 239, ${clamp01(alpha)})`;
+  }
+
+  return `rgba(${clampRgbChannel(rgb[0])}, ${clampRgbChannel(rgb[1])}, ${clampRgbChannel(rgb[2])}, ${clamp01(alpha)})`;
+}
+
+function clampRgbChannel(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(255, value));
 }
 
 function mapCardShadowStrength(strength: number): string {
