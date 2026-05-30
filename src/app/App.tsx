@@ -2,7 +2,7 @@
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import type { CSSProperties, MutableRefObject, PointerEvent } from "react";
+import type { CSSProperties, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScheduleWidget } from "../components/ScheduleWidget/ScheduleWidget";
 import { allScheduleDays, mockSchedule } from "../features/schedule/mockSchedule";
@@ -43,8 +43,16 @@ import {
   WIDGET_MENU_CLOSE_EVENT,
   WIDGET_MENU_STATE_EVENT,
   WIDGET_MENU_WINDOW_LABEL,
+  WIDGET_WINDOW_LABEL,
+  FLOATING_TOOLBAR_ACTION_EVENT,
+  FLOATING_TOOLBAR_CLOSE_EVENT,
+  FLOATING_TOOLBAR_STATE_EVENT,
+  FLOATING_TOOLBAR_WINDOW_LABEL,
   type WidgetMenuAction,
   type WidgetMenuStatePayload,
+  type FloatingToolbarAction,
+  type FloatingToolbarActionPayload,
+  type FloatingToolbarStatePayload,
   type CardSettingsWindowStatePayload,
   type CardSettingsWindowActionPayload,
   type CardSettingsWindowUpdatePayload,
@@ -52,6 +60,7 @@ import {
   type SettingsWindowStatePayload,
   type SettingsWindowStateRequestPayload,
   type SettingsWindowUpdatePayload,
+  type ToolbarLayoutMode,
 } from "../features/settings/windowEvents";
 import { skinThemes } from "../features/skins/themes";
 import { defaultWidgetRegistry } from "../features/widgets/defaultWidgets";
@@ -90,16 +99,19 @@ export function App() {
   const scaleFactorRef = useRef(1);
   const menuOpenRef = useRef(false);
   const menuClosedAtRef = useRef(0);
+  const toolbarWindowOpenRef = useRef(false);
+  const toolbarLayoutModeRef = useRef<ToolbarLayoutMode>("normal");
   const modeRef = useRef<WindowMode>("attached");
   const lastForwardedCardClickRef = useRef<{ key: string; time: number } | null>(null);
 
   const [mode, setMode] = useState<WindowMode>("attached");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [toolbarLayoutMode, setToolbarLayoutMode] = useState<ToolbarLayoutMode>("normal");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("schedule");
   const [settings, setSettings] = useState<WidgetSettingsState>(defaultSettings);
   const [schedule, setSchedule] = useState<Schedule>(mockSchedule);
   const [hovered, setHovered] = useState(false);
-  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
+  const [weekOffset, setWeekOffset] = useState(0);
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [selectedCard, setSelectedCard] = useState<SelectedCard | null>(null);
   const [cardDraft, setCardDraft] = useState<CardDraft>(defaultCardDraft);
@@ -116,7 +128,10 @@ export function App() {
 
   const activeWidget = widgetRegistry.widgets.find((widget) => widget.id === widgetRegistry.activeWidgetId);
   const activeSkin = skinThemes.find((theme) => theme.id === activeSkinId) ?? skinThemes[0];
-  const computedWeek = useMemo(() => calculateWeekNumber(settings.term.startDate, new Date()), [settings.term.startDate]);
+  const computedWeek = useMemo(
+    () => Math.max(1, calculateWeekNumber(settings.term.startDate, new Date()) + weekOffset),
+    [settings.term.startDate, weekOffset],
+  );
 
   const visibleSchedule = useMemo(
     () => ({
@@ -163,6 +178,10 @@ export function App() {
   }, [mode]);
 
   useEffect(() => {
+    toolbarLayoutModeRef.current = toolbarLayoutMode;
+  }, [toolbarLayoutMode]);
+
+  useEffect(() => {
     menuOpenRef.current = menuOpen;
   }, [menuOpen]);
 
@@ -196,6 +215,32 @@ export function App() {
     await invoke("hide_schedule_widget");
   }, []);
 
+  const syncFloatingToolbarState = useCallback(async () => {
+    if (!toolbarWindowOpenRef.current) {
+      return;
+    }
+
+    await emitTo<FloatingToolbarStatePayload>(FLOATING_TOOLBAR_WINDOW_LABEL, FLOATING_TOOLBAR_STATE_EVENT, {
+      weekNumber: computedWeek,
+      menuOpen: menuOpenRef.current,
+      toolbarLayoutMode: toolbarLayoutModeRef.current,
+      backgroundMode: normalizedAppearance.backgroundMode,
+    });
+  }, [computedWeek, normalizedAppearance.backgroundMode]);
+
+  const openFloatingToolbarWindow = useCallback(async () => {
+    if (toolbarWindowOpenRef.current) {
+      await hideWindowByLabel(FLOATING_TOOLBAR_WINDOW_LABEL);
+      toolbarWindowOpenRef.current = false;
+      return;
+    }
+
+    await invoke("open_floating_toolbar_window");
+    toolbarWindowOpenRef.current = true;
+    await positionFloatingToolbarWindow();
+    await syncFloatingToolbarState();
+  }, [syncFloatingToolbarState]);
+
   const openSettings = useCallback(async () => {
     menuOpenRef.current = false;
     setMenuOpen(false);
@@ -222,7 +267,7 @@ export function App() {
     await hideWindowByLabel(WIDGET_MENU_WINDOW_LABEL);
   }, []);
 
-  const openWidgetMenu = useCallback(async () => {
+  const openWidgetMenu = useCallback(async (sourceWindowLabel?: string, anchor?: { x: number; y: number; width: number; height: number }) => {
     if (menuOpenRef.current) {
       await closeWidgetMenu();
       return;
@@ -236,13 +281,27 @@ export function App() {
     try {
       await invoke("open_widget_menu_window");
       console.info("open widget menu window invoked");
-      await positionWidgetMenuWindow();
+      await positionWidgetMenuWindow(sourceWindowLabel, anchor);
       await emitWidgetMenuState(modeRef.current);
       menuOpenRef.current = true;
       setMenuOpen(true);
     } catch (error) {
       console.error("failed to open widget menu window", error);
     }
+  }, [closeWidgetMenu]);
+
+  const toggleToolbarLayoutMode = useCallback(async () => {
+    const nextMode: ToolbarLayoutMode = toolbarLayoutModeRef.current === "normal" ? "minimalist" : "normal";
+    toolbarLayoutModeRef.current = nextMode;
+    setToolbarLayoutMode(nextMode);
+
+    if (nextMode === "normal") {
+      toolbarWindowOpenRef.current = false;
+      await hideWindowByLabel(FLOATING_TOOLBAR_WINDOW_LABEL);
+      return;
+    }
+
+    await closeWidgetMenu();
   }, [closeWidgetMenu]);
 
   const closeCardSettings = useCallback(async () => {
@@ -349,6 +408,10 @@ export function App() {
   }, [settings, settingsSection]);
 
   useEffect(() => {
+    void syncFloatingToolbarState();
+  }, [computedWeek, menuOpen, mode, syncFloatingToolbarState, toolbarLayoutMode]);
+
+  useEffect(() => {
     const unlistenUpdate = listen<CardSettingsWindowUpdatePayload>(CARD_SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
       setSelectedCard(event.payload.selectedCard);
       setCardDraft(event.payload.draft);
@@ -425,11 +488,6 @@ export function App() {
         return;
       }
 
-      if (hit.headerToggle) {
-        setIsHeaderCollapsed((current) => !current);
-        return;
-      }
-
       if (menuOpenRef.current && hit.menuAction === "settings") {
         void openSettings();
         return;
@@ -499,17 +557,15 @@ export function App() {
   }, [menuOpen, visibleSchedule, activeCellId]);
 
   useEffect(() => {
-    const toggleHeader = () => setIsHeaderCollapsed((current) => !current);
-
     window.__teacherScheduleProxyTrigger = (hit: ProxyWidgetHit) => {
       handleProxyWidgetHit(
         hit,
-        toggleHeader,
+        openFloatingToolbarWindow,
         openWidgetMenu,
+        toggleToolbarLayoutMode,
         openCardSettings,
         setActiveCellId,
         setMenuOpen,
-        menuOpenRef,
       );
     };
 
@@ -518,12 +574,12 @@ export function App() {
       console.info("proxy trigger", hit);
       handleProxyWidgetHit(
         hit,
-        toggleHeader,
+        openFloatingToolbarWindow,
         openWidgetMenu,
+        toggleToolbarLayoutMode,
         openCardSettings,
         setActiveCellId,
         setMenuOpen,
-        menuOpenRef,
       );
     });
 
@@ -533,10 +589,10 @@ export function App() {
       }
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [openCardSettings, openWidgetMenu]);
+  }, [openCardSettings, openFloatingToolbarWindow, openWidgetMenu, toggleToolbarLayoutMode]);
 
   useEffect(() => {
-  const unlistenPromise = listen<WidgetMenuAction>(WIDGET_MENU_ACTION_EVENT, (event) => {
+    const unlistenPromise = listen<WidgetMenuAction>(WIDGET_MENU_ACTION_EVENT, (event) => {
       if (event.payload === "settings") {
         void openSettings();
         return;
@@ -556,6 +612,47 @@ export function App() {
       void unlistenPromise.then((unlisten) => unlisten());
     };
   }, [hideScheduleWidget, openSettings, switchMode]);
+
+  useEffect(() => {
+    const unlistenPromise = listen<FloatingToolbarActionPayload>(FLOATING_TOOLBAR_ACTION_EVENT, (event) => {
+      const action = event.payload.action;
+      const sourceWindowLabel = event.payload.windowLabel;
+      const anchor = event.payload.anchor;
+
+      if (action === "previous-week") {
+        void stepWeek(-1);
+        return;
+      }
+
+      if (action === "next-week") {
+        void stepWeek(1);
+        return;
+      }
+
+      if (action === "layout") {
+        void toggleToolbarLayoutMode();
+        return;
+      }
+
+      if (action === "menu") {
+        void openWidgetMenu(sourceWindowLabel, anchor);
+      }
+    });
+
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [openWidgetMenu, switchMode, toggleToolbarLayoutMode]);
+
+  useEffect(() => {
+    const unlistenPromise = listen(FLOATING_TOOLBAR_CLOSE_EVENT, () => {
+      toolbarWindowOpenRef.current = false;
+    });
+
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   const onCourseClick = (courseId: string) => {
     if (mode === "detached") {
@@ -596,6 +693,14 @@ export function App() {
     await appWindow.startResizeDragging("SouthEast");
   };
 
+  const stepWeek = async (delta: number) => {
+    setWeekOffset((current) => {
+      const baseWeek = calculateWeekNumber(settingsRef.current.term.startDate, new Date());
+      const nextOffset = Math.max(1, baseWeek + current + delta) - baseWeek;
+      return nextOffset;
+    });
+  };
+
   const themeStyle = {
     ...activeSkin.tokens,
     "--panel-opacity": "0.9",
@@ -616,12 +721,15 @@ export function App() {
         mode={mode}
         menuOpen={menuOpen}
         hovered={hovered}
-        isHeaderCollapsed={isHeaderCollapsed}
         activeCellId={activeCellId}
         menuButtonRef={menuButtonRef}
         widgetStyle={widgetStyle}
         backgroundMode={normalizedAppearance.backgroundMode}
-        onToggleHeader={() => setIsHeaderCollapsed((current) => !current)}
+        toolbarLayoutMode={toolbarLayoutMode}
+        onPreviousWeek={() => void stepWeek(-1)}
+        onNextWeek={() => void stepWeek(1)}
+        onToggleFloatingToolbar={openFloatingToolbarWindow}
+        onToggleLayoutMode={toggleToolbarLayoutMode}
         onToggleMenu={openWidgetMenu}
         onCourseClick={onCourseClick}
         onCardEdit={openCardSettings}
@@ -727,21 +835,54 @@ async function emitWidgetMenuState(mode: WindowMode) {
   await emitTo<WidgetMenuStatePayload>(WIDGET_MENU_WINDOW_LABEL, WIDGET_MENU_STATE_EVENT, { mode });
 }
 
+async function closeWindowByLabel(label: string) {
+  const window = await WebviewWindow.getByLabel(label);
+  if (!window) {
+    return;
+  }
+
+  await window.hide();
+}
+
+async function positionFloatingToolbarWindow() {
+  const toolbarWindow = await WebviewWindow.getByLabel(FLOATING_TOOLBAR_WINDOW_LABEL);
+  const widgetWindow = await WebviewWindow.getByLabel(WIDGET_WINDOW_LABEL);
+  if (!toolbarWindow || !widgetWindow) {
+    return;
+  }
+
+  const outer = await widgetWindow.outerPosition();
+  const size = await widgetWindow.outerSize();
+  const scaleFactor = window.devicePixelRatio || 1;
+  const outerPadding = Math.round(18 * scaleFactor);
+  const toolbarWidth = Math.max(180, Math.round(size.width - outerPadding * 2));
+  const toolbarHeight = Math.round(34 * scaleFactor);
+  const x = outer.x + outerPadding;
+  const y = outer.y - toolbarHeight;
+  await toolbarWindow.setPosition(new PhysicalPosition(x, y));
+  await toolbarWindow.setSize(new PhysicalSize(toolbarWidth, toolbarHeight));
+}
+
 function collectProxyHitboxes() {
   return Array.from(
-    document.querySelectorAll<HTMLElement>("[data-menu-button], [data-header-toggle], [data-course-id], [data-period-id]"),
+    document.querySelectorAll<HTMLElement>(
+      "[data-menu-button], [data-header-toggle], [data-toolbar-action], [data-course-id], [data-period-id]",
+    ),
   )
     .map((element) => {
       const rect = element.getBoundingClientRect();
       const courseId = element.dataset.courseId;
       const periodId = element.dataset.periodId;
+      const toolbarAction = element.dataset.toolbarAction;
       const kind = element.dataset.menuButton
         ? "menu-button"
         : element.dataset.headerToggle
           ? "header-toggle"
-          : courseId
-            ? "course"
-            : "period";
+          : toolbarAction === "layout-toggle"
+            ? toolbarAction
+            : courseId
+              ? "course"
+              : "period";
 
       return {
         kind,
@@ -779,12 +920,12 @@ function selectedCardKey(card: SelectedCard): string {
 
 function handleProxyWidgetHit(
   hit: ProxyWidgetHit,
-  toggleHeader: () => void,
+  openFloatingToolbarWindow: () => void,
   openWidgetMenu: () => Promise<void>,
+  toggleToolbarLayoutMode: () => Promise<void>,
   openCardSettings: (card: SelectedCard) => Promise<void>,
   setActiveCellId: (value: string | null) => void,
   setMenuOpen: (value: boolean) => void,
-  menuOpenRef: MutableRefObject<boolean>,
 ) {
   if (hit.kind === "menu-button") {
     void openWidgetMenu();
@@ -792,11 +933,15 @@ function handleProxyWidgetHit(
   }
 
   if (hit.kind === "header-toggle") {
-    toggleHeader();
+    openFloatingToolbarWindow();
     return;
   }
 
-  menuOpenRef.current = false;
+  if (hit.kind === "layout-toggle") {
+    void toggleToolbarLayoutMode();
+    return;
+  }
+
   setMenuOpen(false);
 
   if (hit.kind === "course" && hit.id) {
@@ -811,19 +956,30 @@ function handleProxyWidgetHit(
   }
 }
 
-async function positionWidgetMenuWindow() {
+async function positionWidgetMenuWindow(
+  sourceWindowLabel?: string,
+  anchor?: { x: number; y: number; width: number; height: number },
+) {
   const menuWindow = await WebviewWindow.getByLabel(WIDGET_MENU_WINDOW_LABEL);
-  const button = document.querySelector<HTMLButtonElement>("[data-menu-button]");
-  if (!menuWindow || !button) {
+  if (!menuWindow) {
     return;
   }
 
-  const rect = button.getBoundingClientRect();
   const scaleFactor = window.devicePixelRatio || 1;
   const width = 132;
   const height = 132;
-  const x = Math.max(8, Math.round((window.screenX + rect.right - width) * scaleFactor));
-  const y = Math.max(8, Math.round((window.screenY + rect.bottom + 8) * scaleFactor));
+  const fallbackButton = document.querySelector<HTMLButtonElement>("[data-menu-button]");
+  const rect = anchor ? { right: anchor.x + anchor.width, bottom: anchor.y + anchor.height } : fallbackButton?.getBoundingClientRect();
+  if (!rect) {
+    return;
+  }
+
+  const x = anchor
+    ? Math.max(8, Math.round(rect.right - Math.round((width * scaleFactor) / 2)))
+    : Math.max(8, Math.round((window.screenX + rect.right) * scaleFactor - Math.round((width * scaleFactor) / 2)));
+  const y = anchor
+    ? Math.max(8, Math.round(rect.bottom + 8))
+    : Math.max(8, Math.round((window.screenY + rect.bottom) * scaleFactor + 8));
 
   await menuWindow.setPosition(new PhysicalPosition(x, y));
   await menuWindow.setSize(new PhysicalSize(Math.round(width * scaleFactor), Math.round(height * scaleFactor)));

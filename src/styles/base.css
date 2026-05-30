@@ -110,6 +110,7 @@ button {
   display: flex;
   align-items: stretch;
   justify-content: center;
+  overflow: visible;
 }
 
 .schedule-shell.mode-detached {
@@ -138,9 +139,54 @@ button {
   position: relative;
 }
 
+.widget-mini-trigger {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(var(--widget-border), 0.16);
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(var(--widget-text), 0.9);
+  cursor: pointer;
+}
+
+.widget-mini-trigger:hover,
+.widget-mini-trigger:active {
+  background: transparent;
+  border-color: rgba(var(--widget-border), 0.16);
+  color: rgba(var(--widget-text), 0.9);
+}
+
+.widget-mini-trigger svg {
+  width: 18px;
+  height: 18px;
+}
+
 .schedule-card {
   --grid-line-color: rgba(var(--row-divider-rgb), var(--row-divider-opacity));
   --grid-line-size: var(--row-divider-thickness);
+}
+
+.schedule-shell.toolbar-minimalist .schedule-card {
+  grid-template-rows: var(--date-row-height) minmax(0, 1fr);
+}
+
+.schedule-shell.toolbar-minimalist .date-row {
+  grid-row: 1;
+}
+
+.schedule-shell.toolbar-minimalist .schedule-grid {
+  grid-row: 2;
+}
+
+.schedule-shell.toolbar-minimalist .widget-mini-trigger {
+  top: calc(var(--column-gap) / 2);
+  left: calc(var(--column-gap) / 2);
 }
 
 .schedule-shell.background-blur .schedule-card,
@@ -209,6 +255,19 @@ button {
   transition:
     max-height 250ms cubic-bezier(0.1, 0.9, 0.2, 1),
     opacity 250ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+.toolbar-floating {
+  height: 100%;
+  max-height: 100%;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.16),
+    inset 0 0 0 1px rgba(229, 234, 242, 0.72);
 }
 
 .is-header-collapsed .schedule-card {
@@ -313,6 +372,196 @@ button {
 
 .hamburger-button:active {
   background: rgba(var(--widget-border), 0.14);
+}
+
+.toolbar-icon-button {
+  height: 32px;
+  width: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(var(--widget-border), 0.14);
+  border-radius: 9px;
+  color: rgba(var(--widget-text), 0.92);
+  background: rgba(var(--widget-border), 0.08);
+  cursor: pointer;
+  padding: 0;
+}
+
+.toolbar-icon-button.is-floating {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.toolbar-icon-button.is-transparent {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.toolbar-icon-button.is-active {
+  border-color: rgba(79, 70, 229, 0.35);
+  background: rgba(238, 240, 255, 0.88);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  color: #4f46e5;
+}
+
+.toolbar-icon-button.is-transparent.is-active {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: #4f46e5;
+}
+
+.toolbar-icon-button[data-menu-button="true"],
+.toolbar-icon-button[data-menu-button="true"].is-active {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: rgba(var(--widget-text), 0.92);
+}
+
+.toolbar-icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.floating-toolbar-window-root {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  padding: 0;
+  background: transparent;
+}
+
+.floating-toolbar-window-root .schedule-toolbar.toolbar-floating {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  padding: 0 12px;
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  grid-template-columns: auto minmax(28px, 1fr) auto;
+}
+
+.floating-toolbar-window-root .toolbar-left {
+  gap: 10px;
+}
+
+.floating-toolbar-window-root .toolbar-right {
+  gap: 8px;
+}
+
+.floating-toolbar-window-root .toolbar-drag-zone {
+  min-width: 24px;
+  height: 100%;
+}
+
+.floating-toolbar-window-root .toolbar-icon-button,
+.floating-toolbar-window-root .week-number-button {
+  color: rgba(255, 255, 255, 0.94);
+  border-color: rgba(255, 255, 255, 0.16);
+  background: transparent;
+  cursor: default;
+}
+
+.floating-toolbar-window-root .toolbar-icon-button svg,
+.floating-toolbar-window-root .week-number-button svg {
+  pointer-events: none;
+}
+
+.floating-toolbar-window-root .toolbar-left,
+.floating-toolbar-window-root .toolbar-right,
+.floating-toolbar-window-root .toolbar-left *,
+.floating-toolbar-window-root .toolbar-right * {
+  cursor: default;
+}
+
+.floating-toolbar-window-root .toolbar-icon-button.is-transparent {
+  background: transparent;
+  border-color: transparent;
+}
+
+.floating-toolbar-window-root .toolbar-icon-button.is-active {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.floating-toolbar-window-root .toolbar-icon-button[data-menu-button="true"],
+.floating-toolbar-window-root .toolbar-icon-button[data-menu-button="true"].is-active {
+  color: rgba(255, 255, 255, 0.94);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.floating-toolbar-window-root .toolbar-icon-button.is-floating {
+  background: transparent;
+}
+
+.floating-toolbar-window-root .week-number-button,
+.floating-toolbar-window-root .toolbar-icon-button.is-floating:not(.is-active) {
+  background: transparent;
+  box-shadow: none;
+}
+
+.floating-toolbar-window-root .toolbar-icon-button svg,
+.floating-toolbar-window-root .week-number-button,
+.floating-toolbar-window-root .toolbar-icon-button {
+  -webkit-app-region: no-drag;
+}
+
+.floating-toolbar-window-root .toolbar-drag-zone {
+  -webkit-app-region: drag;
+  cursor: default;
+}
+
+.floating-toolbar-window-root .toolbar-drag-zone:active {
+  cursor: default;
+}
+
+.floating-toolbar-window-root button,
+.floating-toolbar-window-root .toolbar-icon-button,
+.floating-toolbar-window-root .week-number-button,
+.floating-toolbar-window-root .toolbar-drag-zone {
+  cursor: default;
+}
+
+.floating-toolbar-window-root .schedule-toolbar.toolbar-floating .toolbar-drag-zone {
+  margin: 0 4px;
+  border-radius: 12px;
+}
+
+.floating-toolbar-window-root .schedule-toolbar.toolbar-floating .toolbar-drag-zone::before {
+  content: "";
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+}
+
+.widget-mini-trigger {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(var(--widget-border), 0.16);
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(var(--widget-text), 0.9);
+  cursor: pointer;
+}
+
+.widget-mini-trigger svg {
+  width: 18px;
+  height: 18px;
 }
 
 .toolbar-menu {
@@ -1083,24 +1332,53 @@ button {
 .course-card.is-active {
   outline: 2px solid rgba(var(--accent), 0.4);
   outline-offset: -2px;
-}.resize-grip::before,
-.resize-grip::after {
-  content: "";
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  border-right: 2px solid rgba(var(--widget-text), 0.46);
-  border-bottom: 2px solid rgba(var(--widget-text), 0.46);
 }
 
-.resize-grip::before {
+.schedule-shell.mode-detached .resize-grip {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  z-index: 3;
+  pointer-events: auto;
+}
+
+.schedule-shell.mode-detached .resize-grip::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  border-right: 2px solid rgba(255, 255, 255, 0.82);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.82);
+}
+
+.schedule-shell.mode-detached .resize-grip::before {
   width: 14px;
   height: 14px;
 }
 
-.resize-grip::after {
-  width: 8px;
-  height: 8px;
+.schedule-shell.mode-detached .resize-grip::after {
+  content: none;
+}
+
+.schedule-shell.mode-detached .resize-grip svg {
+  width: 18px;
+  height: 18px;
+  position: relative;
+  z-index: 1;
+}
+
+.schedule-shell.toolbar-minimalist .date-cell:not(.arrow-cell)[data-tauri-drag-region="true"] {
+  cursor: grab;
+}
+
+.schedule-shell.toolbar-minimalist .date-cell:not(.arrow-cell)[data-tauri-drag-region="true"]:active {
+  cursor: grabbing;
 }
 
 /*

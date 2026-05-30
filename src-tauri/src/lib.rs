@@ -56,6 +56,7 @@ pub fn run() {
             settings_windows::open_settings_window,
             settings_windows::open_card_settings_window,
             settings_windows::open_widget_menu_window,
+            settings_windows::open_floating_toolbar_window,
             interaction_proxy::proxy_hitbox_probe,
             interaction_proxy::set_proxy_passthrough,
             interaction_proxy::update_proxy_hitboxes,

@@ -15,6 +15,7 @@ export type WindowModeState = {
 export type ProxyWidgetHit =
   | { kind: "menu-button"; id?: string }
   | { kind: "header-toggle"; id?: string }
+  | { kind: "layout-toggle"; id?: string }
   | { kind: "course"; id: string }
   | { kind: "period"; id: string }
   | { kind: "placeholder"; id: string };

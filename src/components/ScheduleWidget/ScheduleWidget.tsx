@@ -1,7 +1,9 @@
 import type { CSSProperties, PointerEvent, ReactNode, RefObject } from "react";
+import { ScheduleToolbar } from "../ScheduleToolbar/ScheduleToolbar";
 import type { CardStyle, CourseCell, PeriodInfo, Schedule, Weekday } from "../../features/schedule/types";
 import type { SelectedCard, WidgetBackgroundMode } from "../../features/settings/settingsTypes";
 import type { WindowMode } from "../../features/windowMode/types";
+import type { ToolbarLayoutMode } from "../../features/settings/windowEvents";
 
 type ScheduleWidgetProps = {
   schedule: Schedule;
@@ -9,12 +11,15 @@ type ScheduleWidgetProps = {
   mode: WindowMode;
   menuOpen: boolean;
   hovered: boolean;
-  isHeaderCollapsed: boolean;
   activeCellId: string | null;
   menuButtonRef: RefObject<HTMLButtonElement | null>;
   widgetStyle?: CSSProperties;
   backgroundMode: WidgetBackgroundMode;
-  onToggleHeader: () => void;
+  toolbarLayoutMode: ToolbarLayoutMode;
+  onPreviousWeek: () => void;
+  onNextWeek: () => void;
+  onToggleFloatingToolbar: () => void;
+  onToggleLayoutMode: () => void;
   onToggleMenu: () => void;
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
@@ -28,12 +33,15 @@ export function ScheduleWidget({
   mode,
   menuOpen,
   hovered,
-  isHeaderCollapsed,
   activeCellId,
   menuButtonRef,
   widgetStyle,
   backgroundMode,
-  onToggleHeader,
+  toolbarLayoutMode,
+  onPreviousWeek,
+  onNextWeek,
+  onToggleFloatingToolbar,
+  onToggleLayoutMode,
   onToggleMenu,
   onCourseClick,
   onCardEdit,
@@ -41,60 +49,47 @@ export function ScheduleWidget({
   onResizeStart,
 }: ScheduleWidgetProps) {
   const visibleWeekdays = schedule.days.map((day) => day.id);
+  const isMinimalistMode = toolbarLayoutMode === "minimalist";
 
   return (
-    <section className={`schedule-shell mode-${mode} background-${backgroundMode} ${hovered ? "is-forward-hovered" : ""} ${isHeaderCollapsed ? "is-header-collapsed" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
-      <div className="schedule-card">
+    <section className={`schedule-shell mode-${mode} background-${backgroundMode} toolbar-${toolbarLayoutMode} ${hovered ? "is-forward-hovered" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
+      <div className={`schedule-card ${isMinimalistMode ? "is-minimalist-layout" : ""}`}>
         <div className="schedule-background-overlay" aria-hidden="true" />
-        <header className="schedule-toolbar">
-          <div className="toolbar-left" aria-label="周次切换">
-            <button className="week-arrow-button" type="button" title="前一周">
-              &lt;
-            </button>
-            <button className="week-number-button" type="button" title={schedule.termLabel}>
-              第{schedule.weekNumber}周
-            </button>
-            <button className="week-arrow-button" type="button" title="后一周">
-              &gt;
-            </button>
-          </div>
-
-          <div className="toolbar-drag-zone" onPointerDown={onDragStart} title="拖动窗口" />
-
-          <div className="toolbar-right">
-            <button
-              ref={menuButtonRef}
-              className="hamburger-button"
-              data-menu-button="true"
-              type="button"
-              title="菜单"
-              aria-label="菜单"
-              aria-expanded={menuOpen}
-              onClick={onToggleMenu}
-            >
-              <span />
-              <span />
-              <span />
-            </button>
-          </div>
-        </header>
+        {!isMinimalistMode ? (
+          <ScheduleToolbar
+            weekNumber={schedule.weekNumber}
+            menuOpen={menuOpen}
+            toolbarLayoutMode={toolbarLayoutMode}
+            menuButtonRef={menuButtonRef}
+            onPreviousWeek={onPreviousWeek}
+            onNextWeek={onNextWeek}
+            onToggleLayoutMode={onToggleLayoutMode}
+            onToggleMenu={onToggleMenu}
+            onDragStart={onDragStart}
+          />
+        ) : null}
 
         <div className="date-row" role="row">
-          <div className="date-cell arrow-cell">
+          {isMinimalistMode ? (
             <button
-              className="arrow-card header-toggle-button"
-              data-header-toggle="true"
+              className="widget-mini-trigger"
               type="button"
-              title={isHeaderCollapsed ? "展开顶部栏" : "收起顶部栏"}
-              aria-label={isHeaderCollapsed ? "展开顶部栏" : "收起顶部栏"}
-              aria-pressed={isHeaderCollapsed}
-              onClick={onToggleHeader}
+              title="打开工具栏"
+              aria-label="打开工具栏"
+              data-header-toggle="true"
+              onClick={onToggleFloatingToolbar}
             >
-              {isHeaderCollapsed ? "↑" : "↓"}
+              <MiniToolbarIcon />
             </button>
-          </div>
+          ) : null}
+          <div className="date-cell arrow-cell" data-tauri-drag-region={!isMinimalistMode ? "true" : undefined} />
           {schedule.days.map((day) => (
-            <div className="date-cell" key={day.id}>
+            <div
+              className="date-cell"
+              key={day.id}
+              data-tauri-drag-region={isMinimalistMode ? "true" : undefined}
+              onPointerDown={isMinimalistMode ? onDragStart : undefined}
+            >
               <div className={`date-card ${day.id === schedule.activeWeekday ? "is-current" : ""}`}>
                 <span>{day.label}</span>
                 <small>{day.dateLabel}</small>
@@ -139,8 +134,20 @@ export function ScheduleWidget({
         </div>
       </div>
 
-      {mode === "detached" && <div className="resize-grip" onPointerDown={onResizeStart} title="调整大小" />}
+      {mode === "detached" && (
+        <div className="resize-grip" onPointerDown={onResizeStart} title="调整大小" aria-label="调整大小">
+        </div>
+      )}
     </section>
+  );
+}
+
+function MiniToolbarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+      <path d="M6 8h12M6 12h12M6 16h12" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+      <path d="M10 5.5h4M8.5 18.5h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" opacity={0.45} />
+    </svg>
   );
 }
 

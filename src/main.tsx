@@ -2,11 +2,13 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { CardSettingsWindowHost } from "./app/CardSettingsWindowHost";
+import { FloatingToolbarWindowHost } from "./app/FloatingToolbarWindowHost";
 import { InteractionProxyHost } from "./app/InteractionProxyHost";
 import { SettingsWindowHost } from "./app/SettingsWindowHost";
 import { WidgetMenuWindowHost } from "./app/WidgetMenuWindowHost";
 import {
   CARD_SETTINGS_WINDOW_LABEL,
+  FLOATING_TOOLBAR_WINDOW_LABEL,
   SETTINGS_WINDOW_LABEL,
   WIDGET_MENU_WINDOW_LABEL,
 } from "./features/settings/windowEvents";
@@ -25,6 +27,8 @@ const RootComponent =
           ? InteractionProxyHost
           : windowLabel === WIDGET_MENU_WINDOW_LABEL
             ? WidgetMenuWindowHost
+            : windowLabel === FLOATING_TOOLBAR_WINDOW_LABEL
+              ? FloatingToolbarWindowHost
             : App;
 
 createRoot(document.getElementById("root")!).render(
