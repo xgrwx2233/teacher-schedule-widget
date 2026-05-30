@@ -1724,22 +1724,6 @@ button {
   white-space: nowrap;
 }
 
-.settings-window .schedule-choice-preview {
-  min-width: 0;
-  display: flex;
-  gap: 5px;
-  flex-wrap: nowrap;
-  color: #6b7280;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.35;
-  overflow: hidden;
-}
-
-.settings-window .schedule-choice-preview i {
-  font-style: normal;
-}
-
 .settings-window .period-stepper {
   min-width: 0;
   width: min(100%, 180px);

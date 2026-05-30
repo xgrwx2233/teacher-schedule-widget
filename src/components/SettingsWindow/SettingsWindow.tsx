@@ -33,8 +33,6 @@ const workdayOptions: Array<{ id: WorkdayMode; label: string; count: number }> =
   { id: "mon-sun", label: "周一到周日", count: 7 },
 ];
 
-const weekdayPreview = ["一", "二", "三", "四", "五", "六", "日"];
-
 export function SettingsWindow({
   open,
   activeSection,
@@ -110,11 +108,6 @@ function ScheduleTablePanel({
                 onClick={() => onSettingsChange({ ...settings, workdayMode: option.id })}
               >
                 <strong>{option.label}</strong>
-                <span className="schedule-choice-preview" aria-hidden="true">
-                  {weekdayPreview.slice(0, option.count).map((label) => (
-                    <i key={label}>{label}</i>
-                  ))}
-                </span>
               </button>
             ))}
           </div>

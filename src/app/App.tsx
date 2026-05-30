@@ -286,19 +286,24 @@ export function App() {
   useEffect(() => {
     const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
       const nextSettings = event.payload.settings;
-      const visibleScheduleForRows = applyPeriodCountToSchedule(scheduleRef.current, nextSettings.periodCount);
+      const shouldResizeWidget = nextSettings.periodCount !== settingsRef.current.periodCount;
 
+      settingsRef.current = nextSettings;
+      settingsSectionRef.current = normalizeSettingsSection(event.payload.activeSection);
+      setSettingsSection(normalizeSettingsSection(event.payload.activeSection));
+      setSettings(nextSettings);
+
+      if (!shouldResizeWidget) {
+        return;
+      }
+
+      const visibleScheduleForRows = applyPeriodCountToSchedule(scheduleRef.current, nextSettings.periodCount);
       const scaleFactor = window.devicePixelRatio || 1;
       const measuredRowHeight = measureCurrentCourseRowHeight();
       if (measuredRowHeight) {
         courseRowHeightRef.current = courseRowHeightRef.current ?? measuredRowHeight;
       }
       const rowHeight = Math.round((courseRowHeightRef.current ?? measuredRowHeight ?? DEFAULT_COURSE_ROW_HEIGHT) * scaleFactor);
-
-      settingsRef.current = nextSettings;
-      settingsSectionRef.current = normalizeSettingsSection(event.payload.activeSection);
-      setSettings(nextSettings);
-      setSettingsSection(normalizeSettingsSection(event.payload.activeSection));
       void resizeDetachedWidgetToSchedule(visibleScheduleForRows, rowHeight);
     });
 
