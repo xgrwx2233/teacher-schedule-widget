@@ -27,7 +27,7 @@ type CardSettingsWindowProps = {
 
 type CardSettingsTab = "course" | "temporary";
 
-const masterColors = ["#f97316", "#facc15", "#22c55e", "#38bdf8", "#818cf8", "#f472b6"];
+const masterColors = ["#f97316", "#facc15", "#22c55e", "#2dd4bf", "#38bdf8", "#818cf8", "#f472b6"];
 const fontSizeOptions = Array.from({ length: 15 }, (_, index) => index + 10);
 const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -69,19 +69,22 @@ export function CardSettingsWindow({
   return (
     <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="课程卡片设置">
       <section className="card-settings-window">
-        <header className="card-settings-topbar">
-          <nav className="card-settings-tabs" aria-label="卡片设置分类">
-            <button type="button" className={activeTab === "course" ? "is-active" : ""} onClick={() => setActiveTab("course")}>
-              课程配置
-            </button>
-            <button type="button" className={activeTab === "temporary" ? "is-active" : ""} onClick={() => setActiveTab("temporary")}>
-              临时改动
-            </button>
-          </nav>
-          <button className="card-settings-confirm" type="button" aria-label="确认并关闭" title="确认并关闭" onClick={onConfirm}>
+        <header className="card-settings-titlebar">
+          <div className="card-settings-titlebar-drag" data-tauri-drag-region="true">
+            <span className="card-settings-title">课程卡片设置</span>
+          </div>
+          <button className="card-settings-confirm titlebar-confirm" type="button" aria-label="确认并关闭" title="确认并关闭" onClick={onConfirm}>
             ✓
           </button>
         </header>
+        <nav className="card-settings-tabs" aria-label="卡片设置分类">
+          <button type="button" className={activeTab === "course" ? "is-active" : ""} onClick={() => setActiveTab("course")}>
+            课程配置
+          </button>
+          <button type="button" className={activeTab === "temporary" ? "is-active" : ""} onClick={() => setActiveTab("temporary")}>
+            临时改动
+          </button>
+        </nav>
 
         <div className="card-settings-body">
           {activeTab === "course" ? (
@@ -125,126 +128,145 @@ function CourseConfigurationTab({
 }) {
   return (
     <div className="course-config-stack">
-      <SettingsCard
-        title="基础信息"
-        action={
-          <label className="card-settings-header-control">
-            <span>显示模式</span>
-            <select className="card-settings-select" defaultValue="auto">
-              <option value="follow" title="继承课程表全局显示规则">跟随课表</option>
-              <option value="auto" title="有辅助信息时自动显示双行">自动</option>
-              <option value="single" title="只显示一行课程名">单行</option>
-              <option value="double" title="课程名和辅助信息固定双行">双行</option>
-            </select>
-          </label>
-        }
-      >
-        <div className="basic-inline-inputs">
-          <label>
-            <span>课程名</span>
-            <input
-              className="card-settings-input"
-              value={draft.title}
-              maxLength={4}
-              placeholder="课程名"
-              onChange={(event) => onDraftChange({ ...draft, title: limitCardText(event.currentTarget.value) })}
-            />
-          </label>
-          <label>
-            <span>辅助信息</span>
-            <input
-              className="card-settings-input"
-              value={draft.secondary}
-              maxLength={4}
-              placeholder="辅助信息"
-              onChange={(event) => onDraftChange({ ...draft, secondary: limitCardText(event.currentTarget.value) })}
-            />
-          </label>
-        </div>
+      <RowCard label="课程名">
+        <input
+          className="card-settings-input"
+          value={draft.title}
+          maxLength={4}
+          placeholder="社团"
+          onChange={(event) => onDraftChange({ ...draft, title: limitCardText(event.currentTarget.value) })}
+        />
+      </RowCard>
+
+      <RowCard label="辅助信息">
+        <input
+          className="card-settings-input"
+          value={draft.secondary}
+          maxLength={4}
+          placeholder="活动室"
+          onChange={(event) => onDraftChange({ ...draft, secondary: limitCardText(event.currentTarget.value) })}
+        />
+      </RowCard>
+
+      <RowCard label="颜色">
         <ColorPickerRow value={draft.backgroundColor} onChange={(backgroundColor) => onDraftChange({ ...draft, backgroundColor })} />
-        <details className="font-popover-row">
-          <summary>字体</summary>
-          <div className="typography-matrix">
-            <label>
-              <span>字体</span>
-              <select className="card-settings-select" value={draft.fontFamily} onChange={(event) => onDraftChange({ ...draft, fontFamily: event.currentTarget.value })}>
-                <option value="Microsoft YaHei">微软雅黑</option>
-                <option value="Segoe UI">Segoe UI</option>
-                <option value="SimSun">宋体</option>
-                <option value="KaiTi">楷体</option>
-              </select>
-            </label>
-            <label>
-              <span>字号</span>
-              <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 10, 24) })}>
-                {fontSizeOptions.map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>粗细</span>
-              <select className="card-settings-select" defaultValue="medium">
-                <option value="regular">常规</option>
-                <option value="medium">中等</option>
-                <option value="bold">加粗</option>
-              </select>
-            </label>
-          </div>
-        </details>
-      </SettingsCard>
+      </RowCard>
 
-      <SettingsCard
-        title="排课日期"
-        action={
-          <button type="button" className="card-settings-link" onClick={() => onDraftChange({ ...draft, applyWholeTerm: true })}>
-            使用学期起止日期
-          </button>
-        }
-      >
-        <SettingRow label="单双周">
-          <select
-            className="card-settings-select compact-select"
-            value={draft.weekPattern}
-            onChange={(event) => onDraftChange({ ...draft, weekPattern: event.currentTarget.value as CardDraft["weekPattern"] })}
-          >
-            <option value="all">每周</option>
-            <option value="odd">单周</option>
-            <option value="even">双周</option>
-          </select>
-        </SettingRow>
-        <div className="card-settings-date-pair">
-          <input aria-label="开始日期" className="card-settings-input" type="date" value={draft.startDate} onChange={(event) => onDraftChange({ ...draft, applyWholeTerm: false, startDate: event.currentTarget.value })} />
-          <input aria-label="结束日期" className="card-settings-input" type="date" value={draft.endDate} onChange={(event) => onDraftChange({ ...draft, applyWholeTerm: false, endDate: event.currentTarget.value })} />
+      <details className="row-card row-card-accordion" open>
+        <summary>
+          <span className="row-card-label">风格</span>
+          <span className="card-settings-accordion-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div className="row-card-accordion-content">
+          <div className="style-row-stack">
+            <div className="style-row-grid">
+              <CompactField label="字体">
+                <select className="card-settings-select" value={draft.fontFamily} onChange={(event) => onDraftChange({ ...draft, fontFamily: event.currentTarget.value })}>
+                  <option value="Microsoft YaHei">微软雅黑</option>
+                  <option value="Segoe UI">Segoe UI</option>
+                  <option value="SimSun">宋体</option>
+                  <option value="KaiTi">楷体</option>
+                </select>
+              </CompactField>
+              <CompactField label="字号">
+                <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 10, 24) })}>
+                  {fontSizeOptions.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </CompactField>
+              <CompactField label="粗细">
+                <select className="card-settings-select" defaultValue="medium">
+                  <option value="regular">常规</option>
+                  <option value="medium">中等</option>
+                  <option value="bold">加粗</option>
+                </select>
+              </CompactField>
+            </div>
+            <div className="style-row-secondary">
+              <div className="card-settings-field display-mode-control">
+                <select className="card-settings-select card-settings-select-narrow" defaultValue="auto">
+                  <option value="follow" title="继承课程表全局显示规则">跟随课表</option>
+                  <option value="auto" title="有辅助信息时自动显示双行">自动</option>
+                  <option value="single" title="只显示一行课程名">单行</option>
+                  <option value="double" title="课程名和辅助信息固定双行">双行</option>
+                </select>
+              </div>
+              <button type="button" className="card-settings-secondary action-global-apply" onClick={() => onDraftChange({ ...draft })}>
+                全局应用
+              </button>
+            </div>
+          </div>
         </div>
-      </SettingsCard>
+      </details>
 
-      <details className="settings-card card-settings-accordion">
-        <summary>高级设置：合并 / 拆分</summary>
-        <div className="merge-panel">
-          <div className="merge-dpad" aria-label="合并方向">
-            <button type="button" disabled>
-              ↑ 上合并
+      <details className="row-card row-card-accordion" open>
+        <summary>
+          <span className="row-card-label">排课日期</span>
+          <span className="card-settings-accordion-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div className="row-card-accordion-content">
+          <div className="schedule-row-grid schedule-row-grid-two">
+            <CompactField label="单双周">
+              <select
+                className="card-settings-select compact-select"
+                value={draft.weekPattern}
+                onChange={(event) => onDraftChange({ ...draft, weekPattern: event.currentTarget.value as CardDraft["weekPattern"] })}
+              >
+                <option value="all">每周</option>
+                <option value="odd">单周</option>
+                <option value="even">双周</option>
+              </select>
+            </CompactField>
+            <CompactField label="开始日期">
+              <input aria-label="开始日期" className="card-settings-input" type="date" value={draft.startDate} onChange={(event) => onDraftChange({ ...draft, applyWholeTerm: false, startDate: event.currentTarget.value })} />
+            </CompactField>
+            <CompactField label="结束日期">
+              <input aria-label="结束日期" className="card-settings-input" type="date" value={draft.endDate} onChange={(event) => onDraftChange({ ...draft, applyWholeTerm: false, endDate: event.currentTarget.value })} />
+            </CompactField>
+          </div>
+          <div className="secondary-button-row">
+            <button type="button" className="card-settings-link" onClick={() => onDraftChange({ ...draft, applyWholeTerm: true })}>
+              使用学期起止日期
             </button>
-            <button type="button" disabled>
-              ← 左合并
-            </button>
-            <span>当前</span>
-            <button type="button" disabled={!mergeState.canMergeRight} onClick={onMergeRight}>
-              右合并 →
-            </button>
-            <button type="button" disabled>
-              ↓ 下合并
+            <button type="button" className="card-settings-secondary action-global-apply" onClick={() => onDraftChange({ ...draft })}>
+              全局应用
             </button>
           </div>
-          <button className="split-card-button" type="button" disabled={!mergeState.canSplit} onClick={onSplit}>
-            拆分当前卡片
-          </button>
         </div>
-        {mergeState.reason && <p className="card-settings-hint">{mergeState.reason}</p>}
-        <p className="card-settings-hint">当合并组内课程名、辅助信息、单双周或有效日期不一致时，后续会自动拆分为独立卡片。</p>
+      </details>
+
+      <details className="row-card row-card-accordion">
+        <summary>
+          <span className="row-card-label">合并 / 拆分</span>
+          <span className="card-settings-accordion-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div className="row-card-accordion-content">
+          <div className="merge-panel">
+            <div className="merge-dpad" aria-label="合并方向">
+              <button type="button" disabled>
+                ↑ 上合并
+              </button>
+              <button type="button" disabled>
+                ← 左合并
+              </button>
+              <span>当前</span>
+              <button type="button" disabled={!mergeState.canMergeRight} onClick={onMergeRight}>
+                右合并 →
+              </button>
+              <button type="button" disabled>
+                ↓ 下合并
+              </button>
+            </div>
+            <button className="split-card-button" type="button" disabled={!mergeState.canSplit} onClick={onSplit}>
+              拆分当前卡片
+            </button>
+          </div>
+          {mergeState.reason && <p className="card-settings-hint">{mergeState.reason}</p>}
+          <p className="card-settings-hint">只允许同名且辅助信息一致的相邻课程合并；水平合并后只能继续左右合并，竖直合并后只能继续上下合并。</p>
+        </div>
       </details>
     </div>
   );
@@ -264,7 +286,9 @@ function PeriodConfigurationTab({ draft, onDraftChange }: { draft: CardDraft; on
             <input className="card-settings-input" value={draft.secondary} maxLength={4} placeholder="时间" onChange={(event) => onDraftChange({ ...draft, secondary: limitCardText(event.currentTarget.value) })} />
           </label>
         </div>
-        <ColorPickerRow value={draft.backgroundColor} onChange={(backgroundColor) => onDraftChange({ ...draft, backgroundColor })} />
+        <SettingRow label="颜色">
+          <ColorPickerRow value={draft.backgroundColor} onChange={(backgroundColor) => onDraftChange({ ...draft, backgroundColor })} />
+        </SettingRow>
         <div className="typography-matrix">
           <label>
             <span>字体</span>
@@ -461,14 +485,34 @@ function TemporaryList({
   );
 }
 
-function SettingsCard({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+function SettingsCard({ title, action, className, children }: { title?: string; action?: ReactNode; className?: string; children: ReactNode }) {
   return (
-    <section className="settings-card">
-      <header className="settings-card-header">
-        <h2>{title}</h2>
-        {action}
-      </header>
+    <section className={["settings-card", className].filter(Boolean).join(" ")}>
+      {title ? (
+        <header className="settings-card-header">
+          <h2>{title}</h2>
+          {action}
+        </header>
+      ) : null}
       <div className="settings-card-content">{children}</div>
+    </section>
+  );
+}
+
+function CompactField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="card-settings-field">
+      <span>{label}</span>
+      <div>{children}</div>
+    </label>
+  );
+}
+
+function RowCard({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section className="row-card">
+      <div className="row-card-label">{label}</div>
+      <div className="row-card-content">{children}</div>
     </section>
   );
 }
