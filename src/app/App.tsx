@@ -137,12 +137,17 @@ export function App() {
   );
 
   const visibleSchedule = useMemo(
-    () => ({
-      ...schedule,
-      weekNumber: computedWeek,
-      days: getVisibleDays(settings.workdayMode),
-      rows: limitScheduleRows(schedule.rows, settings.periodCount),
-    }),
+    () =>
+      applyTemporaryChangesToSchedule(
+        {
+          ...schedule,
+          weekNumber: computedWeek,
+          days: getVisibleDays(settings.workdayMode, settings.term.startDate, computedWeek),
+          rows: limitScheduleRows(schedule.rows, settings.periodCount),
+        },
+        settings.term.startDate,
+        computedWeek,
+      ),
     [computedWeek, schedule, settings.periodCount, settings.workdayMode],
   );
   const normalizedAppearance = useMemo(() => normalizeAppearanceSettings(settings.appearance), [settings.appearance]);
@@ -749,7 +754,12 @@ export function App() {
   );
 }
 
-function getVisibleDays(mode: WorkdayMode): Schedule["days"] {
+function getVisibleDays(mode: WorkdayMode, termStartDate: string, weekNumber: number): Schedule["days"] {
+  const days = buildVisibleDaysForWeek(mode, termStartDate, weekNumber);
+  if (days.length > 0) {
+    return days;
+  }
+
   if (mode === "mon-sun") {
     return allScheduleDays;
   }
@@ -759,6 +769,48 @@ function getVisibleDays(mode: WorkdayMode): Schedule["days"] {
   }
 
   return allScheduleDays.slice(0, 5);
+}
+
+function buildVisibleDaysForWeek(mode: WorkdayMode, termStartDate: string, weekNumber: number): Schedule["days"] {
+  const weekdays = getWorkdayWeekdays(mode);
+  const weekStart = getWeekStartDate(termStartDate, weekNumber);
+  return weekdays.map((weekday, index) => {
+    const current = new Date(weekStart);
+    current.setDate(weekStart.getDate() + index);
+    return {
+      id: weekday,
+      label: allScheduleDays.find((day) => day.id === weekday)?.label ?? "",
+      dateLabel: formatMonthDay(current),
+    };
+  });
+}
+
+function getWorkdayWeekdays(mode: WorkdayMode): Weekday[] {
+  if (mode === "mon-sun") {
+    return allScheduleDays.map((day) => day.id);
+  }
+
+  if (mode === "mon-sat") {
+    return allScheduleDays.slice(0, 6).map((day) => day.id);
+  }
+
+  return allScheduleDays.slice(0, 5).map((day) => day.id);
+}
+
+function getWeekStartDate(termStartDate: string, weekNumber: number): Date {
+  const parsed = new Date(`${termStartDate}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return new Date();
+  }
+
+  const offsetDays = Math.max(0, weekNumber - 1) * 7;
+  const weekStart = new Date(parsed);
+  weekStart.setDate(parsed.getDate() + offsetDays);
+  return weekStart;
+}
+
+function formatMonthDay(date: Date): string {
+  return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function normalizeSettingsSection(section: SettingsSection | string): SettingsSection {
@@ -782,6 +834,67 @@ function applyPeriodCountToSchedule(schedule: Schedule, periodCount: number): Sc
     ...schedule,
     rows: limitScheduleRows(schedule.rows, periodCount),
   };
+}
+
+function applyTemporaryChangesToSchedule(schedule: Schedule, termStartDate: string, weekNumber: number): Schedule {
+  const weekStart = getWeekStartDate(termStartDate, weekNumber);
+  const visibleDateByWeekday = new Map<Weekday, string>();
+  for (const [index, day] of schedule.days.entries()) {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + index);
+    visibleDateByWeekday.set(day.id, formatIsoDate(date));
+  }
+
+  return {
+    ...schedule,
+    rows: schedule.rows.map((row) => ({
+      ...row,
+      courses: Object.fromEntries(
+        Object.entries(row.courses).map(([weekday, course]) => [
+          weekday,
+          applyTemporaryChangeToCourse(course, visibleDateByWeekday.get(weekday as Weekday)),
+        ]),
+      ) as Record<Weekday, CourseCell>,
+    })),
+  };
+}
+
+function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefined): CourseCell {
+  if (!date || !course.temporaryChanges?.length) {
+    return course;
+  }
+
+  const change = course.temporaryChanges.find((item) => item.dates.includes(date));
+  if (!change) {
+    return course;
+  }
+
+  if (change.type === "cancel") {
+    return {
+      ...course,
+      title: "无课",
+      room: "",
+      style: {
+        ...course.style,
+        backgroundColor: "#f8fafc",
+        color: "#64748b",
+      },
+    };
+  }
+
+  return {
+    ...course,
+    title: change.replaceTitle ?? course.title,
+    room: change.replaceSecondary ?? course.room,
+    style: {
+      ...course.style,
+      backgroundColor: change.replaceColor ?? course.style?.backgroundColor,
+    },
+  };
+}
+
+function formatIsoDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function createFallbackRow(order: number, previous?: ScheduleRow): ScheduleRow {
@@ -1216,7 +1329,8 @@ function applyCardDraft(
 
   const style = toCardStyle(draft);
   const rows = schedule.rows.map((row) => applyDraftToRow(row, selectedCard, draft, style, temporaryChanges));
-  return { ...schedule, rows };
+  const nextSchedule = { ...schedule, rows };
+  return selectedCard.type === "course" ? autoSplitInconsistentMergedCourse(nextSchedule, selectedCard.courseId) : nextSchedule;
 }
 
 function emitCardSettingsState(windowLabel: string, selectedCard: SelectedCard, draft: CardDraft, schedule: Schedule) {
@@ -1291,10 +1405,7 @@ function applyDraftToRow(
               startDate: draft.applyWholeTerm ? undefined : draft.startDate,
               endDate: draft.applyWholeTerm ? undefined : draft.endDate,
             } satisfies CourseScheduleRule,
-            temporaryChanges:
-              temporaryChanges === undefined
-                ? course.temporaryChanges
-                : temporaryChanges.map(toCourseTemporaryChange),
+            temporaryChanges: temporaryChanges === undefined ? course.temporaryChanges : temporaryChanges.map(toCourseTemporaryChange),
           }
         : course,
     ]),
@@ -1354,7 +1465,31 @@ function findRightNeighbor(location: CourseLocation): CourseCell | null {
 }
 
 function canMergeCourses(left: CourseCell, right: CourseCell): boolean {
-  return !left.mergedInto && !right.mergedInto && (right.colSpan ?? 1) === 1 && left.title === right.title && (left.room ?? "") === (right.room ?? "");
+  return (
+    !left.mergedInto &&
+    !right.mergedInto &&
+    (right.colSpan ?? 1) === 1 &&
+    left.title === right.title &&
+    (left.room ?? "") === (right.room ?? "") &&
+    areScheduleRulesEqual(left.scheduleRule, right.scheduleRule)
+  );
+}
+
+function areScheduleRulesEqual(left?: CourseScheduleRule, right?: CourseScheduleRule): boolean {
+  if (!left && !right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.weekPattern === right.weekPattern &&
+    left.applyWholeTerm === right.applyWholeTerm &&
+    (left.startDate ?? "") === (right.startDate ?? "") &&
+    (left.endDate ?? "") === (right.endDate ?? "")
+  );
 }
 
 function mergeCourseCardRight(schedule: Schedule, courseId: string): Schedule {
@@ -1415,6 +1550,7 @@ function splitCourseCard(schedule: Schedule, courseId: string): Schedule {
         room: location.course.room,
         style: location.course.style,
         scheduleRule: location.course.scheduleRule,
+        temporaryChanges: location.course.temporaryChanges,
         colSpan: 1,
         mergedInto: undefined,
       };
@@ -1424,6 +1560,91 @@ function splitCourseCard(schedule: Schedule, courseId: string): Schedule {
   });
 
   return { ...schedule, rows };
+}
+
+function autoSplitInconsistentMergedCourse(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  if (!location) {
+    return schedule;
+  }
+
+  const course = location.course;
+  if (course.mergedInto) {
+    return splitCourseCardPreservingMembers(schedule, course.mergedInto);
+  }
+
+  const span = course.colSpan ?? 1;
+  if (span <= 1) {
+    return schedule;
+  }
+
+  const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + span);
+  const row = location.row;
+  const reference = row.courses[location.weekday];
+  const baseSignature = buildCourseSignature(reference);
+
+  for (const weekday of coveredWeekdays) {
+    const neighbor = row.courses[weekday];
+    if (!neighbor) {
+      continue;
+    }
+
+    if (neighbor.mergedInto !== course.id) {
+      continue;
+    }
+
+    if (buildCourseSignature(neighbor) !== baseSignature) {
+      return splitCourseCardPreservingMembers(schedule, courseId);
+    }
+  }
+
+  return schedule;
+}
+
+function splitCourseCardPreservingMembers(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  if (!location || (location.course.colSpan ?? 1) <= 1) {
+    return schedule;
+  }
+
+  const span = location.course.colSpan ?? 1;
+  const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + span);
+  const rows = schedule.rows.map((row, rowIndex) => {
+    if (rowIndex !== location.rowIndex) {
+      return row;
+    }
+
+    const courses = { ...row.courses };
+    courses[location.weekday] = { ...location.course, colSpan: 1, mergedInto: undefined };
+    for (const weekday of coveredWeekdays) {
+      courses[weekday] = {
+        ...courses[weekday],
+        colSpan: 1,
+        mergedInto: undefined,
+      };
+    }
+
+    return { ...row, courses };
+  });
+
+  return { ...schedule, rows };
+}
+
+function buildCourseSignature(course: CourseCell): string {
+  return [
+    course.title,
+    course.room ?? "",
+    course.scheduleRule?.weekPattern ?? "all",
+    course.scheduleRule?.applyWholeTerm ? "whole" : "range",
+    course.scheduleRule?.startDate ?? "",
+    course.scheduleRule?.endDate ?? "",
+    course.temporaryChanges
+      ?.map(
+        (change) =>
+          `${change.id}:${change.type}:${change.dates.join(",")}:${change.replaceTitle ?? ""}:${change.replaceSecondary ?? ""}:${change.replaceColor ?? ""}`,
+      )
+      .join("|") ?? "",
+  ].join("::");
 }
 
 function findCourse(schedule: Schedule, courseId: string): CourseCell | undefined {
