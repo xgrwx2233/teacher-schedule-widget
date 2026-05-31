@@ -662,7 +662,8 @@ button {
 
 .card-settings-window {
   width: min(96vw, 360px);
-  height: min(94vh, 430px);
+  height: 430px;
+  max-height: 430px;
   margin-top: 0;
   border: 1px solid #e5eaf2;
   border-radius: 16px;
@@ -1363,12 +1364,15 @@ button {
 
 .card-settings-window {
   width: min(100vw, 360px);
-  height: min(100vh, 430px);
+  height: 430px;
+  max-height: 430px;
   grid-template-rows: 32px auto minmax(0, 1fr);
-  border: 1px solid #e3e8f2;
+  border: 1px solid #d9dee8;
   border-radius: 16px;
-  background: #f6f7fb;
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+  background: #f3f3f6;
+  box-shadow:
+    0 18px 42px rgba(15, 23, 42, 0.18),
+    0 2px 8px rgba(15, 23, 42, 0.08);
 }
 
 .card-settings-titlebar {
@@ -1415,7 +1419,8 @@ button {
   margin: 8px 10px 0;
   padding: 3px;
   border-radius: 999px;
-  background: #e9ebf2;
+  background: #dfe2ea;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 .card-settings-tabs button {
@@ -1431,12 +1436,12 @@ button {
   color: #312e81;
   background: #ffffff;
   box-shadow:
-    0 1px 4px rgba(15, 23, 42, 0.1),
+    0 2px 6px rgba(15, 23, 42, 0.14),
     inset 0 0 0 1px rgba(255, 255, 255, 0.72);
 }
 
 .card-settings-body {
-  padding: 8px 10px 10px;
+  padding: 6px 10px 6px;
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
 }
@@ -1462,12 +1467,13 @@ button {
   gap: 9px;
   min-height: 46px;
   padding: 8px 10px;
-  border: 1px solid #e4e9f2;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #ffffff;
   box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 2px 6px rgba(0, 0, 0, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
 }
 
 .row-card-label {
@@ -1497,18 +1503,24 @@ button {
   height: 32px;
   min-width: 0;
   padding: 0 9px;
-  border-color: #d9e1ee;
+  border: 1px solid #d1d5db;
   border-radius: 9px;
   background: #ffffff;
   font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
   font-size: 12px;
   outline: none;
+  box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.03);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .card-settings-window .card-settings-input:focus,
 .card-settings-window .card-settings-select:focus {
-  border-color: #9aa8ff;
-  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.18);
+  border-color: #8b8cf6;
+  box-shadow:
+    0 0 0 2px rgba(129, 140, 248, 0.2),
+    inset 0 1px 1px rgba(15, 23, 42, 0.03);
 }
 
 .style-row-grid {
@@ -1565,6 +1577,7 @@ button {
 .row-card-accordion {
   display: block;
   padding: 0;
+  background: #ffffff;
 }
 
 .row-card-accordion > summary {
@@ -1575,6 +1588,17 @@ button {
   gap: 8px;
   padding: 0 10px;
   cursor: pointer;
+  border-radius: 14px;
+  background: #f9fafb;
+  transition:
+    transform 80ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.row-card-accordion > summary:active {
+  transform: scale(0.98);
+  background: #f3f4f6;
 }
 
 .row-card-accordion > summary::-webkit-details-marker {
@@ -1583,6 +1607,8 @@ button {
 
 .row-card-accordion[open] > summary {
   border-bottom: 1px solid #eef2f7;
+  border-radius: 14px 14px 0 0;
+  background: #ffffff;
 }
 
 .row-card-accordion[open] .card-settings-accordion-chevron {
@@ -1693,11 +1719,12 @@ button {
 .card-settings-window .card-settings-link {
   height: 24px;
   padding: 0 8px;
-  border: 1px solid #dfe5f1;
+  border: 1px solid #d1d5db;
   border-radius: 999px;
-  background: #f7f8ff;
+  background: #ffffff;
   color: #4f46e5;
   font-size: 11px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .temporary-layout {
@@ -1714,9 +1741,12 @@ button {
 .temporary-list-item,
 .temporary-result-card,
 .card-settings-window .settings-card {
-  border-color: #e4e9f2;
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-color: #e5e7eb;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 2px 6px rgba(0, 0, 0, 0.02);
 }
 
 .segmented-list {

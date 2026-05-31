@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CardDraft,
   CourseCardMergeState,
@@ -49,6 +49,11 @@ export function CardSettingsWindow({
 }: CardSettingsWindowProps) {
   const [activeTab, setActiveTab] = useState<CardSettingsTab>("course");
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [activeTab, selectedCard]);
 
   if (!selectedCard) {
     return null;
@@ -86,7 +91,7 @@ export function CardSettingsWindow({
           </button>
         </nav>
 
-        <div className="card-settings-body">
+        <div className="card-settings-body" ref={bodyRef}>
           {activeTab === "course" ? (
             selectedCard.type === "course" ? (
               <CourseConfigurationTab draft={draft} mergeState={mergeState} onDraftChange={onDraftChange} onMergeRight={onMergeRight} onSplit={onSplit} />
@@ -152,7 +157,7 @@ function CourseConfigurationTab({
         <ColorPickerRow value={draft.backgroundColor} onChange={(backgroundColor) => onDraftChange({ ...draft, backgroundColor })} />
       </RowCard>
 
-      <details className="row-card row-card-accordion" open>
+      <details className="row-card row-card-accordion">
         <summary>
           <span className="row-card-label">风格</span>
           <span className="card-settings-accordion-chevron" aria-hidden="true">▾</span>
@@ -202,7 +207,7 @@ function CourseConfigurationTab({
         </div>
       </details>
 
-      <details className="row-card row-card-accordion" open>
+      <details className="row-card row-card-accordion">
         <summary>
           <span className="row-card-label">排课日期</span>
           <span className="card-settings-accordion-chevron" aria-hidden="true">▾</span>
