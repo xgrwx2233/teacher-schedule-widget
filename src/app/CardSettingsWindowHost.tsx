@@ -92,6 +92,21 @@ export function CardSettingsWindowHost() {
     });
   };
 
+  const confirmAndClose = () => {
+    if (!selectedCard) {
+      return;
+    }
+
+    if (draft.title.trim() === "" && selectedCard.type === "course") {
+      emitAction("delete");
+      void closeWindow();
+      return;
+    }
+
+    emitUpdate(draft);
+    void closeWindow();
+  };
+
   const addTemporaryChange = () => {
     const nextChange = createDefaultTemporaryChangeDraft(new Date().toISOString().slice(0, 10));
     const nextChanges = [nextChange, ...temporaryChanges];
@@ -145,6 +160,7 @@ export function CardSettingsWindowHost() {
         onDraftChange={emitUpdate}
         onMergeRight={() => emitAction("merge-right")}
         onSplit={() => emitAction("split")}
+        onConfirm={confirmAndClose}
         onClose={closeWindow}
         onTemporaryChangeAdd={addTemporaryChange}
         onTemporaryChangeSelect={setActiveTemporaryChangeId}

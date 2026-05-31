@@ -1372,7 +1372,11 @@ function applyCourseCardAction(schedule: Schedule, selectedCard: SelectedCard, a
     return mergeCourseCardRight(schedule, selectedCard.courseId);
   }
 
-  return splitCourseCard(schedule, selectedCard.courseId);
+  if (action === "split") {
+    return splitCourseCard(schedule, selectedCard.courseId);
+  }
+
+  return deleteCourseCard(schedule, selectedCard.courseId);
 }
 
 function applyDraftToRow(
@@ -1628,6 +1632,76 @@ function splitCourseCardPreservingMembers(schedule: Schedule, courseId: string):
   });
 
   return { ...schedule, rows };
+}
+
+function deleteCourseCard(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  if (!location) {
+    return schedule;
+  }
+
+  const rows = schedule.rows.map((row, rowIndex) => {
+    if (rowIndex !== location.rowIndex) {
+      return row;
+    }
+
+    const courses = { ...row.courses };
+    const target = courses[location.weekday];
+    if (!target) {
+      return row;
+    }
+
+    const span = target.colSpan ?? 1;
+    const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + span);
+    courses[location.weekday] = createEmptyCourseCell(target.id);
+
+    for (const weekday of coveredWeekdays) {
+      const neighbor = courses[weekday];
+      if (!neighbor) {
+        continue;
+      }
+
+      courses[weekday] = {
+        ...neighbor,
+        title: "",
+        room: "",
+        note: "",
+        colSpan: 1,
+        mergedInto: undefined,
+        scheduleRule: {
+          weekPattern: "all",
+          applyWholeTerm: true,
+        },
+        temporaryChanges: undefined,
+        style: {
+          backgroundColor: "#ffffff",
+          color: "#64748b",
+        },
+      };
+    }
+
+    return { ...row, courses };
+  });
+
+  return { ...schedule, rows };
+}
+
+function createEmptyCourseCell(id: string): CourseCell {
+  return {
+    id,
+    title: "",
+    room: "",
+    note: "",
+    colSpan: 1,
+    scheduleRule: {
+      weekPattern: "all",
+      applyWholeTerm: true,
+    },
+    style: {
+      backgroundColor: "#ffffff",
+      color: "#64748b",
+    },
+  };
 }
 
 function buildCourseSignature(course: CourseCell): string {

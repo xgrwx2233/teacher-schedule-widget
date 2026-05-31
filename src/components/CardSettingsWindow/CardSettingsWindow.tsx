@@ -17,6 +17,7 @@ type CardSettingsWindowProps = {
   onDraftChange: (draft: CardDraft) => void;
   onMergeRight: () => void;
   onSplit: () => void;
+  onConfirm: () => void;
   onClose: () => void;
   onTemporaryChangeAdd: () => void;
   onTemporaryChangeSelect: (id: string | null) => void;
@@ -39,6 +40,7 @@ export function CardSettingsWindow({
   onDraftChange,
   onMergeRight,
   onSplit,
+  onConfirm,
   onClose,
   onTemporaryChangeAdd,
   onTemporaryChangeSelect,
@@ -67,14 +69,19 @@ export function CardSettingsWindow({
   return (
     <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="课程卡片设置">
       <section className="card-settings-window">
-        <nav className="card-settings-tabs" aria-label="卡片设置分类">
-          <button type="button" className={activeTab === "course" ? "is-active" : ""} onClick={() => setActiveTab("course")}>
-            课程配置
+        <header className="card-settings-topbar">
+          <nav className="card-settings-tabs" aria-label="卡片设置分类">
+            <button type="button" className={activeTab === "course" ? "is-active" : ""} onClick={() => setActiveTab("course")}>
+              课程配置
+            </button>
+            <button type="button" className={activeTab === "temporary" ? "is-active" : ""} onClick={() => setActiveTab("temporary")}>
+              临时改动
+            </button>
+          </nav>
+          <button className="card-settings-confirm" type="button" aria-label="确认并关闭" title="确认并关闭" onClick={onConfirm}>
+            ✓
           </button>
-          <button type="button" className={activeTab === "temporary" ? "is-active" : ""} onClick={() => setActiveTab("temporary")}>
-            临时改动
-          </button>
-        </nav>
+        </header>
 
         <div className="card-settings-body">
           {activeTab === "course" ? (
@@ -98,19 +105,6 @@ export function CardSettingsWindow({
           )}
         </div>
 
-        <footer className="card-settings-footer">
-          <button className="card-settings-danger" type="button">
-            {activeTab === "temporary" ? "删除该条改动" : selectedCard.type === "course" ? "删除课程" : "删除课次"}
-          </button>
-          <div className="card-settings-footer-actions">
-            <button className="card-settings-secondary" type="button" onClick={onClose}>
-              取消
-            </button>
-            <button className="card-settings-primary" type="button" onClick={onClose}>
-              保存修改
-            </button>
-          </div>
-        </footer>
       </section>
     </div>
   );
@@ -137,10 +131,10 @@ function CourseConfigurationTab({
           <label className="card-settings-header-control">
             <span>显示模式</span>
             <select className="card-settings-select" defaultValue="auto">
-              <option value="follow">跟随课程表设置</option>
-              <option value="auto">自动 (有辅助信息时双行)</option>
-              <option value="single">强制单行</option>
-              <option value="double">强制双行</option>
+              <option value="follow" title="继承课程表全局显示规则">跟随课表</option>
+              <option value="auto" title="有辅助信息时自动显示双行">自动</option>
+              <option value="single" title="只显示一行课程名">单行</option>
+              <option value="double" title="课程名和辅助信息固定双行">双行</option>
             </select>
           </label>
         }
@@ -168,39 +162,42 @@ function CourseConfigurationTab({
           </label>
         </div>
         <ColorPickerRow value={draft.backgroundColor} onChange={(backgroundColor) => onDraftChange({ ...draft, backgroundColor })} />
-        <div className="typography-matrix">
-          <label>
-            <span>字体</span>
-            <select className="card-settings-select" value={draft.fontFamily} onChange={(event) => onDraftChange({ ...draft, fontFamily: event.currentTarget.value })}>
-              <option value="Microsoft YaHei">微软雅黑</option>
-              <option value="Segoe UI">Segoe UI</option>
-              <option value="SimSun">宋体</option>
-              <option value="KaiTi">楷体</option>
-            </select>
-          </label>
-          <label>
-            <span>字号</span>
-            <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 10, 24) })}>
-              {fontSizeOptions.map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>粗细</span>
-            <select className="card-settings-select" defaultValue="medium">
-              <option value="regular">常规</option>
-              <option value="medium">中等</option>
-              <option value="bold">加粗</option>
-            </select>
-          </label>
-        </div>
+        <details className="font-popover-row">
+          <summary>字体</summary>
+          <div className="typography-matrix">
+            <label>
+              <span>字体</span>
+              <select className="card-settings-select" value={draft.fontFamily} onChange={(event) => onDraftChange({ ...draft, fontFamily: event.currentTarget.value })}>
+                <option value="Microsoft YaHei">微软雅黑</option>
+                <option value="Segoe UI">Segoe UI</option>
+                <option value="SimSun">宋体</option>
+                <option value="KaiTi">楷体</option>
+              </select>
+            </label>
+            <label>
+              <span>字号</span>
+              <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 10, 24) })}>
+                {fontSizeOptions.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>粗细</span>
+              <select className="card-settings-select" defaultValue="medium">
+                <option value="regular">常规</option>
+                <option value="medium">中等</option>
+                <option value="bold">加粗</option>
+              </select>
+            </label>
+          </div>
+        </details>
       </SettingsCard>
 
       <SettingsCard
-        title="排课与有效日期"
+        title="排课日期"
         action={
           <button type="button" className="card-settings-link" onClick={() => onDraftChange({ ...draft, applyWholeTerm: true })}>
             使用学期起止日期
@@ -218,13 +215,9 @@ function CourseConfigurationTab({
             <option value="even">双周</option>
           </select>
         </SettingRow>
-        <div className="date-stack">
-          <SettingRow label="开始日期">
-            <input className="card-settings-input" type="date" value={draft.startDate} onChange={(event) => onDraftChange({ ...draft, applyWholeTerm: false, startDate: event.currentTarget.value })} />
-          </SettingRow>
-          <SettingRow label="结束日期">
-            <input className="card-settings-input" type="date" value={draft.endDate} onChange={(event) => onDraftChange({ ...draft, applyWholeTerm: false, endDate: event.currentTarget.value })} />
-          </SettingRow>
+        <div className="card-settings-date-pair">
+          <input aria-label="开始日期" className="card-settings-input" type="date" value={draft.startDate} onChange={(event) => onDraftChange({ ...draft, applyWholeTerm: false, startDate: event.currentTarget.value })} />
+          <input aria-label="结束日期" className="card-settings-input" type="date" value={draft.endDate} onChange={(event) => onDraftChange({ ...draft, applyWholeTerm: false, endDate: event.currentTarget.value })} />
         </div>
       </SettingsCard>
 
@@ -343,7 +336,6 @@ function TemporaryChangesTab({
           <TemporaryChangeEditor
             change={activeChange}
             onUpdateChange={onUpdateChange}
-            onRemoveChange={onRemoveChange}
             onRemoveDate={onRemoveDate}
           />
         ) : (
@@ -360,12 +352,10 @@ function TemporaryChangesTab({
 function TemporaryChangeEditor({
   change,
   onUpdateChange,
-  onRemoveChange,
   onRemoveDate,
 }: {
   change: TemporaryChangeDraft;
   onUpdateChange: (change: TemporaryChangeDraft) => void;
-  onRemoveChange: (id: string) => void;
   onRemoveDate: (change: TemporaryChangeDraft, date: string) => void;
 }) {
   const updateType = (type: TemporaryChangeType) => {
@@ -418,9 +408,6 @@ function TemporaryChangeEditor({
         </SettingsCard>
       )}
 
-      <button className="card-settings-danger inline-danger" type="button" onClick={() => onRemoveChange(change.id)}>
-        删除该条改动
-      </button>
     </div>
   );
 }

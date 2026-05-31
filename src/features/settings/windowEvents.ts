@@ -94,7 +94,7 @@ export type CardSettingsWindowUpdatePayload = {
 export type CardSettingsWindowActionPayload = {
   windowLabel: string;
   selectedCard: SelectedCard;
-  action: "merge-right" | "split";
+  action: "merge-right" | "split" | "delete";
 };
 
 export type CardSettingsWindowStateRequestPayload = {

@@ -651,7 +651,7 @@ button {
   max-width: 100%;
   max-height: 100%;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid #e5eaf2;
   border-radius: 16px;
   background: #ffffff;
@@ -661,8 +661,9 @@ button {
 }
 
 .card-settings-window {
-  width: min(96vw, 520px);
+  width: min(96vw, 276px);
   height: min(94vh, 720px);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .settings-window-wide {
@@ -711,9 +712,35 @@ button {
 .settings-content,
 .card-settings-body {
   min-height: 0;
-  overflow-y: hidden;
+  overflow-y: auto;
   overflow-x: hidden;
   padding: 10px;
+}
+
+.card-settings-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  padding-right: 8px;
+}
+
+.card-settings-confirm {
+  width: 30px;
+  height: 30px;
+  margin-top: 8px;
+  border: 1px solid #dbe2ee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #4f46e5;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.card-settings-confirm:hover {
+  background: #f8fafc;
 }
 
 .card-settings-tabs {
@@ -985,40 +1012,7 @@ button {
 }
 
 .card-settings-footer {
-  display: grid;
-  grid-template-columns: auto auto;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 0 10px 10px;
-}
-
-.card-settings-footer-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.card-settings-danger {
-  height: 30px;
-  padding: 0 10px;
-  color: #b91c1c;
-  font-weight: 700;
-  background: #fff5f5;
-  font-size: 12px;
-}
-
-.card-settings-secondary,
-.card-settings-primary {
-  height: 30px;
-  padding: 0 12px;
-  font-weight: 700;
-  font-size: 12px;
-}
-
-.card-settings-primary {
-  border-color: #c7d2fe;
-  background: #4f46e5;
-  color: #ffffff;
+  display: none;
 }
 
 .temporary-layout {
