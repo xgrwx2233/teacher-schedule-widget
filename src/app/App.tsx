@@ -10,6 +10,7 @@ import type {
   CardStyle,
   CourseCell,
   CourseScheduleRule,
+  CourseTemporaryChange,
   PeriodInfo,
   Schedule,
   ScheduleRow,
@@ -20,10 +21,12 @@ import {
   defaultCardDraft,
   defaultAppearanceSettings,
   normalizeAppearanceSettings,
+  createDefaultTemporaryChangeDraft,
   type CardDraft,
   type CourseCardMergeState,
   type SelectedCard,
   type SettingsSection,
+  type TemporaryChangeDraft,
   type WidgetSettingsState,
   toCardStyle,
 } from "../features/settings/settingsTypes";
@@ -416,7 +419,13 @@ export function App() {
       setSelectedCard(event.payload.selectedCard);
       setCardDraft(event.payload.draft);
       setSchedule((current) => {
-        const nextSchedule = applyCardDraft(current, event.payload.selectedCard, event.payload.draft);
+        const nextSchedule = applyCardDraft(
+          current,
+          event.payload.selectedCard,
+          event.payload.draft,
+          event.payload.temporaryChanges,
+          event.payload.activeTemporaryChangeId,
+        );
         scheduleRef.current = nextSchedule;
         void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, event.payload.draft, nextSchedule);
         return nextSchedule;
@@ -1194,21 +1203,31 @@ function createDraftForCard(
   return base;
 }
 
-function applyCardDraft(schedule: Schedule, selectedCard: SelectedCard | null, draft: CardDraft): Schedule {
+function applyCardDraft(
+  schedule: Schedule,
+  selectedCard: SelectedCard | null,
+  draft: CardDraft,
+  temporaryChanges?: TemporaryChangeDraft[],
+  activeTemporaryChangeId?: string | null,
+): Schedule {
   if (!selectedCard) {
     return schedule;
   }
 
   const style = toCardStyle(draft);
-  const rows = schedule.rows.map((row) => applyDraftToRow(row, selectedCard, draft, style));
+  const rows = schedule.rows.map((row) => applyDraftToRow(row, selectedCard, draft, style, temporaryChanges));
   return { ...schedule, rows };
 }
 
 function emitCardSettingsState(windowLabel: string, selectedCard: SelectedCard, draft: CardDraft, schedule: Schedule) {
+  const course = selectedCard.type === "course" ? findCourse(schedule, selectedCard.courseId) : undefined;
+  const temporaryChanges = course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
   return emitTo<CardSettingsWindowStatePayload>(windowLabel, CARD_SETTINGS_WINDOW_STATE_EVENT, {
     selectedCard,
     draft,
     mergeState: getCourseCardMergeState(schedule, selectedCard),
+    temporaryChanges,
+    activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
   });
 }
 
@@ -1247,6 +1266,7 @@ function applyDraftToRow(
   selectedCard: SelectedCard,
   draft: CardDraft,
   style: CardStyle,
+  temporaryChanges?: TemporaryChangeDraft[],
 ): ScheduleRow {
   if (selectedCard.type === "period" && selectedCard.periodId === row.period.id) {
     return { ...row, period: { ...row.period, label: draft.title, time: draft.secondary, style } };
@@ -1271,12 +1291,38 @@ function applyDraftToRow(
               startDate: draft.applyWholeTerm ? undefined : draft.startDate,
               endDate: draft.applyWholeTerm ? undefined : draft.endDate,
             } satisfies CourseScheduleRule,
+            temporaryChanges:
+              temporaryChanges === undefined
+                ? course.temporaryChanges
+                : temporaryChanges.map(toCourseTemporaryChange),
           }
         : course,
     ]),
   ) as Record<Weekday, CourseCell>;
 
   return { ...row, courses };
+}
+
+function toCourseTemporaryChange(change: TemporaryChangeDraft) {
+  return {
+    id: change.id,
+    type: change.type,
+    dates: change.dates,
+    replaceTitle: change.replaceTitle || undefined,
+    replaceSecondary: change.replaceSecondary || undefined,
+    replaceColor: change.replaceColor || undefined,
+  } satisfies CourseTemporaryChange;
+}
+
+function toTemporaryChangeDraft(change: CourseTemporaryChange): TemporaryChangeDraft {
+  return {
+    id: change.id,
+    type: change.type,
+    dates: change.dates,
+    replaceTitle: change.replaceTitle ?? "",
+    replaceSecondary: change.replaceSecondary ?? "",
+    replaceColor: change.replaceColor ?? "#4f46e5",
+  };
 }
 
 type CourseLocation = {

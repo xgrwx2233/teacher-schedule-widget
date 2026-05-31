@@ -1,4 +1,12 @@
-import type { CardDraft, CourseCardMergeState, SelectedCard, SettingsSection, WidgetBackgroundMode, WidgetSettingsState } from "./settingsTypes";
+import type {
+  CardDraft,
+  CourseCardMergeState,
+  SelectedCard,
+  SettingsSection,
+  TemporaryChangeDraft,
+  WidgetBackgroundMode,
+  WidgetSettingsState,
+} from "./settingsTypes";
 import type { WindowMode } from "../windowMode/types";
 
 export const SETTINGS_WINDOW_LABEL = "settings";
@@ -71,12 +79,16 @@ export type CardSettingsWindowStatePayload = {
   selectedCard: SelectedCard;
   draft: CardDraft;
   mergeState: CourseCardMergeState;
+  temporaryChanges?: TemporaryChangeDraft[];
+  activeTemporaryChangeId?: string | null;
 };
 
 export type CardSettingsWindowUpdatePayload = {
   windowLabel: string;
   selectedCard: SelectedCard;
   draft: CardDraft;
+  temporaryChanges?: TemporaryChangeDraft[];
+  activeTemporaryChangeId?: string | null;
 };
 
 export type CardSettingsWindowActionPayload = {

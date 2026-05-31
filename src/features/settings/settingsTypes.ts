@@ -1,4 +1,4 @@
-import type { CardStyle, CourseScheduleRule, WorkdayMode } from "../schedule/types";
+import type { CardStyle, CourseScheduleRule, CourseTemporaryChange, WorkdayMode } from "../schedule/types";
 
 export type TermSettings = {
   startDate: string;
@@ -58,6 +58,14 @@ export type CardDraft = {
   applyWholeTerm: boolean;
   startDate: string;
   endDate: string;
+};
+
+export type TemporaryChangeType = CourseTemporaryChange["type"];
+
+export type TemporaryChangeDraft = CourseTemporaryChange & {
+  replaceTitle: string;
+  replaceSecondary: string;
+  replaceColor: string;
 };
 
 export const defaultAppearanceSettings: AppearanceSettings = {
@@ -142,6 +150,17 @@ export const defaultCardDraft: CardDraft = {
   startDate: "2026-03-05",
   endDate: "2026-06-30",
 };
+
+export function createDefaultTemporaryChangeDraft(date: string): TemporaryChangeDraft {
+  return {
+    id: `temporary-change-${date}-${Math.random().toString(16).slice(2, 8)}`,
+    type: "cancel",
+    dates: [date],
+    replaceTitle: "",
+    replaceSecondary: "",
+    replaceColor: "#4f46e5",
+  };
+}
 
 export function toCardStyle(draft: CardDraft): CardStyle {
   return {

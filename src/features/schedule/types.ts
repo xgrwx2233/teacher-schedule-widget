@@ -23,6 +23,15 @@ export type CourseScheduleRule = {
   endDate?: string;
 };
 
+export type CourseTemporaryChange = {
+  id: string;
+  type: "cancel" | "replace";
+  dates: string[];
+  replaceTitle?: string;
+  replaceSecondary?: string;
+  replaceColor?: string;
+};
+
 export type ScheduleDay = {
   id: Weekday;
   label: string;
@@ -45,6 +54,7 @@ export type CourseCell = {
   mergedInto?: string;
   style?: CardStyle;
   scheduleRule?: CourseScheduleRule;
+  temporaryChanges?: CourseTemporaryChange[];
 };
 
 export type ScheduleCourseRow = {
