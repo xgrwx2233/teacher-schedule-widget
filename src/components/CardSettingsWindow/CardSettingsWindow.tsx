@@ -375,6 +375,16 @@ function TemporaryChangesTab({
     }));
   };
 
+  const markNoClass = () => {
+    updateEditor({
+      type: "cancel",
+      title: "无课",
+      subtitle: "",
+    });
+  };
+
+  const isNoClass = editor.title.trim() === "无课";
+
   const removeDate = (date: string) => {
     const nextDates = editor.dates.filter((item) => item !== date);
     if (nextDates.length === 0) {
@@ -438,23 +448,34 @@ function TemporaryChangesTab({
       <SettingsCard>
         <div className="basic-info-grid">
           <div className="basic-info-inline">
-            <label className="basic-info-field">
-              <span>课程名</span>
+            <label className={isNoClass ? "basic-info-field is-disabled" : "basic-info-field"}>
+              <div className="basic-info-field-head">
+                <span>课程名</span>
+                <button
+                  type="button"
+                  className={isNoClass ? "temporary-no-class-button is-active" : "temporary-no-class-button"}
+                  onClick={markNoClass}
+                >
+                  不上啦
+                </button>
+              </div>
               <input
                 className="card-settings-input"
                 value={editor.title}
                 maxLength={4}
                 placeholder="社团"
+                disabled={isNoClass}
                 onChange={(event) => updateEditor({ title: limitCardText(event.currentTarget.value) })}
               />
             </label>
-            <label className="basic-info-field">
+            <label className={isNoClass ? "basic-info-field is-disabled" : "basic-info-field"}>
               <span>辅助信息</span>
               <input
                 className="card-settings-input"
                 value={editor.subtitle}
                 maxLength={4}
                 placeholder="活动室"
+                disabled={isNoClass}
                 onChange={(event) => updateEditor({ subtitle: limitCardText(event.currentTarget.value) })}
               />
             </label>

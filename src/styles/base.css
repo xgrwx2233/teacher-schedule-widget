@@ -1382,6 +1382,14 @@ button {
   gap: 4px;
 }
 
+.basic-info-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 .basic-info-field span,
 .basic-info-color > span {
   color: #64748b;
@@ -1397,6 +1405,47 @@ button {
 
 .basic-info-field .card-settings-input {
   height: 30px;
+}
+
+.basic-info-field.is-disabled .card-settings-input {
+  background: #f8fafc;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+  box-shadow: none;
+  opacity: 0.82;
+}
+
+.temporary-no-class-button {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #fff1f2;
+  color: #be123c;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 80ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.temporary-no-class-button:hover {
+  border-color: #fda4af;
+  background: #ffe4e6;
+}
+
+.temporary-no-class-button.is-active {
+  border-color: #fb7185;
+  background: #ffe4e6;
+  box-shadow: 0 0 0 2px rgba(251, 113, 133, 0.18);
+}
+
+.basic-info-field.is-disabled .temporary-no-class-button {
+  opacity: 0.75;
 }
 
 .card-settings-body::-webkit-scrollbar {
