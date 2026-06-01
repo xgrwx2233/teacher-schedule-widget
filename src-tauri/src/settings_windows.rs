@@ -129,7 +129,7 @@ fn create_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String>
     WebviewWindowBuilder::new(app, CARD_SETTINGS_WINDOW_LABEL, WebviewUrl::App("index.html#card-settings".into()))
         .title("课程卡片设置")
         .devtools(true)
-        .decorations(false)
+        .decorations(true)
         .transparent(false)
         .resizable(false)
         .minimizable(false)

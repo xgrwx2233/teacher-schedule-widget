@@ -78,6 +78,23 @@ import {
 import type { DesktopInputEvent, WindowMode, WindowModeState } from "../features/windowMode/types";
 import type { ProxyWidgetHit } from "../features/windowMode/types";
 
+type DesktopWallpaperInfo = {
+  path: string | null;
+  url: string | null;
+  monitorLeft: number;
+  monitorTop: number;
+  monitorWidth: number;
+  monitorHeight: number;
+  windowLeft: number;
+  windowTop: number;
+  windowWidth: number;
+  windowHeight: number;
+  wallpaperLeft: number;
+  wallpaperTop: number;
+  wallpaperWidth: number;
+  wallpaperHeight: number;
+};
+
 declare global {
   interface Window {
     __teacherScheduleProxyTrigger?: (hit: ProxyWidgetHit) => void;
@@ -123,6 +140,7 @@ export function App() {
   const [cardDraft, setCardDraft] = useState<CardDraft>(defaultCardDraft);
   const [activeSkinId, setActiveSkinId] = useState("midnight-coral");
   const [widgetRegistry, setWidgetRegistry] = useState(defaultWidgetRegistry);
+  const [wallpaperInfo, setWallpaperInfo] = useState<DesktopWallpaperInfo | null>(null);
   const settingsWindowOpenRef = useRef(false);
   const cardSettingsWindowOpenRef = useRef(false);
   const settingsRef = useRef(settings);
@@ -154,7 +172,10 @@ export function App() {
     [computedWeek, schedule, settings.periodCount, settings.workdayMode],
   );
   const normalizedAppearance = useMemo(() => normalizeAppearanceSettings(settings.appearance), [settings.appearance]);
-  const widgetStyle = useMemo(() => buildWidgetStyle(settings.appearance, visibleSchedule), [settings.appearance, visibleSchedule]);
+  const widgetStyle = useMemo(
+    () => buildWidgetStyle(settings.appearance, visibleSchedule, wallpaperInfo),
+    [settings.appearance, visibleSchedule, wallpaperInfo],
+  );
 
   useEffect(() => {
     void invoke<WindowModeState>("get_window_mode").then((state) => setMode(state.mode));
@@ -175,6 +196,40 @@ export function App() {
       scaleFactorRef.current = factor || 1;
     });
   }, [appWindow]);
+
+  const refreshWallpaperInfo = useCallback(async () => {
+    if (normalizedAppearance.backgroundMode !== "blur") {
+      setWallpaperInfo(null);
+      return;
+    }
+
+    try {
+      const info = await invoke<DesktopWallpaperInfo>("get_desktop_wallpaper");
+      setWallpaperInfo(info);
+    } catch (error) {
+      console.error("failed to load desktop wallpaper", error);
+      setWallpaperInfo(null);
+    }
+  }, [normalizedAppearance.backgroundMode]);
+
+  useEffect(() => {
+    void refreshWallpaperInfo();
+  }, [refreshWallpaperInfo]);
+
+  useEffect(() => {
+    const unlistenPromise = appWindow.onMoved(() => {
+      void refreshWallpaperInfo();
+    });
+
+    const unlistenResizePromise = appWindow.onResized(() => {
+      void refreshWallpaperInfo();
+    });
+
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+      void unlistenResizePromise.then((unlisten) => unlisten());
+    };
+  }, [appWindow, refreshWallpaperInfo]);
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -221,6 +276,19 @@ export function App() {
     setWidgetRegistry((current) => updateActiveWidgetMode(current, state.mode));
     setMenuOpen(false);
     setHovered(false);
+
+    if (state.mode === "detached" && settingsRef.current.appearance.backgroundMode === "blur") {
+      const nextSettings = {
+        ...settingsRef.current,
+        appearance: {
+          ...settingsRef.current.appearance,
+          backgroundMode: "solid" as const,
+        },
+      };
+      settingsRef.current = nextSettings;
+      setSettings(nextSettings);
+    }
+
     await emitWidgetMenuState(state.mode);
   }, []);
 
@@ -268,6 +336,7 @@ export function App() {
       await emitTo<SettingsWindowStatePayload>(SETTINGS_WINDOW_LABEL, SETTINGS_WINDOW_STATE_EVENT, {
         settings: currentSettings,
         activeSection: currentSection,
+        windowMode: modeRef.current,
       });
     } catch (error) {
       console.error("failed to open settings window", error);
@@ -351,6 +420,7 @@ export function App() {
         selectedCard: card,
         draft,
         mergeState: getCourseCardMergeState(schedule, card),
+        term: settingsRef.current.term,
       });
     } catch (error) {
       console.error("failed to open card settings window", error);
@@ -363,6 +433,10 @@ export function App() {
       const shouldResizeWidget = nextSettings.periodCount !== settingsRef.current.periodCount;
 
       settingsRef.current = nextSettings;
+      if (event.payload.windowMode && event.payload.windowMode !== modeRef.current) {
+        modeRef.current = event.payload.windowMode;
+        setMode(event.payload.windowMode);
+      }
       settingsSectionRef.current = normalizeSettingsSection(event.payload.activeSection);
       setSettingsSection(normalizeSettingsSection(event.payload.activeSection));
       setSettings(nextSettings);
@@ -385,6 +459,7 @@ export function App() {
       void emitTo<SettingsWindowStatePayload>(event.payload.windowLabel, SETTINGS_WINDOW_STATE_EVENT, {
         settings: settingsRef.current,
         activeSection: normalizeSettingsSection(settingsSectionRef.current),
+        windowMode: modeRef.current,
       });
     });
 
@@ -419,8 +494,9 @@ export function App() {
     void emitTo<SettingsWindowStatePayload>(SETTINGS_WINDOW_LABEL, SETTINGS_WINDOW_STATE_EVENT, {
       settings,
       activeSection: normalizeSettingsSection(settingsSection),
+      windowMode: mode,
     });
-  }, [settings, settingsSection]);
+  }, [settings, settingsSection, mode]);
 
   useEffect(() => {
     void syncFloatingToolbarState();
@@ -439,19 +515,24 @@ export function App() {
           event.payload.activeTemporaryChangeId,
         );
         scheduleRef.current = nextSchedule;
-        void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, event.payload.draft, nextSchedule);
+        void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, event.payload.draft, nextSchedule, settingsRef.current.term);
         return nextSchedule;
       });
     });
 
     const unlistenAction = listen<CardSettingsWindowActionPayload>(CARD_SETTINGS_WINDOW_ACTION_EVENT, (event) => {
-      const nextSchedule = applyCourseCardAction(scheduleRef.current, event.payload.selectedCard, event.payload.action);
+      const nextSchedule =
+        event.payload.action === "apply-style" && event.payload.draft
+          ? applyGlobalStyleToSchedule(scheduleRef.current, event.payload.draft)
+          : event.payload.action === "apply-schedule" && event.payload.draft
+            ? applyGlobalScheduleToSchedule(scheduleRef.current, event.payload.draft)
+            : applyCourseCardAction(scheduleRef.current, event.payload.selectedCard, event.payload.action);
       const nextDraft = createDraftForCard(nextSchedule, event.payload.selectedCard, settingsRef.current.term);
       scheduleRef.current = nextSchedule;
       cardDraftRef.current = nextDraft;
       setSchedule(nextSchedule);
       setCardDraft(nextDraft);
-      void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, nextDraft, nextSchedule);
+      void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, nextDraft, nextSchedule, settingsRef.current.term);
     });
 
     const unlistenRequest = listen<CardSettingsWindowStateRequestPayload>(CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT, (event) => {
@@ -464,6 +545,7 @@ export function App() {
         selectedCard: currentCard,
         draft: cardDraftRef.current,
         mergeState: getCourseCardMergeState(scheduleRef.current, currentCard),
+        term: settingsRef.current.term,
       });
     });
 
@@ -1172,7 +1254,11 @@ function calculateWeekNumber(startDate: string, currentDate: Date): number {
   return Math.max(1, Math.floor(diffDays / 7) + 1);
 }
 
-function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedule: Schedule): CSSProperties {
+function buildWidgetStyle(
+  appearance: WidgetSettingsState["appearance"],
+  schedule: Schedule,
+  wallpaperInfo: DesktopWallpaperInfo | null,
+): CSSProperties {
   const normalizedAppearance = normalizeAppearanceSettings(appearance);
   const gridLineOpacity = String(normalizedAppearance.gridLineOpacity / 100);
   const blurIntensity = normalizedAppearance.backgroundMode === "blur" ? normalizedAppearance.blurIntensity : 0;
@@ -1181,28 +1267,23 @@ function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedul
     normalizedAppearance.backgroundColor,
     normalizedAppearance.backgroundOpacity / 100,
   );
-  const mist = blurMix * 0.48;
-  const mistHighlight = blurMix * 0.22;
-  const brightness = 100 + Math.round(blurMix * 4);
-  const saturation = 100 + Math.round(blurMix * 12);
   const gridLineBorder = buildGridLineBorder(
     normalizedAppearance.gridLineType,
     normalizedAppearance.gridLineColor,
     normalizedAppearance.gridLineWidth,
     normalizedAppearance.gridLineOpacity,
   );
+  const deviceScale = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   return {
     "--column-gap": `${normalizedAppearance.columnGap}px`,
+    "--outer-padding": "16px",
+    "--content-padding": "14px",
     "--schedule-row-count": Math.max(1, schedule.rows.length),
     "--widget-background-mode": normalizedAppearance.backgroundMode,
     "--widget-background-color": normalizedAppearance.backgroundColor,
     "--widget-background-fill": backgroundFill,
     "--widget-background-opacity": String(normalizedAppearance.backgroundOpacity / 100),
     "--widget-blur-intensity": `${normalizedAppearance.blurIntensity}px`,
-    "--widget-blur-overlay": blurMix > 0 ? String(mist) : "0",
-    "--widget-blur-highlight": blurMix > 0 ? String(mistHighlight) : "0",
-    "--widget-background-brightness": `${brightness}%`,
-    "--widget-background-saturation": `${saturation}%`,
     "--row-divider": normalizedAppearance.gridLineColor,
     "--row-divider-rgb": hexToRgbParts(normalizedAppearance.gridLineColor),
     "--row-divider-opacity": gridLineOpacity,
@@ -1216,6 +1297,11 @@ function buildWidgetStyle(appearance: WidgetSettingsState["appearance"], schedul
     "--schedule-grid-line-width": `${normalizedAppearance.gridLineWidth}px`,
     "--schedule-grid-line-opacity": gridLineOpacity,
     "--schedule-grid-line-border": gridLineBorder,
+    "--widget-wallpaper-url": wallpaperInfo?.url ? `url("${wallpaperInfo.url}")` : "none",
+    "--widget-wallpaper-offset-x": wallpaperInfo ? `${Math.round((wallpaperInfo.wallpaperLeft - wallpaperInfo.windowLeft) / deviceScale)}px` : "0px",
+    "--widget-wallpaper-offset-y": wallpaperInfo ? `${Math.round((wallpaperInfo.wallpaperTop - wallpaperInfo.windowTop) / deviceScale)}px` : "0px",
+    "--widget-wallpaper-width": wallpaperInfo ? `${Math.max(1, Math.round(wallpaperInfo.wallpaperWidth / deviceScale))}px` : "100%",
+    "--widget-wallpaper-height": wallpaperInfo ? `${Math.max(1, Math.round(wallpaperInfo.wallpaperHeight / deviceScale))}px` : "100%",
   } as CSSProperties;
 }
 
@@ -1312,6 +1398,7 @@ function createDraftForCard(
       iconColor: computedPalette.iconColor,
       fontFamily: course?.style?.fontFamily ?? base.fontFamily,
       fontSize: course?.style?.fontSize ?? base.fontSize,
+      fontWeight: course?.style?.fontWeight ?? base.fontWeight,
       displayMode,
       weekPattern: course?.scheduleRule?.weekPattern ?? "all",
       applyWholeTerm: course?.scheduleRule?.applyWholeTerm ?? true,
@@ -1331,6 +1418,7 @@ function createDraftForCard(
       iconColor: period?.style?.iconColor ?? period?.style?.color ?? "#ffffff",
       fontFamily: period?.style?.fontFamily ?? base.fontFamily,
       fontSize: period?.style?.fontSize ?? 12,
+      fontWeight: period?.style?.fontWeight ?? base.fontWeight,
       displayMode: "auto",
     };
   }
@@ -1354,13 +1442,14 @@ function applyCardDraft(
   return selectedCard.type === "course" ? autoSplitInconsistentMergedCourse(nextSchedule, selectedCard.courseId) : nextSchedule;
 }
 
-function emitCardSettingsState(windowLabel: string, selectedCard: SelectedCard, draft: CardDraft, schedule: Schedule) {
+function emitCardSettingsState(windowLabel: string, selectedCard: SelectedCard, draft: CardDraft, schedule: Schedule, term: WidgetSettingsState["term"]) {
   const course = selectedCard.type === "course" ? findCourse(schedule, selectedCard.courseId) : undefined;
   const temporaryChanges = course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
   return emitTo<CardSettingsWindowStatePayload>(windowLabel, CARD_SETTINGS_WINDOW_STATE_EVENT, {
     selectedCard,
     draft,
     mergeState: getCourseCardMergeState(schedule, selectedCard),
+    term,
     temporaryChanges,
     activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
   });
@@ -1397,7 +1486,61 @@ function applyCourseCardAction(schedule: Schedule, selectedCard: SelectedCard, a
     return splitCourseCard(schedule, selectedCard.courseId);
   }
 
+  if (action === "add") {
+    return restoreHiddenCourseCard(schedule, selectedCard.courseId);
+  }
+
   return deleteCourseCard(schedule, selectedCard.courseId);
+}
+
+function applyGlobalStyleToSchedule(schedule: Schedule, draft: CardDraft): Schedule {
+  const style = {
+    fontFamily: draft.fontFamily,
+    fontSize: draft.fontSize,
+    fontWeight: draft.fontWeight,
+    displayMode: draft.displayMode,
+  } satisfies CardStyle;
+  return {
+    ...schedule,
+    rows: schedule.rows.map((row) => ({
+      ...row,
+      courses: Object.fromEntries(
+        Object.entries(row.courses).map(([weekday, course]) => [
+          weekday,
+          {
+            ...course,
+            style: {
+              ...course.style,
+              ...style,
+            },
+          },
+        ]),
+      ) as Record<Weekday, CourseCell>,
+    })),
+  };
+}
+
+function applyGlobalScheduleToSchedule(schedule: Schedule, draft: CardDraft): Schedule {
+  return {
+    ...schedule,
+    rows: schedule.rows.map((row) => ({
+      ...row,
+      courses: Object.fromEntries(
+        Object.entries(row.courses).map(([weekday, course]) => [
+          weekday,
+          {
+            ...course,
+            scheduleRule: {
+              weekPattern: draft.weekPattern,
+              applyWholeTerm: draft.applyWholeTerm,
+              startDate: draft.applyWholeTerm ? undefined : draft.startDate,
+              endDate: draft.applyWholeTerm ? undefined : draft.endDate,
+            } satisfies CourseScheduleRule,
+          },
+        ]),
+      ) as Record<Weekday, CourseCell>,
+    })),
+  };
 }
 
 function applyDraftToRow(
@@ -1423,7 +1566,7 @@ function applyDraftToRow(
             ...course,
             title: draft.title,
             room: draft.secondary,
-            hidden: false,
+            hidden: course.hidden ?? false,
             style,
             scheduleRule: {
               weekPattern: draft.weekPattern,
@@ -1694,6 +1837,36 @@ function deleteCourseCard(schedule: Schedule, courseId: string): Schedule {
         hidden: true,
       };
     }
+
+    return { ...row, courses };
+  });
+
+  return { ...schedule, rows };
+}
+
+function restoreHiddenCourseCard(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  if (!location || !location.course.hidden) {
+    return schedule;
+  }
+
+  const rows = schedule.rows.map((row, rowIndex) => {
+    if (rowIndex !== location.rowIndex) {
+      return row;
+    }
+
+    const courses = { ...row.courses };
+    const target = courses[location.weekday];
+    if (!target?.hidden) {
+      return row;
+    }
+
+    courses[location.weekday] = {
+      ...target,
+      hidden: false,
+      colSpan: 1,
+      mergedInto: undefined,
+    };
 
     return { ...row, courses };
   });

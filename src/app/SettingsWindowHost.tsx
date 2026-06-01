@@ -8,6 +8,7 @@ import {
   type SettingsSection,
   type WidgetSettingsState,
 } from "../features/settings/settingsTypes";
+import type { WindowMode } from "../features/windowMode/types";
 import {
   SETTINGS_WINDOW_CLOSE_EVENT,
   SETTINGS_WINDOW_STATE_EVENT,
@@ -32,6 +33,7 @@ export function SettingsWindowHost() {
   const currentWindow = useMemo(() => getCurrentWindow(), []);
   const [settings, setSettings] = useState<WidgetSettingsState>(defaultSettings);
   const [activeSection, setActiveSection] = useState<SettingsSection>("schedule");
+  const [windowMode, setWindowMode] = useState<WindowMode>("attached");
   const settingsRef = useRef(settings);
   const activeSectionRef = useRef(activeSection);
   const computedWeek = useMemo(() => calculateWeekNumber(settings.term.startDate, new Date()), [settings.term.startDate]);
@@ -48,6 +50,7 @@ export function SettingsWindowHost() {
       const activeSection = normalizeSettingsSection(event.payload.activeSection);
       settingsRef.current = event.payload.settings;
       activeSectionRef.current = activeSection;
+      setWindowMode(event.payload.windowMode ?? "attached");
       setSettings(event.payload.settings);
       setActiveSection(activeSection);
     });
@@ -81,6 +84,7 @@ export function SettingsWindowHost() {
       windowLabel: currentWindow.label,
       settings: nextSettings,
       activeSection: nextSection,
+      windowMode,
     });
   };
 
@@ -91,6 +95,7 @@ export function SettingsWindowHost() {
         activeSection={activeSection}
         settings={settings}
         computedWeek={computedWeek}
+        windowMode={windowMode}
         onActiveSectionChange={(section) => emitUpdate(settings, section)}
         onSettingsChange={(nextSettings) => emitUpdate(nextSettings)}
       />

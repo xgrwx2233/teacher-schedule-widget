@@ -63,12 +63,14 @@ export type FloatingToolbarActionPayload = {
 export type SettingsWindowStatePayload = {
   settings: WidgetSettingsState;
   activeSection: SettingsSection;
+  windowMode?: WindowMode;
 };
 
 export type SettingsWindowUpdatePayload = {
   windowLabel: string;
   settings: WidgetSettingsState;
   activeSection: SettingsSection;
+  windowMode?: WindowMode;
 };
 
 export type SettingsWindowStateRequestPayload = {
@@ -79,6 +81,7 @@ export type CardSettingsWindowStatePayload = {
   selectedCard: SelectedCard;
   draft: CardDraft;
   mergeState: CourseCardMergeState;
+  term: WidgetSettingsState["term"];
   temporaryChanges?: TemporaryChangeDraft[];
   activeTemporaryChangeId?: string | null;
 };
@@ -94,7 +97,10 @@ export type CardSettingsWindowUpdatePayload = {
 export type CardSettingsWindowActionPayload = {
   windowLabel: string;
   selectedCard: SelectedCard;
-  action: "merge-right" | "split" | "delete";
+  action: "merge-right" | "split" | "delete" | "add" | "apply-style" | "apply-schedule";
+  draft?: CardDraft;
+  temporaryChanges?: TemporaryChangeDraft[];
+  activeTemporaryChangeId?: string | null;
 };
 
 export type CardSettingsWindowStateRequestPayload = {

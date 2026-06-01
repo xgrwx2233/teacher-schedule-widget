@@ -1,4 +1,4 @@
-import type { CardStyle, CourseCardDisplayMode, CourseScheduleRule, CourseTemporaryChange, WorkdayMode } from "../schedule/types";
+import type { CardStyle, CourseCardDisplayMode, CourseCardFontWeight, CourseScheduleRule, CourseTemporaryChange, WorkdayMode } from "../schedule/types";
 
 export type TermSettings = {
   startDate: string;
@@ -55,6 +55,7 @@ export type CardDraft = {
   iconColor: string;
   fontFamily: string;
   fontSize: number;
+  fontWeight: CourseCardFontWeight;
   displayMode: CourseCardDisplayMode;
   weekPattern: CourseScheduleRule["weekPattern"];
   applyWholeTerm: boolean;
@@ -148,6 +149,7 @@ export const defaultCardDraft: CardDraft = {
   iconColor: "#b97916",
   fontFamily: "Microsoft YaHei",
   fontSize: 14,
+  fontWeight: "medium",
   displayMode: "auto",
   weekPattern: "all",
   applyWholeTerm: true,
@@ -175,6 +177,7 @@ export function toCardStyle(draft: CardDraft): CardStyle {
     iconColor: palette.iconColor,
     fontFamily: draft.fontFamily,
     fontSize: draft.fontSize,
+    fontWeight: draft.fontWeight,
     displayMode: draft.displayMode,
   };
 }

@@ -9,12 +9,14 @@ import {
   normalizeAppearanceSettings,
 } from "../../features/settings/settingsTypes";
 import type { GridLineType } from "../../features/settings/settingsTypes";
+import type { WindowMode } from "../../features/windowMode/types";
 
 type SettingsWindowProps = {
   open: boolean;
   activeSection: SettingsSection;
   settings: WidgetSettingsState;
   computedWeek: number;
+  windowMode: WindowMode;
   onActiveSectionChange: (section: SettingsSection) => void;
   onSettingsChange: (settings: WidgetSettingsState) => void;
 };
@@ -38,6 +40,7 @@ export function SettingsWindow({
   activeSection,
   settings,
   computedWeek,
+  windowMode,
   onActiveSectionChange,
   onSettingsChange,
 }: SettingsWindowProps) {
@@ -64,7 +67,7 @@ export function SettingsWindow({
           <main className="settings-content">
             {activeSection === "schedule" && <ScheduleTablePanel settings={settings} onSettingsChange={onSettingsChange} />}
             {activeSection === "term" && <TermPanel settings={settings} computedWeek={computedWeek} onSettingsChange={onSettingsChange} />}
-            {activeSection === "appearance" && <AppearancePanel settings={settings} onSettingsChange={onSettingsChange} />}
+            {activeSection === "appearance" && <AppearancePanel settings={settings} windowMode={windowMode} onSettingsChange={onSettingsChange} />}
           </main>
         </div>
       </section>
@@ -199,9 +202,11 @@ function TermPanel({
 
 function AppearancePanel({
   settings,
+  windowMode,
   onSettingsChange,
 }: {
   settings: WidgetSettingsState;
+  windowMode: WindowMode;
   onSettingsChange: (settings: WidgetSettingsState) => void;
 }) {
   const [expandedSections, setExpandedSections] = useState({
@@ -216,6 +221,7 @@ function AppearancePanel({
   };
 
   const isBlurMode = appearance.backgroundMode === "blur";
+  const allowBlurMode = windowMode === "attached";
 
   return (
     <section className="settings-panel-section appearance-panel-static">
@@ -248,6 +254,7 @@ function AppearancePanel({
               <button
                 type="button"
                 className={isBlurMode ? "is-active" : ""}
+                disabled={!allowBlurMode}
                 onClick={() =>
                   onSettingsChange({
                     ...settings,

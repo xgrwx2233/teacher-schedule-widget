@@ -16,10 +16,12 @@ export type CardStyle = {
   iconColor?: string;
   fontFamily?: string;
   fontSize?: number;
+  fontWeight?: CourseCardFontWeight;
   displayMode?: CourseCardDisplayMode;
 };
 
 export type CourseCardDisplayMode = "auto" | "oneLine" | "twoLine";
+export type CourseCardFontWeight = "regular" | "medium" | "bold";
 
 export type CourseScheduleRule = {
   weekPattern: "all" | "odd" | "even";

@@ -236,12 +236,12 @@ type CourseCardDisplayMetrics = {
 };
 
 function getCourseCardDisplayMetrics(course: CourseCell): CourseCardDisplayMetrics {
-  const baseFontSize = clampNumber(course.style?.fontSize ?? 14, 12, 18);
+  const baseFontSize = clampNumber(course.style?.fontSize ?? 14, 8, 16);
   const hasSubtitle = Boolean(course.room?.trim());
   const mode = course.style?.displayMode ?? "auto";
   const isTwoLine = hasSubtitle && mode !== "oneLine";
-  const titleSize = isTwoLine ? clampNumber(baseFontSize, 12, 17) : clampNumber(baseFontSize + 1, 13, 18);
-  const subtitleSize = clampNumber(roundToHalf(baseFontSize * 0.68), 10, 13);
+  const titleSize = isTwoLine ? clampNumber(baseFontSize, 8, 16) : clampNumber(baseFontSize + 1, 9, 17);
+  const subtitleSize = clampNumber(roundToHalf(baseFontSize * 0.68), 7, 11);
 
   return {
     isTwoLine,
@@ -263,11 +263,18 @@ function clampNumber(value: number, min: number, max: number): number {
 }
 
 function toCardCssVars(style?: CardStyle, courseMetrics?: CourseCardDisplayMetrics): CSSProperties {
+  const titleFontWeight =
+    style?.fontWeight === "bold" ? "800" : style?.fontWeight === "regular" ? "400" : "600";
+  const subtitleFontWeight =
+    style?.fontWeight === "bold" ? "600" : style?.fontWeight === "regular" ? "400" : "400";
+
   return {
     "--card-bg": style?.backgroundColor,
     "--card-fg": style?.color,
     "--card-icon": style?.iconColor ?? style?.color,
     "--card-font": style?.fontFamily,
+    "--card-font-weight": titleFontWeight,
+    "--card-subtitle-font-weight": subtitleFontWeight,
     "--card-font-size": style?.fontSize ? `${style.fontSize}px` : undefined,
     "--course-card-title-size": courseMetrics ? `${courseMetrics.titleSize}px` : undefined,
     "--course-card-subtitle-size": courseMetrics ? `${courseMetrics.subtitleSize}px` : undefined,

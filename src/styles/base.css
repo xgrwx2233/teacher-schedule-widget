@@ -93,6 +93,11 @@ button {
   --widget-background-color: #dbe7ef;
   --widget-background-opacity: 0.84;
   --widget-blur-intensity: 14px;
+  --widget-wallpaper-url: none;
+  --widget-wallpaper-offset-x: 0px;
+  --widget-wallpaper-offset-y: 0px;
+  --widget-wallpaper-width: 100%;
+  --widget-wallpaper-height: 100%;
   width: 100vw;
   height: 100vh;
   min-width: 360px;
@@ -202,16 +207,18 @@ button {
   z-index: 0;
   border-radius: inherit;
   background: var(--widget-background-fill, rgba(219, 231, 239, 0.84));
-  filter: saturate(var(--widget-background-saturation, 100%)) brightness(var(--widget-background-brightness, 100%));
   pointer-events: none;
   transition:
-    background-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1),
-    filter 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
+    background-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
 }
 
 .schedule-shell.background-solid .schedule-background-overlay {
   background: var(--widget-background-fill, rgba(219, 231, 239, 0.84));
   filter: none;
+}
+
+.schedule-shell.background-blur .schedule-background-overlay {
+  background: transparent;
 }
 
 .schedule-shell.background-blur .schedule-background-overlay::before,
@@ -224,19 +231,18 @@ button {
 }
 
 .schedule-shell.background-blur .schedule-background-overlay::before {
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, calc(var(--widget-blur-overlay, 0) * 0.95)) 0%,
-      rgba(255, 255, 255, calc(var(--widget-blur-overlay, 0) * 0.4)) 100%
-    );
+  inset: calc(var(--widget-blur-intensity, 14px) * -1);
+  background-image: var(--widget-wallpaper-url);
+  background-position:
+    calc(var(--widget-wallpaper-offset-x) - var(--outer-padding) + var(--widget-blur-intensity, 14px))
+    calc(var(--widget-wallpaper-offset-y) - var(--outer-padding) + var(--widget-blur-intensity, 14px));
+  background-size: var(--widget-wallpaper-width) var(--widget-wallpaper-height);
+  background-repeat: no-repeat;
+  filter: blur(calc(var(--widget-blur-intensity, 14px) * 1)) saturate(1.08);
 }
 
 .schedule-shell.background-blur .schedule-background-overlay::after {
-  background:
-    radial-gradient(circle at 22% 18%, rgba(255, 255, 255, calc(var(--widget-blur-highlight, 0) * 0.9)) 0%, rgba(255, 255, 255, 0) 46%),
-    radial-gradient(circle at 82% 28%, rgba(255, 255, 255, calc(var(--widget-blur-highlight, 0) * 0.55)) 0%, rgba(255, 255, 255, 0) 42%);
-  mix-blend-mode: screen;
+  background: rgba(255, 255, 255, var(--widget-wallpaper-tint, 0.16));
 }
 
 .schedule-toolbar {
@@ -668,7 +674,7 @@ button {
   border: 1px solid #e5eaf2;
   border-radius: 16px;
   box-shadow: 0 22px 52px rgba(15, 23, 42, 0.18);
-  grid-template-rows: 50px auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .settings-window-wide {
@@ -720,67 +726,6 @@ button {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 10px;
-}
-
-.card-settings-titlebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 50px;
-  padding: 0 10px 0 12px;
-  background: #1f1f1f;
-  color: #d1d5db;
-}
-
-.card-settings-titlebar-drag {
-  min-width: 0;
-  flex: 1;
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-}
-
-.card-settings-title {
-  overflow: hidden;
-  color: #d1d5db;
-  font-size: 14px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.card-settings-confirm {
-  width: 30px;
-  height: 30px;
-  border: 1px solid #dbe2ee;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #4f46e5;
-  font-size: 16px;
-  font-weight: 800;
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-}
-
-.card-settings-confirm:hover {
-  background: #f8fafc;
-}
-
-.titlebar-confirm {
-  width: 28px;
-  height: 28px;
-  margin-left: auto;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #8fa2ff;
-  font-size: 18px;
-  font-weight: 700;
-  box-shadow: none;
-}
-
-.titlebar-confirm:hover {
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .card-settings-tabs {
@@ -1366,51 +1311,13 @@ button {
   width: 270px;
   height: 380px;
   max-height: 380px;
-  grid-template-rows: 32px auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid #d9dee8;
   border-radius: 16px;
   background: #f3f3f6;
   box-shadow:
     0 18px 42px rgba(15, 23, 42, 0.18),
     0 2px 8px rgba(15, 23, 42, 0.08);
-}
-
-.card-settings-titlebar {
-  height: 32px;
-  padding: 0 0 0 12px;
-  border-bottom: 1px solid #e5e7eb;
-  border-radius: 16px 16px 0 0;
-  background: linear-gradient(180deg, #fbfbfc 0%, #f3f4f6 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
-}
-
-.card-settings-title {
-  color: #111827;
-  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.titlebar-confirm {
-  width: 46px;
-  height: 31px;
-  border-radius: 0 16px 0 0;
-  color: #374151;
-  font-size: 16px;
-  line-height: 1;
-  background: transparent;
-  box-shadow: none;
-}
-
-.titlebar-confirm:hover,
-.titlebar-confirm:active {
-  background: rgba(15, 23, 42, 0.06);
-  color: #111827;
-}
-
-.titlebar-confirm {
-  -webkit-app-region: no-drag;
-  pointer-events: auto;
 }
 
 .card-settings-tabs {
@@ -1503,6 +1410,62 @@ button {
 
 .course-config-stack {
   gap: 8px;
+}
+
+.course-config-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 2px 0 4px;
+}
+
+.card-settings-footer-action {
+  min-width: 76px;
+  height: 32px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 80ms ease;
+}
+
+.card-settings-footer-action:active {
+  transform: scale(0.98);
+}
+
+.card-settings-window .card-settings-add {
+  border-color: #a5b4fc;
+  background: linear-gradient(180deg, #eef2ff 0%, #e0e7ff 100%);
+  color: #3730a3;
+  box-shadow:
+    0 4px 10px rgba(79, 70, 229, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.card-settings-window .card-settings-add:hover {
+  border-color: #818cf8;
+  background: linear-gradient(180deg, #e0e7ff 0%, #c7d2fe 100%);
+}
+
+.card-settings-window .card-settings-danger {
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
+  color: #be123c;
+  box-shadow:
+    0 4px 10px rgba(225, 29, 72, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.card-settings-window .card-settings-danger:hover {
+  border-color: #fda4af;
+  background: linear-gradient(180deg, #ffe4e6 0%, #fecdd3 100%);
 }
 
 .row-card {
@@ -1743,6 +1706,22 @@ button {
 
 .card-settings-window .action-global-apply {
   padding: 0 10px;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease,
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.card-settings-window .action-global-apply:active,
+.schedule-global-apply:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.card-settings-window .action-global-apply:focus-visible,
+.schedule-global-apply:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.18);
+  outline-offset: 1px;
 }
 
 .schedule-row-grid .card-settings-field > div,
@@ -1907,6 +1886,11 @@ button {
   height: 32px;
   padding: 0 10px;
   justify-self: end;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease,
+    background-color 0.12s ease,
+    color 0.12s ease;
 }
 
 .card-settings-window .action-global-apply,
@@ -2430,6 +2414,12 @@ button {
   padding: calc(var(--column-gap) / 2);
 }
 
+.column-item.is-course-item,
+.column-item.is-period-item {
+  align-items: center;
+  justify-items: stretch;
+}
+
 .column-item.is-period-item.has-row-divider::after {
   content: "";
   position: absolute;
@@ -2445,10 +2435,11 @@ button {
 }
 
 .period-card {
-  height: 100%;
+  min-height: min(100%, 42px);
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
   align-items: center;
+  align-content: center;
   justify-items: end;
   padding: clamp(3px, 0.75vmin, 7px) clamp(2px, 0.8vmin, 6px);
   border: 0;
@@ -2463,14 +2454,12 @@ button {
 }
 
 .period-card strong {
-  align-self: end;
   font-size: var(--card-font-size, var(--period-title-size));
   font-weight: 850;
   line-height: 1.05;
 }
 
 .period-card span {
-  align-self: start;
   color: rgba(var(--widget-muted), 0.84);
   font-size: var(--period-time-size);
   line-height: 1.15;
@@ -2478,12 +2467,13 @@ button {
 
 .course-card {
   width: 100%;
-  height: 100%;
+  min-height: min(100%, 42px);
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
   align-items: center;
   justify-items: center;
   gap: clamp(1px, 0.4vmin, 3px);
+  align-content: center;
   padding: var(--course-padding-y) var(--course-padding-x);
   border: 0;
   border-radius: var(--schedule-card-radius, 10px);
@@ -2496,21 +2486,19 @@ button {
 
 .course-card span {
   font-size: var(--course-card-title-size, var(--card-font-size, var(--course-title-size)));
-  font-weight: 600;
+  font-weight: var(--card-font-weight, 600);
   line-height: 1.15;
-  text-align: center;
 }
 
 .course-card small {
   opacity: 0.82;
   font-size: var(--course-card-subtitle-size, var(--course-meta-size));
-  font-weight: 400;
+  font-weight: var(--card-subtitle-font-weight, 400);
   line-height: 1.1;
-  text-align: center;
 }
 
 .course-card.is-one-line {
-  align-content: center;
+  grid-template-rows: auto;
 }
 
 .course-card.is-one-line span {
@@ -2521,8 +2509,8 @@ button {
 }
 
 .course-card.is-two-line {
-  align-content: center;
   gap: 3px;
+  justify-items: center;
 }
 
 .course-card.is-two-line span,
@@ -2531,6 +2519,14 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.course-card.is-two-line span {
+  font-weight: var(--card-font-weight, 600);
+}
+
+.course-card.is-two-line small {
+  font-weight: var(--card-subtitle-font-weight, 400);
 }
 
 .course-card svg,

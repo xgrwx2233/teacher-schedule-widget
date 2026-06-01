@@ -2,6 +2,7 @@ mod app_state;
 mod config_store;
 mod desktop_icons;
 mod desktop_layer;
+mod desktop_wallpaper;
 mod input_forwarder;
 mod interaction_proxy;
 mod settings_windows;
@@ -53,6 +54,7 @@ pub fn run() {
             config_store::load_widget_settings,
             widget_manager::load_widget_registry,
             widget_manager::sync_active_widget_bounds,
+            desktop_wallpaper::get_desktop_wallpaper,
             settings_windows::open_settings_window,
             settings_windows::open_card_settings_window,
             settings_windows::open_widget_menu_window,

@@ -13,14 +13,16 @@ type CardSettingsWindowProps = {
   selectedCard: SelectedCard | null;
   draft: CardDraft;
   mergeState: CourseCardMergeState;
+  term: { startDate: string; endDate: string };
   temporaryChanges: TemporaryChangeDraft[];
   activeTemporaryChangeId: string | null;
   onDraftChange: (draft: CardDraft) => void;
   onMergeRight: () => void;
   onSplit: () => void;
-  onConfirm: () => void;
-  onClose: () => void;
   onDeleteCourse: () => void;
+  onAddCourse: () => void;
+  onGlobalStyleApply: () => void;
+  onGlobalScheduleApply: () => void;
   onTemporaryChangeAdd: () => void;
   onTemporaryChangeSelect: (id: string | null) => void;
   onTemporaryChangeUpdate: (change: TemporaryChangeDraft) => void;
@@ -29,21 +31,24 @@ type CardSettingsWindowProps = {
 
 type CardSettingsTab = "course" | "temporary";
 
-const fontSizeOptions = Array.from({ length: 7 }, (_, index) => index + 12);
+const courseFontSizeOptions = Array.from({ length: 9 }, (_, index) => index + 8);
+const periodFontSizeOptions = Array.from({ length: 15 }, (_, index) => index + 10);
 const todayIso = new Date().toISOString().slice(0, 10);
 
 export function CardSettingsWindow({
   selectedCard,
   draft,
   mergeState,
+  term,
   temporaryChanges,
   activeTemporaryChangeId,
   onDraftChange,
   onMergeRight,
   onSplit,
-  onConfirm,
-  onClose,
   onDeleteCourse,
+  onAddCourse,
+  onGlobalStyleApply,
+  onGlobalScheduleApply,
   onTemporaryChangeAdd,
   onTemporaryChangeSelect,
   onTemporaryChangeUpdate,
@@ -76,14 +81,6 @@ export function CardSettingsWindow({
   return (
     <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="课程卡片设置">
       <section className="card-settings-window">
-        <header className="card-settings-titlebar">
-          <div className="card-settings-titlebar-drag" data-tauri-drag-region="true">
-            <span className="card-settings-title">课程卡片设置</span>
-          </div>
-          <button className="card-settings-confirm titlebar-confirm" type="button" aria-label="确认并关闭" title="确认并关闭" onClick={onConfirm}>
-            ✓
-          </button>
-        </header>
         <nav className="card-settings-tabs" aria-label="卡片设置分类">
           <button type="button" className={activeTab === "course" ? "is-active" : ""} onClick={() => setActiveTab("course")}>
             课程配置
@@ -96,7 +93,7 @@ export function CardSettingsWindow({
         <div className="card-settings-body" ref={bodyRef}>
           {activeTab === "course" ? (
             selectedCard.type === "course" ? (
-              <CourseConfigurationTab draft={draft} mergeState={mergeState} onDraftChange={onDraftChange} onMergeRight={onMergeRight} onSplit={onSplit} onDeleteCourse={onDeleteCourse} />
+              <CourseConfigurationTab draft={draft} term={term} mergeState={mergeState} onDraftChange={onDraftChange} onMergeRight={onMergeRight} onSplit={onSplit} onDeleteCourse={onDeleteCourse} onAddCourse={onAddCourse} onGlobalStyleApply={onGlobalStyleApply} onGlobalScheduleApply={onGlobalScheduleApply} />
             ) : (
               <PeriodConfigurationTab draft={draft} onDraftChange={onDraftChange} />
             )
@@ -122,18 +119,26 @@ export function CardSettingsWindow({
 
 function CourseConfigurationTab({
   draft,
+  term,
   mergeState,
   onDraftChange,
   onMergeRight,
   onSplit,
   onDeleteCourse,
+  onAddCourse,
+  onGlobalStyleApply,
+  onGlobalScheduleApply,
 }: {
   draft: CardDraft;
+  term: { startDate: string; endDate: string };
   mergeState: CourseCardMergeState;
   onDraftChange: (draft: CardDraft) => void;
   onMergeRight: () => void;
   onSplit: () => void;
   onDeleteCourse: () => void;
+  onAddCourse: () => void;
+  onGlobalStyleApply: () => void;
+  onGlobalScheduleApply: () => void;
 }) {
   return (
     <div className="course-config-stack">
@@ -188,8 +193,8 @@ function CourseConfigurationTab({
                   </select>
                 </CompactField>
                 <CompactField label="字号">
-                  <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 12, 18) })}>
-                    {fontSizeOptions.map((size) => (
+                  <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 8, 16) })}>
+                    {courseFontSizeOptions.map((size) => (
                       <option key={size} value={size}>
                         {size}
                       </option>
@@ -197,7 +202,7 @@ function CourseConfigurationTab({
                   </select>
                 </CompactField>
                 <CompactField label="粗细">
-                  <select className="card-settings-select" defaultValue="medium">
+                  <select className="card-settings-select" value={draft.fontWeight} onChange={(event) => onDraftChange({ ...draft, fontWeight: event.currentTarget.value as CardDraft["fontWeight"] })}>
                     <option value="regular">常规</option>
                     <option value="medium">中等</option>
                     <option value="bold">加粗</option>
@@ -222,7 +227,7 @@ function CourseConfigurationTab({
                     </option>
                   </select>
                 </div>
-                <button type="button" className="card-settings-secondary action-global-apply" onClick={() => onDraftChange({ ...draft })}>
+                <button type="button" className="card-settings-secondary action-global-apply" onClick={onGlobalStyleApply}>
                   全局应用
                 </button>
               </div>
@@ -260,10 +265,10 @@ function CourseConfigurationTab({
                 <option value="odd">单周</option>
                 <option value="even">双周</option>
               </select>
-              <button type="button" className="icon-chip-button" title="使用学期起止日期" aria-label="使用学期起止日期" onClick={() => onDraftChange({ ...draft, applyWholeTerm: true })}>
+              <button type="button" className="icon-chip-button" title="使用学期起止日期" aria-label="使用学期起止日期" onClick={() => onDraftChange({ ...draft, applyWholeTerm: true, startDate: term.startDate, endDate: term.endDate })}>
                 <CalendarIcon />
               </button>
-              <button type="button" className="card-settings-secondary action-global-apply schedule-global-apply" onClick={() => onDraftChange({ ...draft })}>
+              <button type="button" className="card-settings-secondary action-global-apply schedule-global-apply" onClick={onGlobalScheduleApply}>
                 全局应用
               </button>
             </div>
@@ -301,8 +306,11 @@ function CourseConfigurationTab({
         </details>
       </div>
       <div className="course-config-footer">
-        <button type="button" className="card-settings-danger" onClick={onDeleteCourse}>
+        <button type="button" className="card-settings-footer-action card-settings-danger" onClick={onDeleteCourse}>
           删除
+        </button>
+        <button type="button" className="card-settings-footer-action card-settings-add" onClick={onAddCourse}>
+          添加
         </button>
       </div>
     </div>
@@ -339,7 +347,7 @@ function PeriodConfigurationTab({ draft, onDraftChange }: { draft: CardDraft; on
           <label>
             <span>字号</span>
             <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 10, 24) })}>
-              {fontSizeOptions.map((size) => (
+              {periodFontSizeOptions.map((size) => (
                 <option key={size} value={size}>
                   {size}
                 </option>
