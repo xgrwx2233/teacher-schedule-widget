@@ -9,6 +9,7 @@ import { allScheduleDays, mockSchedule } from "../features/schedule/mockSchedule
 import type {
   CardStyle,
   CourseCell,
+  CourseCardDisplayMode,
   CourseScheduleRule,
   CourseTemporaryChange,
   PeriodInfo,
@@ -20,6 +21,7 @@ import type {
 import {
   defaultCardDraft,
   defaultAppearanceSettings,
+  computeCoursePalette,
   normalizeAppearanceSettings,
   createDefaultTemporaryChangeDraft,
   type CardDraft,
@@ -93,6 +95,7 @@ const defaultSettings: WidgetSettingsState = {
 };
 
 const DEFAULT_COURSE_ROW_HEIGHT = 66;
+const SCHEDULE_STORAGE_KEY = "teacher-schedule-widget:schedule";
 
 export function App() {
   const appWindow = useMemo(() => getCurrentWindow(), []);
@@ -112,7 +115,7 @@ export function App() {
   const [toolbarLayoutMode, setToolbarLayoutMode] = useState<ToolbarLayoutMode>("normal");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("schedule");
   const [settings, setSettings] = useState<WidgetSettingsState>(defaultSettings);
-  const [schedule, setSchedule] = useState<Schedule>(mockSchedule);
+  const [schedule, setSchedule] = useState<Schedule>(() => loadPersistedSchedule() ?? mockSchedule);
   const [hovered, setHovered] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
@@ -179,6 +182,10 @@ export function App() {
 
   useEffect(() => {
     scheduleRef.current = schedule;
+  }, [schedule]);
+
+  useEffect(() => {
+    savePersistedSchedule(schedule);
   }, [schedule]);
 
   useEffect(() => {
@@ -876,19 +883,26 @@ function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefin
       room: "",
       style: {
         ...course.style,
+        baseColor: "#f8fafc",
         backgroundColor: "#f8fafc",
         color: "#64748b",
+        iconColor: "#64748b",
       },
     };
   }
 
+  const baseColor = change.replaceColor ?? course.style?.baseColor ?? course.style?.backgroundColor ?? "#ffffff";
+  const computedPalette = computeCoursePalette(baseColor);
   return {
     ...course,
     title: change.replaceTitle ?? course.title,
     room: change.replaceSecondary ?? course.room,
     style: {
       ...course.style,
-      backgroundColor: change.replaceColor ?? course.style?.backgroundColor,
+      baseColor,
+      backgroundColor: computedPalette.backgroundColor,
+      color: computedPalette.color,
+      iconColor: computedPalette.iconColor,
     },
   };
 }
@@ -1286,14 +1300,19 @@ function createDraftForCard(
 
   if (card.type === "course") {
     const course = findCourse(schedule, card.courseId);
+    const courseBaseColor = course?.style?.baseColor ?? course?.style?.backgroundColor ?? "#fff8e1";
+    const computedPalette = computeCoursePalette(courseBaseColor);
+    const displayMode = course?.style?.displayMode ?? base.displayMode;
     return {
       ...base,
       title: course?.title ?? "",
       secondary: course?.room ?? "",
-      backgroundColor: course?.style?.backgroundColor ?? "#fff8e1",
-      color: course?.style?.color ?? "#b97916",
+      backgroundColor: courseBaseColor,
+      color: computedPalette.color,
+      iconColor: computedPalette.iconColor,
       fontFamily: course?.style?.fontFamily ?? base.fontFamily,
       fontSize: course?.style?.fontSize ?? base.fontSize,
+      displayMode,
       weekPattern: course?.scheduleRule?.weekPattern ?? "all",
       applyWholeTerm: course?.scheduleRule?.applyWholeTerm ?? true,
       startDate: course?.scheduleRule?.startDate ?? term.startDate,
@@ -1307,10 +1326,12 @@ function createDraftForCard(
       ...base,
       title: period?.label ?? "",
       secondary: period?.time ?? "",
-      backgroundColor: period?.style?.backgroundColor ?? "#ffffff",
+      backgroundColor: period?.style?.baseColor ?? period?.style?.backgroundColor ?? "#ffffff",
       color: period?.style?.color ?? "#ffffff",
+      iconColor: period?.style?.iconColor ?? period?.style?.color ?? "#ffffff",
       fontFamily: period?.style?.fontFamily ?? base.fontFamily,
       fontSize: period?.style?.fontSize ?? 12,
+      displayMode: "auto",
     };
   }
   return base;
@@ -1402,6 +1423,7 @@ function applyDraftToRow(
             ...course,
             title: draft.title,
             room: draft.secondary,
+            hidden: false,
             style,
             scheduleRule: {
               weekPattern: draft.weekPattern,
@@ -1653,7 +1675,12 @@ function deleteCourseCard(schedule: Schedule, courseId: string): Schedule {
 
     const span = target.colSpan ?? 1;
     const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + span);
-    courses[location.weekday] = createEmptyCourseCell(target.id);
+    courses[location.weekday] = {
+      ...target,
+      hidden: true,
+      colSpan: 1,
+      mergedInto: undefined,
+    };
 
     for (const weekday of coveredWeekdays) {
       const neighbor = courses[weekday];
@@ -1663,20 +1690,8 @@ function deleteCourseCard(schedule: Schedule, courseId: string): Schedule {
 
       courses[weekday] = {
         ...neighbor,
-        title: "",
-        room: "",
-        note: "",
-        colSpan: 1,
         mergedInto: undefined,
-        scheduleRule: {
-          weekPattern: "all",
-          applyWholeTerm: true,
-        },
-        temporaryChanges: undefined,
-        style: {
-          backgroundColor: "#ffffff",
-          color: "#64748b",
-        },
+        hidden: true,
       };
     }
 
@@ -1700,6 +1715,7 @@ function createEmptyCourseCell(id: string): CourseCell {
     style: {
       backgroundColor: "#ffffff",
       color: "#64748b",
+      displayMode: "auto",
     },
   };
 }
@@ -1844,5 +1860,22 @@ function findEditableCardByGeometry(x: number, y: number): SelectedCard | null {
   }
 
   return null;
+}
+
+function loadPersistedSchedule(): Schedule | null {
+  try {
+    const raw = window.localStorage.getItem(SCHEDULE_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Schedule) : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedSchedule(schedule: Schedule): void {
+  try {
+    window.localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(schedule));
+  } catch {
+    // local persistence is best-effort only
+  }
 }
 

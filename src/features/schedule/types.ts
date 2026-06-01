@@ -10,11 +10,16 @@ export type Weekday =
 export type WorkdayMode = "mon-fri" | "mon-sat" | "mon-sun";
 
 export type CardStyle = {
+  baseColor?: string;
   backgroundColor?: string;
   color?: string;
+  iconColor?: string;
   fontFamily?: string;
   fontSize?: number;
+  displayMode?: CourseCardDisplayMode;
 };
+
+export type CourseCardDisplayMode = "auto" | "oneLine" | "twoLine";
 
 export type CourseScheduleRule = {
   weekPattern: "all" | "odd" | "even";
@@ -50,6 +55,7 @@ export type CourseCell = {
   title: string;
   room?: string;
   note?: string;
+  hidden?: boolean;
   colSpan?: number;
   mergedInto?: string;
   style?: CardStyle;

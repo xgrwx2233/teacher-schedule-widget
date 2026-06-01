@@ -1,4 +1,4 @@
-import type { CardStyle, CourseScheduleRule, CourseTemporaryChange, WorkdayMode } from "../schedule/types";
+import type { CardStyle, CourseCardDisplayMode, CourseScheduleRule, CourseTemporaryChange, WorkdayMode } from "../schedule/types";
 
 export type TermSettings = {
   startDate: string;
@@ -52,8 +52,10 @@ export type CardDraft = {
   secondary: string;
   backgroundColor: string;
   color: string;
+  iconColor: string;
   fontFamily: string;
   fontSize: number;
+  displayMode: CourseCardDisplayMode;
   weekPattern: CourseScheduleRule["weekPattern"];
   applyWholeTerm: boolean;
   startDate: string;
@@ -143,8 +145,10 @@ export const defaultCardDraft: CardDraft = {
   secondary: "",
   backgroundColor: "#fff8e1",
   color: "#b97916",
+  iconColor: "#b97916",
   fontFamily: "Microsoft YaHei",
   fontSize: 14,
+  displayMode: "auto",
   weekPattern: "all",
   applyWholeTerm: true,
   startDate: "2026-03-05",
@@ -163,10 +167,104 @@ export function createDefaultTemporaryChangeDraft(date: string): TemporaryChange
 }
 
 export function toCardStyle(draft: CardDraft): CardStyle {
+  const palette = computeCoursePalette(draft.backgroundColor);
   return {
-    backgroundColor: draft.backgroundColor,
-    color: draft.color,
+    baseColor: draft.backgroundColor,
+    backgroundColor: palette.backgroundColor,
+    color: palette.color,
+    iconColor: palette.iconColor,
     fontFamily: draft.fontFamily,
     fontSize: draft.fontSize,
+    displayMode: draft.displayMode,
   };
+}
+
+export type ComputedCardPalette = {
+  backgroundColor: string;
+  color: string;
+  iconColor: string;
+};
+
+export const courseCardPresetColors = [
+  { name: "日落橙", value: "#FF6B35" },
+  { name: "阳光黄", value: "#FFD166" },
+  { name: "薄荷绿", value: "#06D6A0" },
+  { name: "晴空蓝", value: "#118AB2" },
+  { name: "薰衣紫", value: "#9B5DE5" },
+  { name: "珊瑚粉", value: "#F15BB5" },
+  { name: "奶油白", value: "#F0E5CF" },
+] as const;
+
+export function isPresetCourseColor(value: string): boolean {
+  return courseCardPresetColors.some((color) => color.value.toLowerCase() === value.trim().toLowerCase());
+}
+
+export function computeCoursePalette(baseColor: string): ComputedCardPalette {
+  const { r, g, b } = parseHexColor(baseColor);
+  const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+  const saturation = (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
+  const color = deriveReadableAccentColor(r, g, b);
+  return {
+    backgroundColor: blendWithWhiteHex(r, g, b, luminance > 205 && saturation < 0.22 ? 0.9 : 0.84),
+    color,
+    iconColor: color,
+  };
+}
+
+export function applyComputedCoursePalette(draft: CardDraft, baseColor: string): CardDraft {
+  const palette = computeCoursePalette(baseColor);
+  return {
+    ...draft,
+    backgroundColor: baseColor,
+    color: palette.color,
+    iconColor: palette.iconColor,
+  };
+}
+
+function parseHexColor(value: string): { r: number; g: number; b: number } {
+  const normalized = value.trim().replace(/^#/, "");
+  const expanded = normalized.length === 3 ? normalized.split("").map((item) => item + item).join("") : normalized;
+  const match = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(expanded);
+  if (!match) {
+    return { r: 255, g: 255, b: 255 };
+  }
+
+  return {
+    r: parseInt(match[1], 16),
+    g: parseInt(match[2], 16),
+    b: parseInt(match[3], 16),
+  };
+}
+
+function deriveReadableAccentColor(r: number, g: number, b: number): string {
+  const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+  const saturation = (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
+
+  if (luminance > 205 && saturation < 0.22) {
+    return rgbToHex(
+      Math.round(r * 0.45),
+      Math.round(g * 0.42),
+      Math.round(b * 0.38),
+    );
+  }
+
+  const mixWithBlack = luminance > 185 ? 0.48 : luminance > 145 ? 0.38 : 0.24;
+  return rgbToHex(
+    Math.round(r * (1 - mixWithBlack)),
+    Math.round(g * (1 - mixWithBlack)),
+    Math.round(b * (1 - mixWithBlack)),
+  );
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return `#${[r, g, b].map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function blendWithWhiteHex(r: number, g: number, b: number, whiteWeight: number): string {
+  const ratio = Math.max(0, Math.min(1, whiteWeight));
+  return rgbToHex(
+    Math.round(r * (1 - ratio) + 255 * ratio),
+    Math.round(g * (1 - ratio) + 255 * ratio),
+    Math.round(b * (1 - ratio) + 255 * ratio),
+  );
 }

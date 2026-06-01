@@ -160,6 +160,7 @@ export function CardSettingsWindowHost() {
         onDraftChange={emitUpdate}
         onMergeRight={() => emitAction("merge-right")}
         onSplit={() => emitAction("split")}
+        onDeleteCourse={() => emitAction("delete")}
         onConfirm={confirmAndClose}
         onClose={closeWindow}
         onTemporaryChangeAdd={addTemporaryChange}

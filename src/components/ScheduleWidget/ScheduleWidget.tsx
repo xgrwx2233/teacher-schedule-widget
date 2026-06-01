@@ -124,7 +124,17 @@ export function ScheduleWidget({
 
                   return (
                     <ColumnItem key={`${row.id}-${weekday}`} span={span} showColumnDivider={!courseEndsAtLastColumn}>
-                      <CourseCard course={course} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
+                      {course.hidden ? (
+                        <button
+                          className={`course-card course-card-hidden-hitbox ${course.id === activeCellId ? "is-active" : ""}`}
+                          type="button"
+                          data-course-id={course.id}
+                          aria-label={course.title || "空课程卡片"}
+                          onDoubleClick={() => onCardEdit({ type: "course", courseId: course.id })}
+                        />
+                      ) : (
+                        <CourseCard course={course} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
+                      )}
                     </ColumnItem>
                   );
                 })}
@@ -162,10 +172,11 @@ function CourseCard({
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
 }) {
+  const displayMetrics = getCourseCardDisplayMetrics(course);
   return (
     <button
-      className={`course-card ${course.id === activeCellId ? "is-active" : ""}`}
-      style={toCardCssVars(course.style)}
+      className={`course-card ${displayMetrics.isTwoLine ? "is-two-line" : "is-one-line"} ${course.id === activeCellId ? "is-active" : ""}`}
+      style={toCardCssVars(course.style, displayMetrics)}
       data-course-id={course.id}
       type="button"
       title={`${course.title} ${course.room ?? ""}`}
@@ -177,7 +188,7 @@ function CourseCard({
       }}
     >
       <span>{course.title}</span>
-      {course.room && <small>{course.room}</small>}
+      {displayMetrics.isTwoLine && <small>{course.room}</small>}
     </button>
   );
 }
@@ -218,11 +229,47 @@ function PeriodCard({ period, onClick }: { period: PeriodInfo; onClick: () => vo
   );
 }
 
-function toCardCssVars(style?: CardStyle): CSSProperties {
+type CourseCardDisplayMetrics = {
+  isTwoLine: boolean;
+  titleSize: number;
+  subtitleSize: number;
+};
+
+function getCourseCardDisplayMetrics(course: CourseCell): CourseCardDisplayMetrics {
+  const baseFontSize = clampNumber(course.style?.fontSize ?? 14, 12, 18);
+  const hasSubtitle = Boolean(course.room?.trim());
+  const mode = course.style?.displayMode ?? "auto";
+  const isTwoLine = hasSubtitle && mode !== "oneLine";
+  const titleSize = isTwoLine ? clampNumber(baseFontSize, 12, 17) : clampNumber(baseFontSize + 1, 13, 18);
+  const subtitleSize = clampNumber(roundToHalf(baseFontSize * 0.68), 10, 13);
+
+  return {
+    isTwoLine,
+    titleSize,
+    subtitleSize,
+  };
+}
+
+function roundToHalf(value: number): number {
+  return Math.round(value * 2) / 2;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  return Math.max(min, Math.min(max, value));
+}
+
+function toCardCssVars(style?: CardStyle, courseMetrics?: CourseCardDisplayMetrics): CSSProperties {
   return {
     "--card-bg": style?.backgroundColor,
     "--card-fg": style?.color,
+    "--card-icon": style?.iconColor ?? style?.color,
     "--card-font": style?.fontFamily,
     "--card-font-size": style?.fontSize ? `${style.fontSize}px` : undefined,
+    "--course-card-title-size": courseMetrics ? `${courseMetrics.titleSize}px` : undefined,
+    "--course-card-subtitle-size": courseMetrics ? `${courseMetrics.subtitleSize}px` : undefined,
   } as CSSProperties;
 }

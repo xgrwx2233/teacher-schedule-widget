@@ -1363,9 +1363,9 @@ button {
 }
 
 .card-settings-window {
-  width: min(100vw, 360px);
-  height: 430px;
-  max-height: 430px;
+  width: 270px;
+  height: 380px;
+  max-height: 380px;
   grid-template-rows: 32px auto minmax(0, 1fr);
   border: 1px solid #d9dee8;
   border-radius: 16px;
@@ -1416,7 +1416,7 @@ button {
 .card-settings-tabs {
   justify-self: start;
   height: 34px;
-  margin: 8px 10px 0;
+  margin: 8px 8px 0;
   padding: 3px;
   border-radius: 999px;
   background: #dfe2ea;
@@ -1425,8 +1425,8 @@ button {
 
 .card-settings-tabs button {
   height: 28px;
-  min-width: 82px;
-  padding: 0 12px;
+  min-width: 74px;
+  padding: 0 10px;
   border-radius: 999px;
   font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
   font-size: 12px;
@@ -1441,9 +1441,55 @@ button {
 }
 
 .card-settings-body {
-  padding: 6px 10px 6px;
+  padding: 6px 8px 6px;
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.card-settings-window .settings-card {
+  padding: 10px;
+}
+
+.card-settings-window .settings-card-header {
+  gap: 8px;
+}
+
+.card-settings-window .settings-card h2 {
+  font-size: 13px;
+}
+
+.basic-info-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.basic-info-inline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.basic-info-field {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.basic-info-field span,
+.basic-info-color > span {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.basic-info-color {
+  display: grid;
+  gap: 5px;
+}
+
+.basic-info-field .card-settings-input {
+  height: 30px;
 }
 
 .card-settings-body::-webkit-scrollbar {
@@ -1456,7 +1502,7 @@ button {
 }
 
 .course-config-stack {
-  gap: 10px;
+  gap: 8px;
 }
 
 .row-card {
@@ -1465,7 +1511,7 @@ button {
   grid-template-columns: 62px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
-  min-height: 46px;
+  min-height: 42px;
   padding: 8px 10px;
   border: 1px solid #e5e7eb;
   border-radius: 14px;
@@ -1526,7 +1572,7 @@ button {
 .style-row-grid {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(88px, 1fr) minmax(58px, 0.64fr) minmax(70px, 0.76fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.74fr) minmax(0, 1fr);
   gap: 5px;
 }
 
@@ -1537,7 +1583,7 @@ button {
 
 .style-row-secondary {
   display: grid;
-  grid-template-columns: minmax(112px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
 }
@@ -1545,12 +1591,12 @@ button {
 .schedule-row-grid {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(72px, 0.78fr) repeat(2, minmax(90px, 1fr));
+  grid-template-columns: minmax(0, 0.82fr) repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
 .schedule-row-grid-two {
-  grid-template-columns: minmax(72px, 0.78fr) repeat(2, minmax(90px, 1fr));
+  grid-template-columns: minmax(0, 0.82fr) repeat(2, minmax(0, 1fr));
 }
 
 .secondary-button-row {
@@ -1581,14 +1627,14 @@ button {
 }
 
 .row-card-accordion > summary {
-  min-height: 48px;
+  min-height: 36px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
+  padding: 0 12px;
   cursor: pointer;
-  border-radius: 14px;
+  border-radius: 8px;
   background: #f9fafb;
   transition:
     transform 80ms ease,
@@ -1607,7 +1653,7 @@ button {
 
 .row-card-accordion[open] > summary {
   border-bottom: 1px solid #eef2f7;
-  border-radius: 14px 14px 0 0;
+  border-radius: 0;
   background: #ffffff;
 }
 
@@ -1621,14 +1667,56 @@ button {
   padding: 10px;
 }
 
+.accordion-group {
+  display: grid;
+  gap: 0;
+  background: #ffffff;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 2px 6px rgba(0, 0, 0, 0.02);
+}
+
+.accordion-group .row-card-accordion {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.accordion-group .row-card-accordion + .row-card-accordion {
+  border-top: 1px solid #f0f0f4;
+}
+
+.accordion-group .row-card-accordion > summary {
+  border-radius: 0;
+}
+
+.accordion-group .row-card-label {
+  font-size: 13px;
+}
+
+.accordion-group .card-settings-accordion-chevron {
+  font-size: 11px;
+}
+
+.accordion-group .row-card-accordion[open] > summary {
+  background: #ffffff;
+}
+
+.accordion-group .row-card-accordion-content {
+  padding: 8px 10px 10px;
+}
+
 .row-card-accordion .merge-panel {
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .row-card-accordion .merge-dpad {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .row-card-accordion .merge-dpad button,
@@ -1676,6 +1764,8 @@ button {
 
 .card-settings-select-narrow {
   max-width: 150px;
+  text-align: left;
+  text-align-last: left;
 }
 
 .row-card-accordion .style-row-stack {
@@ -1692,21 +1782,192 @@ button {
 
 .row-card-accordion .display-mode-control .card-settings-select {
   height: 30px;
+  width: 100%;
+  max-width: 132px;
+}
+
+.card-settings-window .card-settings-select,
+.card-settings-window .card-settings-input {
+  text-align: left;
+  text-align-last: left;
+}
+
+.card-settings-window .card-settings-input[type="date"] {
+  appearance: auto;
+  -webkit-appearance: auto;
+  padding-right: 8px;
+}
+
+.card-settings-window .card-settings-input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.card-settings-window .card-settings-input[type="date"]::-webkit-clear-button,
+.card-settings-window .card-settings-input[type="date"]::-ms-clear,
+.card-settings-window .card-settings-input[type="date"]::-ms-expand {
+  display: none;
+}
+
+.basic-info-field .card-settings-input,
+.display-mode-select,
+.schedule-row-grid .card-settings-select,
+.style-row-grid .card-settings-select {
+  text-align: left;
+  text-align-last: left;
+}
+
+.schedule-row-top,
+.schedule-row-bottom {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-row-top {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.date-picker-control {
+  min-width: 0;
+  position: relative;
+  display: block;
+}
+
+.date-picker-control .date-picker-input {
+  min-width: 0;
+  width: 100%;
+  padding-right: 34px;
+}
+
+.date-picker-icon-button {
+  width: 28px;
+  height: 32px;
+  position: absolute;
+  top: 0;
+  right: 1px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.date-picker-icon-button:hover {
+  color: #4338ca;
+  background: transparent;
+}
+
+.date-picker-icon-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.schedule-row-bottom {
+  grid-template-columns: minmax(0, 0.85fr) auto auto;
+  align-items: center;
+}
+
+.schedule-pattern-select {
+  width: 100%;
+  max-width: 96px;
+}
+
+.icon-chip-button {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #475569;
+  box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.03);
+  cursor: pointer;
+}
+
+.icon-chip-button:hover {
+  border-color: #c7d2fe;
+  color: #4338ca;
+}
+
+.icon-chip-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.schedule-global-apply {
+  height: 32px;
+  padding: 0 10px;
+  justify-self: end;
+}
+
+.card-settings-window .action-global-apply,
+.schedule-global-apply {
+  border-color: #c7d2fe;
+  background: #f5f7ff;
+  color: #4338ca;
+}
+
+.card-settings-window .action-global-apply:hover,
+.schedule-global-apply:hover {
+  border-color: #a5b4fc;
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.icon-chip-button {
+  border-color: #c7d2fe;
+  background: #f5f7ff;
+  color: #4338ca;
+}
+
+.icon-chip-button:hover {
+  border-color: #a5b4fc;
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.row-card-accordion .merge-dpad span {
+  display: none;
+}
+
+.row-card-accordion .split-card-button {
+  padding: 0 10px;
 }
 
 .card-settings-window .color-dot-row {
   gap: 6px;
   justify-content: flex-start;
+  max-width: 100%;
 }
 
 .card-settings-window .color-dot,
 .card-settings-window .custom-color-trigger {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
   padding: 0;
-  border-radius: 999px;
   cursor: pointer;
+}
+
+.card-settings-window .color-dot {
+  border-radius: 999px;
+}
+
+.card-settings-window .custom-color-trigger {
+  border-radius: 4px;
+}
+
+.card-settings-window .custom-color-trigger input {
+  border-radius: 4px;
 }
 
 .card-settings-window .color-dot.is-active {
@@ -2234,20 +2495,68 @@ button {
 }
 
 .course-card span {
-  font-size: var(--card-font-size, var(--course-title-size));
-  font-weight: 800;
-  line-height: 1.08;
+  font-size: var(--course-card-title-size, var(--card-font-size, var(--course-title-size)));
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
 }
 
 .course-card small {
-  opacity: 0.7;
-  font-size: var(--course-meta-size);
-  line-height: 1.05;
+  opacity: 0.82;
+  font-size: var(--course-card-subtitle-size, var(--course-meta-size));
+  font-weight: 400;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.course-card.is-one-line {
+  align-content: center;
+}
+
+.course-card.is-one-line span {
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.course-card.is-two-line {
+  align-content: center;
+  gap: 3px;
+}
+
+.course-card.is-two-line span,
+.course-card.is-two-line small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.course-card svg,
+.course-card [data-card-icon] {
+  color: var(--card-icon, var(--card-fg, currentColor));
 }
 
 .course-card {
-  color: #b97916;
+  color: var(--card-fg, #b97916);
   background: var(--card-bg, #fff8e1);
+}
+
+.course-card-hidden-hitbox,
+.course-card-hidden-hitbox:hover,
+.course-card-hidden-hitbox:active,
+.course-card-hidden-hitbox:focus-visible,
+.course-card-hidden-hitbox.is-active {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  box-shadow: none;
+  outline: none;
 }
 
 .course-card.is-active {
