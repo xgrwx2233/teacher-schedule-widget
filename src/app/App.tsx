@@ -404,7 +404,10 @@ export function App() {
     }
 
     console.info("open card settings requested", card);
-    const draft = createDraftForCard(schedule, card, settings.term);
+    const currentSchedule = scheduleRef.current;
+    const draft = createDraftForCard(currentSchedule, card, settingsRef.current.term);
+    const course = card.type === "course" ? findCourse(currentSchedule, card.courseId) : undefined;
+    const temporaryChanges = course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
     selectedCardRef.current = card;
     cardDraftRef.current = draft;
     setSelectedCard(card);
@@ -419,13 +422,15 @@ export function App() {
       await emitTo<CardSettingsWindowStatePayload>(CARD_SETTINGS_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_EVENT, {
         selectedCard: card,
         draft,
-        mergeState: getCourseCardMergeState(schedule, card),
+        mergeState: getCourseCardMergeState(currentSchedule, card),
         term: settingsRef.current.term,
+        temporaryChanges,
+        activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
       });
     } catch (error) {
       console.error("failed to open card settings window", error);
     }
-  }, [closeCardSettings, schedule, settings.term]);
+  }, [closeCardSettings]);
 
   useEffect(() => {
     const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
@@ -541,11 +546,33 @@ export function App() {
         return;
       }
 
+      const currentCourse = currentCard.type === "course" ? findCourse(scheduleRef.current, currentCard.courseId) : undefined;
+
       void emitTo<CardSettingsWindowStatePayload>(event.payload.windowLabel, CARD_SETTINGS_WINDOW_STATE_EVENT, {
         selectedCard: currentCard,
         draft: cardDraftRef.current,
         mergeState: getCourseCardMergeState(scheduleRef.current, currentCard),
         term: settingsRef.current.term,
+        temporaryChanges: currentCourse?.temporaryChanges?.map((change) => ({
+          id: change.id,
+          type: change.type,
+          dates: change.dates,
+          title: change.title ?? change.replaceTitle ?? "",
+          subtitle: change.subtitle ?? change.replaceSecondary ?? "",
+          color: change.color ?? change.replaceColor ?? "#4f46e5",
+          style: change.style ?? {
+            fontFamily: "Microsoft YaHei",
+            fontSize: 14,
+            fontWeight: "medium",
+            displayMode: "auto",
+          },
+          createdAt: change.createdAt ?? new Date().toISOString(),
+          updatedAt: change.updatedAt ?? new Date().toISOString(),
+          replaceTitle: change.replaceTitle ?? "",
+          replaceSecondary: change.replaceSecondary ?? "",
+          replaceColor: change.replaceColor ?? change.color ?? "#4f46e5",
+        })) ?? [],
+        activeTemporaryChangeId: currentCourse?.temporaryChanges?.[0]?.id ?? null,
       });
     });
 
@@ -953,7 +980,13 @@ function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefin
     return course;
   }
 
-  const change = course.temporaryChanges.find((item) => item.dates.includes(date));
+  const change = [...(course.temporaryChanges ?? [])]
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.updatedAt ?? left.createdAt ?? "");
+      const rightTime = Date.parse(right.updatedAt ?? right.createdAt ?? "");
+      return rightTime - leftTime;
+    })
+    .find((item) => item.dates.includes(date));
   if (!change) {
     return course;
   }
@@ -961,26 +994,28 @@ function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefin
   if (change.type === "cancel") {
     return {
       ...course,
-      title: "无课",
-      room: "",
+      title: change.title || "无课",
+      room: change.subtitle ?? "",
       style: {
         ...course.style,
-        baseColor: "#f8fafc",
-        backgroundColor: "#f8fafc",
-        color: "#64748b",
-        iconColor: "#64748b",
+        ...(change.style ?? {}),
+        baseColor: change.color ?? course.style?.baseColor ?? "#f8fafc",
+        backgroundColor: change.color ?? course.style?.backgroundColor ?? "#f8fafc",
+        color: computeCoursePalette(change.color ?? course.style?.backgroundColor ?? "#f8fafc").color,
+        iconColor: computeCoursePalette(change.color ?? course.style?.backgroundColor ?? "#f8fafc").iconColor,
       },
     };
   }
 
-  const baseColor = change.replaceColor ?? course.style?.baseColor ?? course.style?.backgroundColor ?? "#ffffff";
+  const baseColor = change.color ?? change.replaceColor ?? course.style?.baseColor ?? course.style?.backgroundColor ?? "#ffffff";
   const computedPalette = computeCoursePalette(baseColor);
   return {
     ...course,
-    title: change.replaceTitle ?? course.title,
-    room: change.replaceSecondary ?? course.room,
+    title: change.title ?? change.replaceTitle ?? course.title,
+    room: change.subtitle ?? change.replaceSecondary ?? course.room,
     style: {
       ...course.style,
+      ...(change.style ?? {}),
       baseColor,
       backgroundColor: computedPalette.backgroundColor,
       color: computedPalette.color,
@@ -1588,6 +1623,12 @@ function toCourseTemporaryChange(change: TemporaryChangeDraft) {
     id: change.id,
     type: change.type,
     dates: change.dates,
+    title: change.title || undefined,
+    subtitle: change.subtitle || undefined,
+    color: change.color || change.replaceColor || undefined,
+    style: change.style,
+    createdAt: change.createdAt,
+    updatedAt: change.updatedAt,
     replaceTitle: change.replaceTitle || undefined,
     replaceSecondary: change.replaceSecondary || undefined,
     replaceColor: change.replaceColor || undefined,
@@ -1595,13 +1636,26 @@ function toCourseTemporaryChange(change: TemporaryChangeDraft) {
 }
 
 function toTemporaryChangeDraft(change: CourseTemporaryChange): TemporaryChangeDraft {
+  const color = change.color ?? change.replaceColor ?? "#4f46e5";
+  const style = change.style ?? {
+    fontFamily: "Microsoft YaHei",
+    fontSize: 14,
+    fontWeight: "medium",
+    displayMode: "auto",
+  };
   return {
     id: change.id,
     type: change.type,
     dates: change.dates,
+    title: change.title ?? change.replaceTitle ?? "",
+    subtitle: change.subtitle ?? change.replaceSecondary ?? "",
+    color,
+    style,
+    createdAt: change.createdAt ?? new Date().toISOString(),
+    updatedAt: change.updatedAt ?? new Date().toISOString(),
     replaceTitle: change.replaceTitle ?? "",
     replaceSecondary: change.replaceSecondary ?? "",
-    replaceColor: change.replaceColor ?? "#4f46e5",
+    replaceColor: change.replaceColor ?? color,
   };
 }
 
@@ -1897,6 +1951,10 @@ function buildCourseSignature(course: CourseCell): string {
   return [
     course.title,
     course.room ?? "",
+    course.style?.fontFamily ?? "",
+    String(course.style?.fontSize ?? ""),
+    course.style?.fontWeight ?? "",
+    course.style?.displayMode ?? "",
     course.scheduleRule?.weekPattern ?? "all",
     course.scheduleRule?.applyWholeTerm ? "whole" : "range",
     course.scheduleRule?.startDate ?? "",

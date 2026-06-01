@@ -5,7 +5,6 @@ import type {
   CourseCardMergeState,
   SelectedCard,
   TemporaryChangeDraft,
-  TemporaryChangeType,
 } from "../../features/settings/settingsTypes";
 import { courseCardPresetColors } from "../../features/settings/settingsTypes";
 
@@ -23,7 +22,6 @@ type CardSettingsWindowProps = {
   onAddCourse: () => void;
   onGlobalStyleApply: () => void;
   onGlobalScheduleApply: () => void;
-  onTemporaryChangeAdd: () => void;
   onTemporaryChangeSelect: (id: string | null) => void;
   onTemporaryChangeUpdate: (change: TemporaryChangeDraft) => void;
   onTemporaryChangeRemove: (id: string) => void;
@@ -49,13 +47,11 @@ export function CardSettingsWindow({
   onAddCourse,
   onGlobalStyleApply,
   onGlobalScheduleApply,
-  onTemporaryChangeAdd,
   onTemporaryChangeSelect,
   onTemporaryChangeUpdate,
   onTemporaryChangeRemove,
 }: CardSettingsWindowProps) {
   const [activeTab, setActiveTab] = useState<CardSettingsTab>("course");
-  const [historyExpanded, setHistoryExpanded] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -65,18 +61,6 @@ export function CardSettingsWindow({
   if (!selectedCard) {
     return null;
   }
-
-  const currentTemporaryChangeId = activeTemporaryChangeId ?? temporaryChanges[0]?.id ?? null;
-
-  const removeTemporaryDate = (change: TemporaryChangeDraft, date: string) => {
-    const nextDates = change.dates.filter((item) => item !== date);
-    if (nextDates.length === 0) {
-      onTemporaryChangeRemove(change.id);
-      return;
-    }
-
-    onTemporaryChangeUpdate({ ...change, dates: nextDates });
-  };
 
   return (
     <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="课程卡片设置">
@@ -100,14 +84,10 @@ export function CardSettingsWindow({
           ) : (
             <TemporaryChangesTab
               changes={temporaryChanges}
-              activeChange={temporaryChanges.find((change) => change.id === currentTemporaryChangeId) ?? null}
-              historyExpanded={historyExpanded}
-              onHistoryExpandedChange={setHistoryExpanded}
-              onAddChange={onTemporaryChangeAdd}
+              activeChangeId={activeTemporaryChangeId}
               onSelectChange={onTemporaryChangeSelect}
               onUpdateChange={onTemporaryChangeUpdate}
               onRemoveChange={onTemporaryChangeRemove}
-              onRemoveDate={removeTemporaryDate}
             />
           )}
         </div>
@@ -362,170 +342,341 @@ function PeriodConfigurationTab({ draft, onDraftChange }: { draft: CardDraft; on
 
 function TemporaryChangesTab({
   changes,
-  activeChange,
-  historyExpanded,
-  onHistoryExpandedChange,
-  onAddChange,
+  activeChangeId,
   onSelectChange,
   onUpdateChange,
   onRemoveChange,
-  onRemoveDate,
 }: {
   changes: TemporaryChangeDraft[];
-  activeChange: TemporaryChangeDraft | null;
-  historyExpanded: boolean;
-  onHistoryExpandedChange: (expanded: boolean) => void;
-  onAddChange: () => void;
+  activeChangeId: string | null;
   onSelectChange: (id: string | null) => void;
   onUpdateChange: (change: TemporaryChangeDraft) => void;
   onRemoveChange: (id: string) => void;
-  onRemoveDate: (change: TemporaryChangeDraft, date: string) => void;
 }) {
-  const recentChanges = useMemo(() => changes.filter((change) => change.dates.some((date) => date >= todayIso)), [changes]);
-  const historyChanges = useMemo(() => changes.filter((change) => change.dates.every((date) => date < todayIso)), [changes]);
+  const sortedChanges = useMemo(() => [...changes].sort(sortTemporaryChangesByUpdatedAt), [changes]);
+  const activeChange = sortedChanges.find((change) => change.id === activeChangeId) ?? null;
+  const [editor, setEditor] = useState<TemporaryChangeDraft>(() => createEditableTemporaryChange(activeChange));
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [replaceConfirmChange, setReplaceConfirmChange] = useState<TemporaryChangeDraft | null>(null);
 
-  return (
-    <div className="temporary-layout">
-      <aside className="temporary-list">
-        <button className="temporary-add-button" type="button" onClick={onAddChange}>
-          + 新增临时改动
-        </button>
-        <TemporaryListGroup title="最近有效" expanded changes={recentChanges} activeId={activeChange?.id ?? null} onSelect={onSelectChange} />
-        <section className="temporary-group">
-          <button className="temporary-group-title" type="button" onClick={() => onHistoryExpandedChange(!historyExpanded)}>
-            历史记录
-            <span>{historyExpanded ? "收起" : "展开"}</span>
-          </button>
-          {historyExpanded && <TemporaryList changes={historyChanges} activeId={activeChange?.id ?? null} onSelect={onSelectChange} />}
-        </section>
-      </aside>
+  useEffect(() => {
+    setEditor(createEditableTemporaryChange(activeChange));
+    setFeedback("");
+  }, [activeChange]);
 
-      <section className="temporary-editor">
-        {activeChange ? (
-          <TemporaryChangeEditor
-            change={activeChange}
-            onUpdateChange={onUpdateChange}
-            onRemoveDate={onRemoveDate}
-          />
-        ) : (
-          <div className="temporary-empty">
-            <h3>暂无改动</h3>
-            <p>点击左侧“新增临时改动”后，在这里设置日期和改动内容。</p>
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function TemporaryChangeEditor({
-  change,
-  onUpdateChange,
-  onRemoveDate,
-}: {
-  change: TemporaryChangeDraft;
-  onUpdateChange: (change: TemporaryChangeDraft) => void;
-  onRemoveDate: (change: TemporaryChangeDraft, date: string) => void;
-}) {
-  const updateType = (type: TemporaryChangeType) => {
-    onUpdateChange({ ...change, type });
+  const updateEditor = (patch: Partial<TemporaryChangeDraft>) => {
+    setEditor((current) => ({
+      ...current,
+      ...patch,
+      replaceTitle: patch.title ?? patch.replaceTitle ?? current.replaceTitle,
+      replaceSecondary: patch.subtitle ?? patch.replaceSecondary ?? current.replaceSecondary,
+      replaceColor: patch.color ?? patch.replaceColor ?? current.replaceColor,
+    }));
   };
 
-  const addDate = () => {
-    if (change.dates.includes(todayIso)) {
+  const removeDate = (date: string) => {
+    const nextDates = editor.dates.filter((item) => item !== date);
+    if (nextDates.length === 0) {
+      onRemoveChange(editor.id);
+      onSelectChange(null);
+      setEditor(createEditableTemporaryChange(null));
+      setFeedback("");
       return;
     }
-    onUpdateChange({ ...change, dates: [...change.dates, todayIso] });
+
+    updateEditor({ dates: nextDates });
+  };
+
+  const saveChange = (forceReplace = false) => {
+    const normalized = normalizeTemporaryEditor(editor);
+    if (!normalized.title.trim()) {
+      setFeedback("请先填写课程名");
+      return;
+    }
+
+    if (normalized.dates.length === 0) {
+      setFeedback("请至少选择一个改动日期");
+      return;
+    }
+
+    const anotherEffective = changes.find((change) => change.id !== normalized.id && isEffectiveTemporaryChange(change));
+    if (!forceReplace && isEffectiveTemporaryChange(normalized) && anotherEffective) {
+      setReplaceConfirmChange(normalized);
+      return;
+    }
+
+    if (forceReplace) {
+      changes
+        .filter((change) => change.id !== normalized.id && isEffectiveTemporaryChange(change))
+        .forEach((change) => onRemoveChange(change.id));
+    }
+
+    onUpdateChange(normalized);
+    onSelectChange(normalized.id);
+    setEditor(normalized);
+    setReplaceConfirmChange(null);
+    setFeedback("已保存");
+  };
+
+  const deleteHistory = () => {
+    if (!activeChange) {
+      return;
+    }
+
+    if (!window.confirm("是否删除该条临时改动历史？")) {
+      return;
+    }
+
+    onRemoveChange(activeChange.id);
+    setEditor(createEditableTemporaryChange(null));
+    setFeedback("");
   };
 
   return (
-    <div className="temporary-editor-form">
-      <select className="card-settings-select temporary-type-control" value={change.type} onChange={(event) => updateType(event.currentTarget.value as TemporaryChangeType)}>
-        <option value="cancel">临时取消</option>
-        <option value="replace">临时换课</option>
-      </select>
-
-      <SettingsCard title="适用日期">
-        <div className="date-chip-row">
-          {change.dates.map((date) => (
-            <span className="date-chip" key={date}>
-              {formatDateChip(date)}
-              <button type="button" aria-label={`删除 ${date}`} onClick={() => onRemoveDate(change, date)}>
-                ×
-              </button>
-            </span>
-          ))}
-          <button className="add-date-chip" type="button" onClick={addDate}>
-            + 添加日期
-          </button>
+    <div className="temporary-config-stack">
+      <SettingsCard>
+        <div className="basic-info-grid">
+          <div className="basic-info-inline">
+            <label className="basic-info-field">
+              <span>课程名</span>
+              <input
+                className="card-settings-input"
+                value={editor.title}
+                maxLength={4}
+                placeholder="社团"
+                onChange={(event) => updateEditor({ title: limitCardText(event.currentTarget.value) })}
+              />
+            </label>
+            <label className="basic-info-field">
+              <span>辅助信息</span>
+              <input
+                className="card-settings-input"
+                value={editor.subtitle}
+                maxLength={4}
+                placeholder="活动室"
+                onChange={(event) => updateEditor({ subtitle: limitCardText(event.currentTarget.value) })}
+              />
+            </label>
+          </div>
+          <div className="basic-info-color">
+            <span>颜色</span>
+            <ColorPickerRow value={editor.color} onChange={(color) => updateEditor({ color })} />
+          </div>
         </div>
       </SettingsCard>
 
-      {change.type === "cancel" ? (
-        <div className="temporary-result-card">结果：无课</div>
-      ) : (
-        <SettingsCard title="替换课程">
-          <SettingRow label="替换课程名称">
-            <input className="card-settings-input" value={change.replaceTitle} maxLength={4} placeholder="课程" onChange={(event) => onUpdateChange({ ...change, replaceTitle: limitCardText(event.currentTarget.value) })} />
-          </SettingRow>
-          <SettingRow label="替换辅助信息">
-            <input className="card-settings-input" value={change.replaceSecondary} maxLength={4} placeholder="辅助信息" onChange={(event) => onUpdateChange({ ...change, replaceSecondary: limitCardText(event.currentTarget.value) })} />
-          </SettingRow>
-          <SettingRow label="颜色">
-            <ColorPickerRow value={change.replaceColor} onChange={(replaceColor) => onUpdateChange({ ...change, replaceColor })} />
-          </SettingRow>
-        </SettingsCard>
-      )}
+      <div className="accordion-group temporary-style-group">
+        <details className="row-card row-card-accordion accordion-style">
+          <summary>
+            <span className="row-card-label">风格</span>
+            <span className="card-settings-accordion-chevron" aria-hidden="true">
+              ▾
+            </span>
+          </summary>
+          <div className="row-card-accordion-content">
+            <div className="style-row-stack">
+              <div className="style-row-grid">
+                <CompactField label="字体">
+                  <select className="card-settings-select" value={editor.style.fontFamily} onChange={(event) => updateEditor({ style: { ...editor.style, fontFamily: event.currentTarget.value } })}>
+                    <option value="Microsoft YaHei">微软雅黑</option>
+                    <option value="Segoe UI">Segoe UI</option>
+                    <option value="SimSun">宋体</option>
+                    <option value="KaiTi">楷体</option>
+                  </select>
+                </CompactField>
+                <CompactField label="字号">
+                  <select className="card-settings-select" value={editor.style.fontSize} onChange={(event) => updateEditor({ style: { ...editor.style, fontSize: clamp(Number(event.currentTarget.value), 8, 16) } })}>
+                    {courseFontSizeOptions.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </CompactField>
+                <CompactField label="粗细">
+                  <select className="card-settings-select" value={editor.style.fontWeight} onChange={(event) => updateEditor({ style: { ...editor.style, fontWeight: event.currentTarget.value as CardDraft["fontWeight"] } })}>
+                    <option value="regular">常规</option>
+                    <option value="medium">中等</option>
+                    <option value="bold">加粗</option>
+                  </select>
+                </CompactField>
+              </div>
+              <div className="style-row-secondary temporary-display-row">
+                <div className="card-settings-field display-mode-control">
+                  <select
+                    className="card-settings-select card-settings-select-narrow display-mode-select"
+                    value={editor.style.displayMode}
+                    onChange={(event) => updateEditor({ style: { ...editor.style, displayMode: event.currentTarget.value as CardDraft["displayMode"] } })}
+                  >
+                    <option value="auto" title="有辅助信息时自动显示双行，没有辅助信息时显示单行">
+                      自动
+                    </option>
+                    <option value="oneLine" title="只显示一行课程名">
+                      单行
+                    </option>
+                    <option value="twoLine" title="有辅助信息时固定双行，没有辅助信息时自动退回单行">
+                      双行
+                    </option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
 
+      <SettingsCard
+        title="改动日期"
+        action={
+          <button type="button" className="card-settings-secondary temporary-pick-date" onClick={() => setCalendarOpen(true)}>
+            选择日期
+          </button>
+        }
+      >
+        <div className="date-chip-row">
+          {sortDates(editor.dates).length === 0 ? (
+            <span className="temporary-date-empty">暂未选择日期</span>
+          ) : (
+            sortDates(editor.dates).map((date) => (
+              <span className="date-chip" key={date}>
+                {formatDateChip(date)}
+                <button type="button" aria-label={`删除 ${date}`} onClick={() => removeDate(date)}>
+                  ×
+                </button>
+              </span>
+            ))
+          )}
+        </div>
+      </SettingsCard>
+
+      <button type="button" className="temporary-save-button" onClick={() => saveChange(false)}>
+        保存本次临时改动
+      </button>
+      {feedback ? <div className="temporary-feedback">{feedback}</div> : null}
+
+      <SettingsCard
+        title="改动历史"
+        action={
+          <button type="button" className="card-settings-secondary temporary-delete-history" disabled={!activeChange} onClick={deleteHistory}>
+            删除该条历史
+          </button>
+        }
+      >
+        {sortedChanges.length === 0 ? (
+          <div className="temporary-list-empty">暂无改动历史</div>
+        ) : (
+          <select className="card-settings-select temporary-history-select" value={activeChange?.id ?? ""} onChange={(event) => onSelectChange(event.currentTarget.value || null)}>
+            <option value="" disabled>
+              选择改动历史
+            </option>
+            {sortedChanges.map((change) => (
+              <option key={change.id} value={change.id}>
+                {formatTemporaryHistorySummary(change)}
+              </option>
+            ))}
+          </select>
+        )}
+      </SettingsCard>
+
+      {calendarOpen ? (
+        <MultiSelectCalendarDialog
+          selectedDates={editor.dates}
+          onCancel={() => setCalendarOpen(false)}
+          onConfirm={(dates) => {
+            updateEditor({ dates });
+            setCalendarOpen(false);
+          }}
+        />
+      ) : null}
+
+      {replaceConfirmChange ? (
+        <div className="temporary-confirm-overlay" role="alertdialog" aria-modal="true" aria-label="替换临时改动">
+          <div className="temporary-confirm-dialog">
+            <p>当前课程已有一条有效临时改动。保存后将替换原有效改动，是否继续？</p>
+            <div>
+              <button type="button" className="card-settings-secondary" onClick={() => setReplaceConfirmChange(null)}>
+                取消
+              </button>
+              <button type="button" className="temporary-confirm-primary" onClick={() => saveChange(true)}>
+                替换并保存
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function TemporaryListGroup({
-  title,
-  expanded,
-  changes,
-  activeId,
-  onSelect,
+function MultiSelectCalendarDialog({
+  selectedDates,
+  onCancel,
+  onConfirm,
 }: {
-  title: string;
-  expanded: boolean;
-  changes: TemporaryChangeDraft[];
-  activeId: string | null;
-  onSelect: (id: string | null) => void;
+  selectedDates: string[];
+  onCancel: () => void;
+  onConfirm: (dates: string[]) => void;
 }) {
+  const initialMonth = getCalendarInitialMonth(selectedDates);
+  const [monthDate, setMonthDate] = useState(initialMonth);
+  const [draftDates, setDraftDates] = useState<string[]>(() => sortDates(selectedDates));
+  const days = buildCalendarMonthDays(monthDate);
+  const monthLabel = `${monthDate.getFullYear()}年${monthDate.getMonth() + 1}月`;
+
+  const shiftMonth = (delta: number) => {
+    setMonthDate((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
+  };
+
+  const toggleDate = (date: string) => {
+    setDraftDates((current) => (current.includes(date) ? current.filter((item) => item !== date) : sortDates([...current, date])));
+  };
+
   return (
-    <section className="temporary-group">
-      <div className="temporary-group-title">
-        {title}
-        <span>{changes.length}</span>
+    <div className="temporary-calendar-overlay" role="dialog" aria-modal="true" aria-label="选择改动日期">
+      <div className="temporary-calendar-dialog">
+        <header className="temporary-calendar-header">
+          <button type="button" aria-label="上一月" onClick={() => shiftMonth(-1)}>
+            ‹
+          </button>
+          <strong>{monthLabel}</strong>
+          <button type="button" aria-label="下一月" onClick={() => shiftMonth(1)}>
+            ›
+          </button>
+        </header>
+        <div className="temporary-calendar-weekdays" aria-hidden="true">
+          {["日", "一", "二", "三", "四", "五", "六"].map((day) => (
+            <span key={day}>{day}</span>
+          ))}
+        </div>
+        <div className="temporary-calendar-grid">
+          {days.map((day) => (
+            <button
+              key={day.date}
+              type="button"
+              className={[
+                "temporary-calendar-day",
+                day.inMonth ? "" : "is-outside",
+                draftDates.includes(day.date) ? "is-selected" : "",
+              ].filter(Boolean).join(" ")}
+              onClick={() => toggleDate(day.date)}
+            >
+              {day.dayOfMonth}
+            </button>
+          ))}
+        </div>
+        <footer className="temporary-calendar-footer">
+          <button type="button" className="card-settings-secondary" onClick={onCancel}>
+            取消
+          </button>
+          <button type="button" className="card-settings-secondary" onClick={() => setDraftDates([])}>
+            清空
+          </button>
+          <button type="button" className="temporary-confirm-primary" onClick={() => onConfirm(sortDates(draftDates))}>
+            确定
+          </button>
+        </footer>
       </div>
-      {expanded && <TemporaryList changes={changes} activeId={activeId} onSelect={onSelect} />}
-    </section>
-  );
-}
-
-function TemporaryList({
-  changes,
-  activeId,
-  onSelect,
-}: {
-  changes: TemporaryChangeDraft[];
-  activeId: string | null;
-  onSelect: (id: string | null) => void;
-}) {
-  if (changes.length === 0) {
-    return <p className="temporary-list-empty">暂无记录</p>;
-  }
-
-  return (
-    <div className="temporary-list-items">
-      {changes.map((change) => (
-        <button key={change.id} type="button" className={change.id === activeId ? "temporary-list-item is-active" : "temporary-list-item"} onClick={() => onSelect(change.id)}>
-          <span>{formatDateChip(change.dates[0])}</span>
-          <strong>{change.type === "cancel" ? "[取消] 无课" : `[换课] ${change.replaceTitle || "未命名"}`}</strong>
-        </button>
-      ))}
     </div>
   );
 }
@@ -636,6 +787,119 @@ function ColorPickerRow({ value, onChange }: { value: string; onChange: (value: 
       </label>
     </div>
   );
+}
+
+function createEditableTemporaryChange(change: TemporaryChangeDraft | null): TemporaryChangeDraft {
+  const now = new Date().toISOString();
+  return {
+    id: change?.id ?? `temporary-change-${now}-${Math.random().toString(16).slice(2, 8)}`,
+    type: change?.type ?? "cancel",
+    dates: [...(change?.dates ?? [])],
+    title: change?.title ?? change?.replaceTitle ?? "",
+    subtitle: change?.subtitle ?? change?.replaceSecondary ?? "",
+    color: change?.color ?? change?.replaceColor ?? "#4f46e5",
+    style: {
+      fontFamily: change?.style?.fontFamily ?? "Microsoft YaHei",
+      fontSize: change?.style?.fontSize ?? 14,
+      fontWeight: change?.style?.fontWeight ?? "medium",
+      displayMode: change?.style?.displayMode ?? "auto",
+    },
+    createdAt: change?.createdAt ?? now,
+    updatedAt: change?.updatedAt ?? now,
+    replaceTitle: change?.replaceTitle ?? "",
+    replaceSecondary: change?.replaceSecondary ?? "",
+    replaceColor: change?.replaceColor ?? change?.color ?? "#4f46e5",
+  };
+}
+
+function normalizeTemporaryEditor(change: TemporaryChangeDraft): TemporaryChangeDraft {
+  const now = new Date().toISOString();
+  const title = limitCardText(change.title || change.replaceTitle || "");
+  const subtitle = limitCardText(change.subtitle || change.replaceSecondary || "");
+  const color = (change.color || change.replaceColor || "#4f46e5").trim();
+  return {
+    ...change,
+    title,
+    subtitle,
+    color,
+    dates: sortDates(change.dates),
+    createdAt: change.createdAt || now,
+    updatedAt: now,
+    replaceTitle: title,
+    replaceSecondary: subtitle,
+    replaceColor: color,
+  };
+}
+
+function isEffectiveTemporaryChange(change: TemporaryChangeDraft): boolean {
+  return change.dates.some((date) => date >= todayIso);
+}
+
+function sortTemporaryChangesByUpdatedAt(left: TemporaryChangeDraft, right: TemporaryChangeDraft): number {
+  return Date.parse(right.updatedAt ?? right.createdAt ?? "") - Date.parse(left.updatedAt ?? left.createdAt ?? "");
+}
+
+function sortDates(dates: string[]): string[] {
+  return [...dates].sort((left, right) => left.localeCompare(right));
+}
+
+function formatTemporaryHistorySummary(change: TemporaryChangeDraft): string {
+  const datePart = summarizeDates(change.dates);
+  const titlePart = change.title || change.replaceTitle || "未命名";
+  const subtitlePart = change.subtitle || change.replaceSecondary || "";
+  return [datePart, titlePart, subtitlePart].filter(Boolean).join(" · ");
+}
+
+function summarizeDates(dates: string[]): string {
+  const sorted = sortDates(dates);
+  if (sorted.length === 0) {
+    return "无日期";
+  }
+
+  const preview = sorted.slice(0, 3).map(formatDateChip);
+  const suffix = sorted.length > 3 ? ` +${sorted.length - 3}` : "";
+  return `${preview.join("、")}${suffix}`;
+}
+
+function getCalendarInitialMonth(dates: string[]): Date {
+  const first = sortDates(dates)[0];
+  if (!first) {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+
+  const parsed = new Date(`${first}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+
+  return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+}
+
+function buildCalendarMonthDays(monthDate: Date): Array<{ date: string; dayOfMonth: number; inMonth: boolean }> {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstOfMonth = new Date(year, month, 1);
+  const startDay = firstOfMonth.getDay();
+  const start = new Date(year, month, 1 - startDay);
+  const result: Array<{ date: string; dayOfMonth: number; inMonth: boolean }> = [];
+
+  for (let index = 0; index < 42; index += 1) {
+    const current = new Date(start);
+    current.setDate(start.getDate() + index);
+    result.push({
+      date: formatIsoDate(current),
+      dayOfMonth: current.getDate(),
+      inMonth: current.getMonth() === month,
+    });
+  }
+
+  return result;
+}
+
+function formatIsoDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function CalendarIcon() {

@@ -66,6 +66,12 @@ export type CardDraft = {
 export type TemporaryChangeType = CourseTemporaryChange["type"];
 
 export type TemporaryChangeDraft = CourseTemporaryChange & {
+  title: string;
+  subtitle: string;
+  color: string;
+  style: Pick<CardStyle, "fontFamily" | "fontSize" | "fontWeight" | "displayMode">;
+  createdAt: string;
+  updatedAt: string;
   replaceTitle: string;
   replaceSecondary: string;
   replaceColor: string;
@@ -158,10 +164,22 @@ export const defaultCardDraft: CardDraft = {
 };
 
 export function createDefaultTemporaryChangeDraft(date: string): TemporaryChangeDraft {
+  const now = new Date().toISOString();
   return {
     id: `temporary-change-${date}-${Math.random().toString(16).slice(2, 8)}`,
     type: "cancel",
     dates: [date],
+    title: "",
+    subtitle: "",
+    color: "#4f46e5",
+    style: {
+      fontFamily: "Microsoft YaHei",
+      fontSize: 14,
+      fontWeight: "medium",
+      displayMode: "auto",
+    },
+    createdAt: now,
+    updatedAt: now,
     replaceTitle: "",
     replaceSecondary: "",
     replaceColor: "#4f46e5",

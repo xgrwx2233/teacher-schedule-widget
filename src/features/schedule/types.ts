@@ -34,9 +34,15 @@ export type CourseTemporaryChange = {
   id: string;
   type: "cancel" | "replace";
   dates: string[];
+  title?: string;
+  subtitle?: string;
+  color?: string;
   replaceTitle?: string;
   replaceSecondary?: string;
   replaceColor?: string;
+  style?: CardStyle;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ScheduleDay = {

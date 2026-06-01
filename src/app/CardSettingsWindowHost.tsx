@@ -4,7 +4,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CardSettingsWindow } from "../components/CardSettingsWindow/CardSettingsWindow";
 import {
-  createDefaultTemporaryChangeDraft,
   defaultCardDraft,
   type CardDraft,
   type CourseCardMergeState,
@@ -33,9 +32,7 @@ export function CardSettingsWindowHost() {
   const [draft, setDraft] = useState<CardDraft>(defaultCardDraft);
   const [term, setTerm] = useState<TermSettings>({ startDate: defaultCardDraft.startDate, endDate: defaultCardDraft.endDate });
   const [mergeState, setMergeState] = useState<CourseCardMergeState>({ canMergeRight: false, canSplit: false });
-  const [temporaryChanges, setTemporaryChanges] = useState<TemporaryChangeDraft[]>(() => [
-    createDefaultTemporaryChangeDraft(new Date().toISOString().slice(0, 10)),
-  ]);
+  const [temporaryChanges, setTemporaryChanges] = useState<TemporaryChangeDraft[]>([]);
   const [activeTemporaryChangeId, setActiveTemporaryChangeId] = useState<string | null>(null);
   const isClosingRef = useRef(false);
   const lastMovedAtRef = useRef(0);
@@ -104,26 +101,27 @@ export function CardSettingsWindowHost() {
     });
   };
 
-  const addTemporaryChange = () => {
-    const nextChange = createDefaultTemporaryChangeDraft(new Date().toISOString().slice(0, 10));
-    const nextChanges = [nextChange, ...temporaryChanges];
-    setTemporaryChanges(nextChanges);
-    setActiveTemporaryChangeId(nextChange.id);
-    emitTemporaryUpdate(nextChanges, nextChange.id);
-  };
-
   const updateTemporaryChange = (nextChange: TemporaryChangeDraft) => {
-    const nextChanges = temporaryChanges.map((change) => (change.id === nextChange.id ? nextChange : change));
-    setTemporaryChanges(nextChanges);
-    emitTemporaryUpdate(nextChanges, activeTemporaryChangeId);
+    setTemporaryChanges((current) => {
+      const exists = current.some((change) => change.id === nextChange.id);
+      const nextChanges = exists
+        ? current.map((change) => (change.id === nextChange.id ? nextChange : change))
+        : [nextChange, ...current];
+      const nextActiveId = nextChange.id;
+      setActiveTemporaryChangeId(nextActiveId);
+      emitTemporaryUpdate(nextChanges, nextActiveId);
+      return nextChanges;
+    });
   };
 
   const removeTemporaryChange = (changeId: string) => {
-    const nextChanges = temporaryChanges.filter((change) => change.id !== changeId);
-    const nextActiveId = nextChanges[0]?.id ?? null;
-    setTemporaryChanges(nextChanges);
-    setActiveTemporaryChangeId(nextActiveId);
-    emitTemporaryUpdate(nextChanges, nextActiveId);
+    setTemporaryChanges((current) => {
+      const nextChanges = current.filter((change) => change.id !== changeId);
+      const nextActiveId = nextChanges[0]?.id ?? null;
+      setActiveTemporaryChangeId(nextActiveId);
+      emitTemporaryUpdate(nextChanges, nextActiveId);
+      return nextChanges;
+    });
   };
 
   const closeWindow = async () => {
@@ -212,7 +210,6 @@ export function CardSettingsWindowHost() {
         onAddCourse={() => emitAction("add", true)}
         onGlobalStyleApply={() => emitAction("apply-style", true)}
         onGlobalScheduleApply={() => emitAction("apply-schedule", true)}
-        onTemporaryChangeAdd={addTemporaryChange}
         onTemporaryChangeSelect={setActiveTemporaryChangeId}
         onTemporaryChangeUpdate={updateTemporaryChange}
         onTemporaryChangeRemove={removeTemporaryChange}
