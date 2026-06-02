@@ -410,7 +410,9 @@ export function App() {
     }
 
     console.info("open card settings requested", card);
-    const currentSchedule = scheduleRef.current;
+    const currentSchedule = ensureScheduleCapacity(scheduleRef.current, settingsRef.current.periodCount);
+    scheduleRef.current = currentSchedule;
+    setSchedule(currentSchedule);
     const draft = createDraftForCard(currentSchedule, card, settingsRef.current.term);
     const course = card.type === "course" ? findCourse(currentSchedule, card.courseId) : undefined;
     const temporaryChanges = course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
@@ -453,12 +455,17 @@ export function App() {
       settingsSectionRef.current = normalizeSettingsSection(event.payload.activeSection);
       setSettingsSection(normalizeSettingsSection(event.payload.activeSection));
       setSettings(nextSettings);
+      setSchedule((current) => {
+        const nextSchedule = ensureScheduleCapacity(current, nextSettings.periodCount);
+        scheduleRef.current = nextSchedule;
+        return nextSchedule;
+      });
 
       if (!shouldResizeWidget) {
         return;
       }
 
-      const visibleScheduleForRows = applyPeriodCountToSchedule(scheduleRef.current, nextSettings.periodCount);
+      const visibleScheduleForRows = applyPeriodCountToSchedule(ensureScheduleCapacity(scheduleRef.current, nextSettings.periodCount), nextSettings.periodCount);
       const scaleFactor = window.devicePixelRatio || 1;
       const measuredRowHeight = measureCurrentCourseRowHeight();
       if (measuredRowHeight) {
@@ -948,7 +955,7 @@ function normalizeSettingsSection(section: SettingsSection | string): SettingsSe
 
 function limitScheduleRows(scheduleRows: Schedule["rows"], periodCount: number): Schedule["rows"] {
   const count = Math.max(1, Math.min(periodCount, 12));
-  const rows = [...scheduleRows.slice(0, count)];
+  const rows = scheduleRows.slice(0, count).map(ensureRowCourses);
 
   while (rows.length < count) {
     const previous = rows[rows.length - 1];
@@ -965,6 +972,21 @@ function applyPeriodCountToSchedule(schedule: Schedule, periodCount: number): Sc
   };
 }
 
+function ensureScheduleCapacity(schedule: Schedule, periodCount: number): Schedule {
+  const count = Math.max(1, Math.min(periodCount, 12));
+  const rows = schedule.rows.map(ensureRowCourses);
+
+  while (rows.length < count) {
+    const previous = rows[rows.length - 1];
+    rows.push(createFallbackRow(rows.length + 1, previous));
+  }
+
+  return {
+    ...schedule,
+    rows,
+  };
+}
+
 function applyVisibleCourseRulesToSchedule(schedule: Schedule, weekNumber: number): Schedule {
   const visibleDateByWeekday = new Map<Weekday, string>();
   for (const day of schedule.days) {
@@ -975,15 +997,30 @@ function applyVisibleCourseRulesToSchedule(schedule: Schedule, weekNumber: numbe
 
   return {
     ...schedule,
-    rows: schedule.rows.map((row) => ({
-      ...row,
-      courses: Object.fromEntries(
-        Object.entries(row.courses).map(([weekday, course]) => [
-          weekday,
-          applyVisibleCourseForDate(course, visibleDateByWeekday.get(weekday as Weekday), weekNumber),
-        ]),
-      ) as Record<Weekday, CourseCell>,
-    })),
+    rows: schedule.rows.map((row) => {
+      const rowWithCourses = ensureRowCourses(row);
+      return {
+        ...rowWithCourses,
+        courses: Object.fromEntries(
+          Object.entries(rowWithCourses.courses).map(([weekday, course]) => [
+            weekday,
+            applyVisibleCourseForDate(course, visibleDateByWeekday.get(weekday as Weekday), weekNumber),
+          ]),
+        ) as Record<Weekday, CourseCell>,
+      };
+    }),
+  };
+}
+
+function ensureRowCourses(row: ScheduleRow): ScheduleRow {
+  return {
+    ...row,
+    courses: Object.fromEntries(
+      allScheduleDays.map((day) => [
+        day.id,
+        row.courses[day.id] ?? createEmptyCourseCell(`${row.id}-${day.id}`),
+      ]),
+    ) as Record<Weekday, CourseCell>,
   };
 }
 
@@ -1102,16 +1139,7 @@ function createFallbackRow(order: number, previous?: ScheduleRow): ScheduleRow {
     courses: Object.fromEntries(
       allScheduleDays.map((day) => [
         day.id,
-        {
-          id: `row-auto-${order}-${day.id}`,
-          title: "",
-          room: "",
-          colSpan: 1,
-          scheduleRule: {
-            weekPattern: "all",
-            applyWholeTerm: true,
-          },
-        } satisfies CourseCell,
+        createEmptyCourseCell(`row-auto-${order}-${day.id}`),
       ]),
     ) as Record<Weekday, CourseCell>,
   };
@@ -2097,6 +2125,7 @@ function createEmptyCourseCell(id: string): CourseCell {
     title: "",
     room: "",
     note: "",
+    hidden: true,
     colSpan: 1,
     scheduleRule: {
       weekPattern: "all",
