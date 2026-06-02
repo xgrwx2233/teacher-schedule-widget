@@ -417,7 +417,9 @@ export function App() {
     setMenuOpen(false);
 
     try {
-      await invoke("open_card_settings_window");
+      await invoke("open_card_settings_window", {
+        title: card.type === "period" ? "课次卡片设置" : "课程卡片设置",
+      });
       console.info("open card settings window invoked");
       cardSettingsWindowOpenRef.current = true;
       await emitTo<CardSettingsWindowStatePayload>(CARD_SETTINGS_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_EVENT, {
@@ -1526,7 +1528,7 @@ function applyCardDraft(
     return schedule;
   }
 
-  const style = toCardStyle(draft);
+  const style = selectedCard.type === "period" ? toPeriodCardStyle(draft) : toCardStyle(draft);
   const rows = schedule.rows.map((row) => applyDraftToRow(row, selectedCard, draft, style, temporaryChanges));
   const nextSchedule = { ...schedule, rows };
   return selectedCard.type === "course" ? autoSplitInconsistentMergedCourse(nextSchedule, selectedCard.courseId) : nextSchedule;
@@ -1630,6 +1632,19 @@ function applyGlobalScheduleToSchedule(schedule: Schedule, draft: CardDraft): Sc
         ]),
       ) as Record<Weekday, CourseCell>,
     })),
+  };
+}
+
+function toPeriodCardStyle(draft: CardDraft): CardStyle {
+  return {
+    baseColor: draft.backgroundColor,
+    backgroundColor: draft.backgroundColor,
+    color: draft.color,
+    iconColor: draft.color,
+    fontFamily: draft.fontFamily,
+    fontSize: draft.fontSize,
+    fontWeight: draft.fontWeight,
+    displayMode: draft.displayMode,
   };
 }
 

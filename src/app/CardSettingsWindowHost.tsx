@@ -57,6 +57,10 @@ export function CardSettingsWindowHost() {
     };
   }, [currentWindow.label]);
 
+  useEffect(() => {
+    void currentWindow.setTitle(selectedCard?.type === "period" ? "课次卡片设置" : "课程卡片设置");
+  }, [currentWindow, selectedCard]);
+
   const emitUpdate = (nextDraft: CardDraft) => {
     if (!selectedCard) {
       return;

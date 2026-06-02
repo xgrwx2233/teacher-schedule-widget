@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, LogicalSize, Manager, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 const SETTINGS_WINDOW_LABEL: &str = "settings";
 const CARD_SETTINGS_WINDOW_LABEL: &str = "card-settings";
@@ -11,8 +11,16 @@ pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn open_card_settings_window(app: AppHandle) -> Result<(), String> {
-    ensure_card_settings_window(&app).map(|_| ())
+pub fn open_card_settings_window(app: AppHandle, title: Option<String>) -> Result<(), String> {
+    let window = ensure_card_settings_window(&app)?;
+    if let Some(title) = title {
+        let height = if title == "课次卡片设置" { 272.0 } else { 380.0 };
+        window
+            .set_size(Size::Logical(LogicalSize::new(270.0, height)))
+            .map_err(|error| error.to_string())?;
+        window.set_title(&title).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

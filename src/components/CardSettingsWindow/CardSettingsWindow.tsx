@@ -58,8 +58,26 @@ export function CardSettingsWindow({
     bodyRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [activeTab, selectedCard]);
 
+  useEffect(() => {
+    if (selectedCard?.type === "period") {
+      setActiveTab("course");
+    }
+  }, [selectedCard]);
+
   if (!selectedCard) {
     return null;
+  }
+
+  if (selectedCard.type === "period") {
+    return (
+      <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="课次卡片设置">
+        <section className="card-settings-window period-settings-window">
+          <div className="card-settings-body is-period-settings" ref={bodyRef}>
+            <PeriodConfigurationTab draft={draft} onDraftChange={onDraftChange} />
+          </div>
+        </section>
+      </div>
+    );
   }
 
   return (
@@ -297,7 +315,61 @@ function CourseConfigurationTab({
   );
 }
 
-function PeriodConfigurationTab({ draft, onDraftChange }: { draft: CardDraft; onDraftChange: (draft: CardDraft) => void }) {
+function PeriodConfigurationTab({
+  draft,
+  onDraftChange,
+}: {
+  draft: CardDraft;
+  onDraftChange: (draft: CardDraft) => void;
+}) {
+  return (
+    <div className="period-settings-stack">
+      <SettingsCard className="period-settings-card">
+        <div className="period-primary-grid">
+          <label className="period-settings-field">
+            <span>课次</span>
+            <input className="card-settings-input period-name-input" value={draft.title} maxLength={3} placeholder="第5节" onChange={(event) => onDraftChange({ ...draft, title: event.currentTarget.value.slice(0, 3) })} />
+          </label>
+          <TimeRangeField value={draft.secondary} onChange={(secondary) => onDraftChange({ ...draft, secondary })} />
+        </div>
+      </SettingsCard>
+
+      <SettingsCard className="period-settings-card">
+        <div className="period-style-grid">
+          <label className="period-settings-field">
+            <span>字体</span>
+            <select className="card-settings-select" value={draft.fontFamily} onChange={(event) => onDraftChange({ ...draft, fontFamily: event.currentTarget.value })}>
+              <option value="Microsoft YaHei">微软雅黑</option>
+              <option value="Segoe UI">Segoe UI</option>
+              <option value="SimSun">宋体</option>
+              <option value="KaiTi">楷体</option>
+            </select>
+          </label>
+          <label className="period-settings-field">
+            <span>字号</span>
+            <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 10, 24) })}>
+              {periodFontSizeOptions.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="period-color-grid">
+          <div className="period-color-field">
+            <span>字体颜色</span>
+            <ColorPickerRow value={draft.color} onChange={(color) => onDraftChange({ ...draft, color, iconColor: color })} />
+          </div>
+          <div className="period-color-field">
+            <span>背景颜色</span>
+            <ColorPickerRow value={draft.backgroundColor} onChange={(backgroundColor) => onDraftChange({ ...draft, backgroundColor })} />
+          </div>
+        </div>
+      </SettingsCard>
+    </div>
+  );
+
   return (
     <div className="course-config-stack period-config-grid">
       <SettingsCard title="基础信息">
@@ -338,6 +410,58 @@ function PeriodConfigurationTab({ draft, onDraftChange }: { draft: CardDraft; on
       </SettingsCard>
     </div>
   );
+}
+
+function TimeRangeField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { start, end } = splitTimeRange(value);
+
+  const updateTime = (nextStart: string, nextEnd: string) => {
+    onChange(`${nextStart || "00:00"}-${nextEnd || "00:00"}`);
+  };
+
+  return (
+    <div className="period-time-inputs">
+      <label className="period-settings-field">
+        <span>开始时间</span>
+        <input
+          className="card-settings-input period-time-input"
+          type="time"
+          value={start}
+          aria-label="开始时间"
+          onChange={(event) => updateTime(event.currentTarget.value, end)}
+        />
+      </label>
+      <label className="period-settings-field">
+        <span>结束时间</span>
+        <input
+          className="card-settings-input period-time-input"
+          type="time"
+          value={end}
+          aria-label="结束时间"
+          onChange={(event) => updateTime(start, event.currentTarget.value)}
+        />
+      </label>
+    </div>
+  );
+}
+
+function splitTimeRange(value: string): { start: string; end: string } {
+  const [start = "", end = ""] = value.split("-");
+  return {
+    start: normalizeTimeValue(start),
+    end: normalizeTimeValue(end),
+  };
+}
+
+function normalizeTimeValue(value: string): string {
+  const match = /^(\d{1,2}):(\d{1,2})$/.exec(value.trim());
+  if (!match) {
+    return "";
+  }
+
+  const hours = clamp(Number(match[1]), 0, 23);
+  const minutes = clamp(Number(match[2]), 0, 59);
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 function TemporaryChangesTab({

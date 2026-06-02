@@ -70,7 +70,8 @@ button {
   --title-size: clamp(12px, 1.55vmin, 16px);
   --meta-size: clamp(8px, 1.05vmin, 11px);
   --period-title-size: clamp(11px, 1.35vmin, 14px);
-  --period-time-size: clamp(7px, 0.95vmin, 10px);
+  --period-time-size: clamp(7.5px, 1vmin, 10.5px);
+  --period-card-row-gap: 3px;
   --course-title-size: clamp(12px, 1.55vmin, 16px);
   --course-meta-size: clamp(8px, 1.05vmin, 11px);
   --course-padding-y: clamp(4px, 0.9vmin, 6px);
@@ -1408,6 +1409,107 @@ button {
   scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
 }
 
+.period-settings-window {
+  height: 272px;
+  max-height: 272px;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.card-settings-body.is-period-settings {
+  padding: 10px 8px;
+}
+
+.period-settings-stack {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.card-settings-window .period-settings-card {
+  padding: 10px;
+}
+
+.period-primary-grid,
+.period-style-grid {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.period-primary-grid {
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.period-style-grid,
+.period-color-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.period-settings-field {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.period-settings-field span,
+.period-color-field > span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.period-time-inputs {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px;
+  align-items: end;
+}
+
+.period-time-input {
+  padding: 0 2px 0 5px;
+  font-size: 10.5px;
+  appearance: auto;
+  -webkit-appearance: auto;
+}
+
+.period-time-input::-webkit-calendar-picker-indicator {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.period-color-grid {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.period-color-field {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.period-settings-card .setting-card-row {
+  min-height: 34px;
+}
+
+.period-color-field .color-dot-row {
+  row-gap: 6px;
+}
+
 .card-settings-window .settings-card {
   padding: 10px;
 }
@@ -2556,10 +2658,6 @@ button {
   border-color: #cbd5e1;
 }
 
-.period-time-input {
-  padding: 0 6px;
-}
-
 .period-name-input {
   font-weight: 700;
 }
@@ -2746,14 +2844,15 @@ button {
   min-height: min(100%, 42px);
   display: grid;
   grid-template-rows: auto auto;
+  row-gap: var(--period-card-row-gap);
   align-items: center;
   align-content: center;
   justify-items: end;
   padding: clamp(3px, 0.75vmin, 7px) clamp(2px, 0.8vmin, 6px);
   border: 1px solid var(--axis-capsule-border);
   border-radius: var(--schedule-card-radius, 10px);
-  background: var(--axis-capsule-bg);
-  color: var(--axis-main-color);
+  background: var(--card-bg, var(--axis-capsule-bg));
+  color: var(--card-fg, var(--axis-main-color));
   font-family: var(--card-font, inherit);
   text-align: right;
   cursor: pointer;
@@ -2762,15 +2861,32 @@ button {
 }
 
 .period-card strong {
+  max-width: 100%;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: right;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 100%);
   font-size: var(--card-font-size, var(--period-title-size));
   font-weight: 850;
-  line-height: 1.05;
+  line-height: 1.1;
 }
 
 .period-card span {
-  color: var(--axis-muted-color);
+  max-width: 100%;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: right;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 100%);
+  color: var(--card-fg, var(--axis-muted-color));
+  opacity: 0.72;
   font-size: var(--period-time-size);
-  line-height: 1.15;
+  line-height: 1.1;
 }
 
 .schedule-shell.period-column-transparent .period-card {
@@ -2781,7 +2897,7 @@ button {
 
 .schedule-shell.period-column-solid .period-card {
   border-color: var(--axis-solid-border);
-  background: var(--axis-solid-bg);
+  background: var(--card-bg, var(--axis-solid-bg));
 }
 
 .course-card {
@@ -2940,7 +3056,8 @@ button {
     --title-size: clamp(10px, 1.35vmin, 13px);
     --meta-size: clamp(7px, 0.95vmin, 9px);
     --period-title-size: clamp(9px, 1.15vmin, 12px);
-    --period-time-size: clamp(6px, 0.8vmin, 8px);
+    --period-time-size: clamp(6.5px, 0.86vmin, 8.5px);
+    --period-card-row-gap: 2px;
     --course-title-size: clamp(10px, 1.3vmin, 13px);
     --course-meta-size: clamp(7px, 0.9vmin, 9px);
   }
