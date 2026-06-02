@@ -74,7 +74,7 @@ export function CardSettingsWindow({
           </button>
         </nav>
 
-        <div className="card-settings-body" ref={bodyRef}>
+        <div className={activeTab === "temporary" ? "card-settings-body is-temporary-tab" : "card-settings-body"} ref={bodyRef}>
           {activeTab === "course" ? (
             selectedCard.type === "course" ? (
               <CourseConfigurationTab draft={draft} term={term} mergeState={mergeState} onDraftChange={onDraftChange} onMergeRight={onMergeRight} onSplit={onSplit} onDeleteCourse={onDeleteCourse} onAddCourse={onAddCourse} onGlobalStyleApply={onGlobalStyleApply} onGlobalScheduleApply={onGlobalScheduleApply} />
