@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 import type { WorkdayMode } from "../../features/schedule/types";
 import type {
+  AxisColorMode,
+  PeriodColumnStyle,
   SettingsSection,
   WidgetSettingsState,
 } from "../../features/settings/settingsTypes";
@@ -213,6 +215,7 @@ function AppearancePanel({
     background: true,
     gridlines: false,
     cards: false,
+    axis: false,
   });
   const appearance = normalizeAppearanceSettings(settings.appearance);
 
@@ -413,20 +416,93 @@ function AppearancePanel({
             />
           </StaticSettingRow>
         </AppearanceAccordionCard>
+
+        <AppearanceAccordionCard
+          title="轴向配色"
+          tooltip="提升工具栏、日期栏和课次列在复杂背景下的可读性。"
+          expanded={expandedSections.axis}
+          summary={`${axisColorModeLabels[appearance.axisColorMode]} · ${periodColumnStyleLabels[appearance.periodColumnStyle]}`}
+          onToggle={() => toggleSection("axis")}
+        >
+          <StaticSettingRow title="颜色模式">
+            <div className="appearance-segmented appearance-segmented-pill axis-color-options" aria-label="轴向颜色模式">
+              {axisColorModeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={appearance.axisColorMode === option.value ? "is-active" : ""}
+                  onClick={() =>
+                    onSettingsChange({
+                      ...settings,
+                      appearance: { ...appearance, axisColorMode: option.value },
+                    })
+                  }
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </StaticSettingRow>
+          <StaticSettingRow title="课次列样式">
+            <div className="appearance-segmented appearance-segmented-pill axis-period-options" aria-label="课次列样式">
+              {periodColumnStyleOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={appearance.periodColumnStyle === option.value ? "is-active" : ""}
+                  onClick={() =>
+                    onSettingsChange({
+                      ...settings,
+                      appearance: { ...appearance, periodColumnStyle: option.value },
+                    })
+                  }
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </StaticSettingRow>
+        </AppearanceAccordionCard>
       </div>
     </section>
   );
 }
 
+const axisColorModeOptions: Array<{ value: AxisColorMode; label: string }> = [
+  { value: "auto", label: "自动对比" },
+  { value: "light", label: "浅色文字" },
+  { value: "dark", label: "深色文字" },
+];
+
+const axisColorModeLabels: Record<AxisColorMode, string> = {
+  auto: "自动对比",
+  light: "浅色文字",
+  dark: "深色文字",
+};
+
+const periodColumnStyleOptions: Array<{ value: PeriodColumnStyle; label: string }> = [
+  { value: "soft", label: "柔和底卡" },
+  { value: "transparent", label: "透明" },
+  { value: "solid", label: "实底" },
+];
+
+const periodColumnStyleLabels: Record<PeriodColumnStyle, string> = {
+  soft: "柔和底卡",
+  transparent: "透明",
+  solid: "实底",
+};
+
 function AppearanceAccordionCard({
   title,
   tooltip,
+  summary,
   expanded,
   onToggle,
   children,
 }: {
   title: string;
   tooltip: string;
+  summary?: string;
   expanded: boolean;
   onToggle: () => void;
   children: ReactNode;
@@ -440,6 +516,7 @@ function AppearanceAccordionCard({
             ⓘ
           </span>
         </span>
+        {!expanded && summary ? <span className="appearance-card-summary">{summary}</span> : null}
         <span className="appearance-chevron" aria-hidden="true">
           ⌄
         </span>

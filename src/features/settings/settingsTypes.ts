@@ -8,6 +8,8 @@ export type TermSettings = {
 export type DividerStyle = "solid" | "dashed" | "dotted";
 export type GridLineType = "none" | DividerStyle;
 export type WidgetBackgroundMode = "solid" | "blur";
+export type AxisColorMode = "auto" | "light" | "dark";
+export type PeriodColumnStyle = "soft" | "transparent" | "solid";
 
 export type AppearanceSettings = {
   columnGap: number;
@@ -26,6 +28,8 @@ export type AppearanceSettings = {
   gridLineColor: string;
   gridLineWidth: number;
   gridLineOpacity: number;
+  axisColorMode: AxisColorMode;
+  periodColumnStyle: PeriodColumnStyle;
 };
 
 export type WidgetSettingsState = {
@@ -94,6 +98,8 @@ export const defaultAppearanceSettings: AppearanceSettings = {
   gridLineColor: "#e5eaf2",
   gridLineWidth: 1,
   gridLineOpacity: 18,
+  axisColorMode: "auto",
+  periodColumnStyle: "soft",
 };
 
 export const cardShadowStrengthLabels = ["无阴影", "极轻", "轻", "标准", "明显"] as const;
@@ -132,7 +138,25 @@ export function normalizeAppearanceSettings(appearance?: Partial<AppearanceSetti
     gridLineColor: appearance?.gridLineColor ?? defaultAppearanceSettings.gridLineColor,
     gridLineWidth: typeof appearance?.gridLineWidth === "number" ? appearance.gridLineWidth : defaultAppearanceSettings.gridLineWidth,
     gridLineOpacity: typeof appearance?.gridLineOpacity === "number" ? appearance.gridLineOpacity : defaultAppearanceSettings.gridLineOpacity,
+    axisColorMode: normalizeAxisColorMode(appearance?.axisColorMode),
+    periodColumnStyle: normalizePeriodColumnStyle(appearance?.periodColumnStyle),
   };
+}
+
+function normalizeAxisColorMode(value: AxisColorMode | undefined): AxisColorMode {
+  if (value === "light" || value === "dark") {
+    return value;
+  }
+
+  return defaultAppearanceSettings.axisColorMode;
+}
+
+function normalizePeriodColumnStyle(value: PeriodColumnStyle | undefined): PeriodColumnStyle {
+  if (value === "transparent" || value === "solid") {
+    return value;
+  }
+
+  return defaultAppearanceSettings.periodColumnStyle;
 }
 
 function normalizePercent(value: number | undefined, fallback: number): number {

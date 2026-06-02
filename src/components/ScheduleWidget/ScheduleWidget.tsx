@@ -1,7 +1,7 @@
 import type { CSSProperties, PointerEvent, ReactNode, RefObject } from "react";
 import { ScheduleToolbar } from "../ScheduleToolbar/ScheduleToolbar";
 import type { CardStyle, CourseCell, PeriodInfo, Schedule, Weekday } from "../../features/schedule/types";
-import type { SelectedCard, WidgetBackgroundMode } from "../../features/settings/settingsTypes";
+import type { PeriodColumnStyle, SelectedCard, WidgetBackgroundMode } from "../../features/settings/settingsTypes";
 import type { WindowMode } from "../../features/windowMode/types";
 import type { ToolbarLayoutMode } from "../../features/settings/windowEvents";
 
@@ -15,6 +15,7 @@ type ScheduleWidgetProps = {
   menuButtonRef: RefObject<HTMLButtonElement | null>;
   widgetStyle?: CSSProperties;
   backgroundMode: WidgetBackgroundMode;
+  periodColumnStyle: PeriodColumnStyle;
   toolbarLayoutMode: ToolbarLayoutMode;
   onPreviousWeek: () => void;
   onNextWeek: () => void;
@@ -37,6 +38,7 @@ export function ScheduleWidget({
   menuButtonRef,
   widgetStyle,
   backgroundMode,
+  periodColumnStyle,
   toolbarLayoutMode,
   onPreviousWeek,
   onNextWeek,
@@ -52,7 +54,7 @@ export function ScheduleWidget({
   const isMinimalistMode = toolbarLayoutMode === "minimalist";
 
   return (
-    <section className={`schedule-shell mode-${mode} background-${backgroundMode} toolbar-${toolbarLayoutMode} ${hovered ? "is-forward-hovered" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
+    <section className={`schedule-shell mode-${mode} background-${backgroundMode} toolbar-${toolbarLayoutMode} period-column-${periodColumnStyle} ${hovered ? "is-forward-hovered" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
       <div className={`schedule-card ${isMinimalistMode ? "is-minimalist-layout" : ""}`}>
         <div className="schedule-background-overlay" aria-hidden="true" />
         {!isMinimalistMode ? (

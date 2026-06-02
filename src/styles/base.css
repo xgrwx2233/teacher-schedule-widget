@@ -108,6 +108,12 @@ button {
 }
 
 .schedule-shell {
+  --axis-main-color: #0f172a;
+  --axis-muted-color: rgba(15, 23, 42, 0.62);
+  --axis-capsule-bg: rgba(15, 23, 42, 0.05);
+  --axis-capsule-border: rgba(15, 23, 42, 0.09);
+  --axis-solid-bg: rgba(255, 255, 255, 0.62);
+  --axis-solid-border: rgba(15, 23, 42, 0.12);
   position: relative;
   width: 100%;
   height: 100%;
@@ -380,6 +386,18 @@ button {
   background: rgba(var(--widget-border), 0.14);
 }
 
+.schedule-shell .hamburger-button,
+.schedule-shell .hamburger-button:hover,
+.schedule-shell .hamburger-button:active {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.schedule-shell .hamburger-button span {
+  background: var(--axis-main-color);
+}
+
 .toolbar-icon-button {
   height: 32px;
   width: 32px;
@@ -423,6 +441,38 @@ button {
   border-color: transparent;
   box-shadow: none;
   color: rgba(var(--widget-text), 0.92);
+}
+
+.schedule-shell .week-arrow-button,
+.schedule-shell .week-number-button,
+.schedule-shell .toolbar-icon-button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--axis-muted-color);
+  box-shadow: none;
+}
+
+.schedule-shell .week-number-button {
+  color: var(--axis-main-color);
+}
+
+.schedule-shell .toolbar-icon-button.is-active,
+.schedule-shell .toolbar-icon-button.is-transparent.is-active,
+.schedule-shell .toolbar-icon-button[data-menu-button="true"],
+.schedule-shell .toolbar-icon-button[data-menu-button="true"].is-active {
+  border-color: transparent;
+  background: transparent;
+  color: var(--axis-main-color);
+  box-shadow: none;
+}
+
+.schedule-shell .widget-mini-trigger,
+.schedule-shell .widget-mini-trigger:hover,
+.schedule-shell .widget-mini-trigger:active {
+  border-color: transparent;
+  background: transparent;
+  color: var(--axis-main-color);
+  box-shadow: none;
 }
 
 .toolbar-icon-button svg {
@@ -2576,12 +2626,16 @@ button {
   align-items: center;
   justify-items: center;
   padding: clamp(3px, 0.8vmin, 6px);
-  color: rgba(var(--widget-text), 0.9);
-  background: rgba(var(--widget-border), 0.04);
+  color: var(--axis-main-color);
+  background: transparent;
+}
+
+.date-card span {
+  color: var(--axis-main-color);
 }
 
 .date-card small {
-  color: rgba(var(--widget-muted), 0.78);
+  color: var(--axis-muted-color);
   font-size: var(--meta-size);
   line-height: 1.05;
 }
@@ -2589,6 +2643,10 @@ button {
 .date-card.is-current {
   color: #fff;
   background: rgb(var(--accent));
+}
+
+.date-card.is-current span {
+  color: #ffffff;
 }
 
 .date-card.is-current small {
@@ -2692,10 +2750,10 @@ button {
   align-content: center;
   justify-items: end;
   padding: clamp(3px, 0.75vmin, 7px) clamp(2px, 0.8vmin, 6px);
-  border: 0;
+  border: 1px solid var(--axis-capsule-border);
   border-radius: var(--schedule-card-radius, 10px);
-  background: rgba(var(--widget-border), 0.04);
-  color: var(--card-fg, rgba(var(--widget-text), 0.9));
+  background: var(--axis-capsule-bg);
+  color: var(--axis-main-color);
   font-family: var(--card-font, inherit);
   text-align: right;
   cursor: pointer;
@@ -2710,9 +2768,20 @@ button {
 }
 
 .period-card span {
-  color: rgba(var(--widget-muted), 0.84);
+  color: var(--axis-muted-color);
   font-size: var(--period-time-size);
   line-height: 1.15;
+}
+
+.schedule-shell.period-column-transparent .period-card {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.schedule-shell.period-column-solid .period-card {
+  border-color: var(--axis-solid-border);
+  background: var(--axis-solid-bg);
 }
 
 .course-card {
@@ -3126,6 +3195,17 @@ button {
   gap: 6px;
 }
 
+.settings-window .appearance-card-summary {
+  min-width: 0;
+  margin-left: auto;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-window .appearance-settings-card h4 {
   margin: 0;
   color: #374151;
@@ -3244,6 +3324,11 @@ button {
   background: #eef0ff;
   color: #4f46e5;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.settings-window .axis-color-options,
+.settings-window .axis-period-options {
+  justify-content: flex-end;
 }
 
 .settings-window .appearance-color-value {

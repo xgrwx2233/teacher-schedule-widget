@@ -24,6 +24,7 @@ import {
   computeCoursePalette,
   normalizeAppearanceSettings,
   createDefaultTemporaryChangeDraft,
+  type AxisColorMode,
   type CardDraft,
   type CourseCardMergeState,
   type SelectedCard,
@@ -855,6 +856,7 @@ export function App() {
         menuButtonRef={menuButtonRef}
         widgetStyle={widgetStyle}
         backgroundMode={normalizedAppearance.backgroundMode}
+        periodColumnStyle={normalizedAppearance.periodColumnStyle}
         toolbarLayoutMode={toolbarLayoutMode}
         onPreviousWeek={() => void stepWeek(-1)}
         onNextWeek={() => void stepWeek(1)}
@@ -1308,6 +1310,7 @@ function buildWidgetStyle(
     normalizedAppearance.gridLineWidth,
     normalizedAppearance.gridLineOpacity,
   );
+  const axisPalette = buildAxisPalette(normalizedAppearance.axisColorMode, normalizedAppearance.backgroundColor);
   const deviceScale = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   return {
     "--column-gap": `${normalizedAppearance.columnGap}px`,
@@ -1332,6 +1335,12 @@ function buildWidgetStyle(
     "--schedule-grid-line-width": `${normalizedAppearance.gridLineWidth}px`,
     "--schedule-grid-line-opacity": gridLineOpacity,
     "--schedule-grid-line-border": gridLineBorder,
+    "--axis-main-color": axisPalette.main,
+    "--axis-muted-color": axisPalette.muted,
+    "--axis-capsule-bg": axisPalette.capsuleBg,
+    "--axis-capsule-border": axisPalette.capsuleBorder,
+    "--axis-solid-bg": axisPalette.solidBg,
+    "--axis-solid-border": axisPalette.solidBorder,
     "--widget-wallpaper-url": wallpaperInfo?.url ? `url("${wallpaperInfo.url}")` : "none",
     "--widget-wallpaper-offset-x": wallpaperInfo ? `${Math.round((wallpaperInfo.wallpaperLeft - wallpaperInfo.windowLeft) / deviceScale)}px` : "0px",
     "--widget-wallpaper-offset-y": wallpaperInfo ? `${Math.round((wallpaperInfo.wallpaperTop - wallpaperInfo.windowTop) / deviceScale)}px` : "0px",
@@ -1355,6 +1364,52 @@ function buildGridLineBorder(type: "none" | "solid" | "dashed" | "dotted", color
   }
 
   return `${Math.max(0.5, width)}px ${type} rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${opacity / 100})`;
+}
+
+function buildAxisPalette(
+  mode: AxisColorMode,
+  backgroundColor: string,
+): {
+  main: string;
+  muted: string;
+  capsuleBg: string;
+  capsuleBorder: string;
+  solidBg: string;
+  solidBorder: string;
+} {
+  const useLightText = mode === "light" || (mode === "auto" && getHexLuminance(backgroundColor) < 138);
+
+  if (useLightText) {
+    return {
+      main: "#F8FAFC",
+      muted: "rgba(248, 250, 252, 0.66)",
+      capsuleBg: "rgba(255, 255, 255, 0.08)",
+      capsuleBorder: "rgba(255, 255, 255, 0.13)",
+      solidBg: "rgba(255, 255, 255, 0.16)",
+      solidBorder: "rgba(255, 255, 255, 0.22)",
+    };
+  }
+
+  return {
+    main: "#0F172A",
+    muted: "rgba(15, 23, 42, 0.62)",
+    capsuleBg: "rgba(15, 23, 42, 0.05)",
+    capsuleBorder: "rgba(15, 23, 42, 0.09)",
+    solidBg: "rgba(255, 255, 255, 0.62)",
+    solidBorder: "rgba(15, 23, 42, 0.12)",
+  };
+}
+
+function getHexLuminance(value: string): number {
+  const rgb = hexToRgbParts(value)
+    .split(" ")
+    .map((channel) => Number.parseInt(channel, 10));
+
+  if (rgb.length !== 3 || rgb.some((channel) => !Number.isFinite(channel))) {
+    return 255;
+  }
+
+  return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
 }
 
 
