@@ -49,6 +49,7 @@ export type ScheduleDay = {
   id: Weekday;
   label: string;
   dateLabel: string;
+  date?: string;
 };
 
 export type PeriodInfo = {
@@ -84,7 +85,7 @@ export type Schedule = {
   teacherName: string;
   weekNumber: number;
   termLabel: string;
-  activeWeekday: Weekday;
+  activeWeekday?: Weekday;
   days: ScheduleDay[];
   rows: ScheduleRow[];
 };

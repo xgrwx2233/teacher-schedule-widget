@@ -36,7 +36,7 @@ export function SettingsWindowHost() {
   const [windowMode, setWindowMode] = useState<WindowMode>("attached");
   const settingsRef = useRef(settings);
   const activeSectionRef = useRef(activeSection);
-  const computedWeek = useMemo(() => calculateWeekNumber(settings.term.startDate, new Date()), [settings.term.startDate]);
+  const computedWeek = useMemo(() => calculateWeekNumber(settings.term.startDate, getBeijingToday()), [settings.term.startDate]);
 
   const closeWindow = useCallback(async () => {
     await emitTo(WIDGET_WINDOW_LABEL, SETTINGS_WINDOW_CLOSE_EVENT, {
@@ -104,15 +104,44 @@ export function SettingsWindowHost() {
 }
 
 function calculateWeekNumber(startDate: string, currentDate: Date): number {
-  const start = new Date(`${startDate}T00:00:00`);
+  const start = parseIsoDateOnly(startDate);
   if (Number.isNaN(start.getTime())) {
     return 1;
   }
 
-  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
-  const currentDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
+  const currentDayOnly = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
+  const startDay = start.getTime();
+  const currentDay = currentDayOnly.getTime();
   const diffDays = Math.floor((currentDay - startDay) / 86400000);
   return Math.max(1, Math.floor(diffDays / 7) + 1);
+}
+
+function getBeijingToday(): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    const fallback = new Date();
+    return new Date(fallback.getFullYear(), fallback.getMonth(), fallback.getDate());
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function parseIsoDateOnly(value: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) {
+    return new Date(Number.NaN);
+  }
+
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
 
 function normalizeSettingsSection(section: SettingsSection | string): SettingsSection {

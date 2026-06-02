@@ -39,13 +39,13 @@ export function ScheduleToolbar({
       data-background-mode={backgroundMode}
     >
       <div className="toolbar-left" aria-label="周次切换">
-        <ToolbarIconButton title="上一周" ariaLabel="上一周" variant={variant} onClick={onPreviousWeek}>
+        <ToolbarIconButton title="上一周" ariaLabel="上一周" variant={variant} dataToolbarAction="previous-week" onClick={onPreviousWeek}>
           <ChevronLeftIcon />
         </ToolbarIconButton>
         <button className="week-number-button" type="button" title={`第${weekNumber}周`} aria-label={`第${weekNumber}周`}>
           第{weekNumber}周
         </button>
-        <ToolbarIconButton title="下一周" ariaLabel="下一周" variant={variant} onClick={onNextWeek}>
+        <ToolbarIconButton title="下一周" ariaLabel="下一周" variant={variant} dataToolbarAction="next-week" onClick={onNextWeek}>
           <ChevronRightIcon />
         </ToolbarIconButton>
       </div>
@@ -104,7 +104,7 @@ function ToolbarIconButton({
   onClick: () => void;
   buttonRef?: RefObject<HTMLButtonElement | null>;
   dataMenuButton?: boolean;
-  dataToolbarAction?: "layout-toggle";
+  dataToolbarAction?: "layout-toggle" | "previous-week" | "next-week";
   transparent?: boolean;
 }) {
   const className = [

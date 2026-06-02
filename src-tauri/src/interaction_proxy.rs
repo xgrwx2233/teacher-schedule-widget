@@ -385,7 +385,10 @@ fn handle_proxy_click(
     pending_card_click: &mut Option<(ProxyWidgetHit, Instant)>,
     double_click_interval: Duration,
 ) {
-    if matches!(hit.kind.as_str(), "menu-button" | "header-toggle" | "layout-toggle") {
+    if matches!(
+        hit.kind.as_str(),
+        "menu-button" | "header-toggle" | "layout-toggle" | "previous-week" | "next-week"
+    ) {
         pending_card_click.take();
         let _ = app.emit(PROXY_TRIGGER_EVENT, hit.clone());
         return;

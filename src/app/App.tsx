@@ -154,23 +154,28 @@ export function App() {
   const activeWidget = widgetRegistry.widgets.find((widget) => widget.id === widgetRegistry.activeWidgetId);
   const activeSkin = skinThemes.find((theme) => theme.id === activeSkinId) ?? skinThemes[0];
   const computedWeek = useMemo(
-    () => Math.max(1, calculateWeekNumber(settings.term.startDate, new Date()) + weekOffset),
+    () => Math.max(1, calculateWeekNumber(settings.term.startDate, getBeijingToday()) + weekOffset),
     [settings.term.startDate, weekOffset],
   );
+  const visibleDays = useMemo(
+    () => getVisibleDays(settings.workdayMode, weekOffset),
+    [settings.workdayMode, weekOffset],
+  );
+  const activeWeekday = useMemo(() => getActiveWeekdayForVisibleDays(visibleDays, getBeijingToday()), [visibleDays]);
 
   const visibleSchedule = useMemo(
     () =>
-      applyTemporaryChangesToSchedule(
+      applyVisibleCourseRulesToSchedule(
         {
           ...schedule,
           weekNumber: computedWeek,
-          days: getVisibleDays(settings.workdayMode, settings.term.startDate, computedWeek),
+          activeWeekday,
+          days: visibleDays,
           rows: limitScheduleRows(schedule.rows, settings.periodCount),
         },
-        settings.term.startDate,
         computedWeek,
       ),
-    [computedWeek, schedule, settings.periodCount, settings.workdayMode],
+    [activeWeekday, computedWeek, schedule, settings.periodCount, visibleDays],
   );
   const normalizedAppearance = useMemo(() => normalizeAppearanceSettings(settings.appearance), [settings.appearance]);
   const widgetStyle = useMemo(
@@ -696,6 +701,7 @@ export function App() {
         openFloatingToolbarWindow,
         openWidgetMenu,
         toggleToolbarLayoutMode,
+        stepWeek,
         openCardSettings,
         setActiveCellId,
         setMenuOpen,
@@ -710,6 +716,7 @@ export function App() {
         openFloatingToolbarWindow,
         openWidgetMenu,
         toggleToolbarLayoutMode,
+        stepWeek,
         openCardSettings,
         setActiveCellId,
         setMenuOpen,
@@ -828,7 +835,7 @@ export function App() {
 
   const stepWeek = async (delta: number) => {
     setWeekOffset((current) => {
-      const baseWeek = calculateWeekNumber(settingsRef.current.term.startDate, new Date());
+      const baseWeek = calculateWeekNumber(settingsRef.current.term.startDate, getBeijingToday());
       const nextOffset = Math.max(1, baseWeek + current + delta) - baseWeek;
       return nextOffset;
     });
@@ -874,8 +881,8 @@ export function App() {
   );
 }
 
-function getVisibleDays(mode: WorkdayMode, termStartDate: string, weekNumber: number): Schedule["days"] {
-  const days = buildVisibleDaysForWeek(mode, termStartDate, weekNumber);
+function getVisibleDays(mode: WorkdayMode, weekOffset: number): Schedule["days"] {
+  const days = buildVisibleDaysForWeek(mode, weekOffset);
   if (days.length > 0) {
     return days;
   }
@@ -891,9 +898,9 @@ function getVisibleDays(mode: WorkdayMode, termStartDate: string, weekNumber: nu
   return allScheduleDays.slice(0, 5);
 }
 
-function buildVisibleDaysForWeek(mode: WorkdayMode, termStartDate: string, weekNumber: number): Schedule["days"] {
+function buildVisibleDaysForWeek(mode: WorkdayMode, weekOffset: number): Schedule["days"] {
   const weekdays = getWorkdayWeekdays(mode);
-  const weekStart = getWeekStartDate(termStartDate, weekNumber);
+  const weekStart = getVisibleWeekStartDate(weekOffset);
   return weekdays.map((weekday, index) => {
     const current = new Date(weekStart);
     current.setDate(weekStart.getDate() + index);
@@ -901,8 +908,14 @@ function buildVisibleDaysForWeek(mode: WorkdayMode, termStartDate: string, weekN
       id: weekday,
       label: allScheduleDays.find((day) => day.id === weekday)?.label ?? "",
       dateLabel: formatMonthDay(current),
+      date: formatIsoDate(current),
     };
   });
+}
+
+function getActiveWeekdayForVisibleDays(days: Schedule["days"], today: Date): Weekday | undefined {
+  const todayIso = formatIsoDate(today);
+  return days.find((day) => day.date === todayIso)?.id;
 }
 
 function getWorkdayWeekdays(mode: WorkdayMode): Weekday[] {
@@ -917,15 +930,11 @@ function getWorkdayWeekdays(mode: WorkdayMode): Weekday[] {
   return allScheduleDays.slice(0, 5).map((day) => day.id);
 }
 
-function getWeekStartDate(termStartDate: string, weekNumber: number): Date {
-  const parsed = new Date(`${termStartDate}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) {
-    return new Date();
-  }
-
-  const offsetDays = Math.max(0, weekNumber - 1) * 7;
-  const weekStart = new Date(parsed);
-  weekStart.setDate(parsed.getDate() + offsetDays);
+function getVisibleWeekStartDate(weekOffset: number): Date {
+  const today = getBeijingToday();
+  const weekStart = new Date(today);
+  const mondayBasedDay = (today.getDay() + 6) % 7;
+  weekStart.setDate(today.getDate() - mondayBasedDay + weekOffset * 7);
   return weekStart;
 }
 
@@ -956,13 +965,12 @@ function applyPeriodCountToSchedule(schedule: Schedule, periodCount: number): Sc
   };
 }
 
-function applyTemporaryChangesToSchedule(schedule: Schedule, termStartDate: string, weekNumber: number): Schedule {
-  const weekStart = getWeekStartDate(termStartDate, weekNumber);
+function applyVisibleCourseRulesToSchedule(schedule: Schedule, weekNumber: number): Schedule {
   const visibleDateByWeekday = new Map<Weekday, string>();
-  for (const [index, day] of schedule.days.entries()) {
-    const date = new Date(weekStart);
-    date.setDate(weekStart.getDate() + index);
-    visibleDateByWeekday.set(day.id, formatIsoDate(date));
+  for (const day of schedule.days) {
+    if (day.date) {
+      visibleDateByWeekday.set(day.id, day.date);
+    }
   }
 
   return {
@@ -972,11 +980,54 @@ function applyTemporaryChangesToSchedule(schedule: Schedule, termStartDate: stri
       courses: Object.fromEntries(
         Object.entries(row.courses).map(([weekday, course]) => [
           weekday,
-          applyTemporaryChangeToCourse(course, visibleDateByWeekday.get(weekday as Weekday)),
+          applyVisibleCourseForDate(course, visibleDateByWeekday.get(weekday as Weekday), weekNumber),
         ]),
       ) as Record<Weekday, CourseCell>,
     })),
   };
+}
+
+function applyVisibleCourseForDate(course: CourseCell, date: string | undefined, weekNumber: number): CourseCell {
+  if (course.hidden) {
+    return course;
+  }
+
+  if (!isCourseScheduledForDate(course, date, weekNumber)) {
+    return { ...course, hidden: true };
+  }
+
+  return applyTemporaryChangeToCourse(course, date);
+}
+
+function isCourseScheduledForDate(course: CourseCell, date: string | undefined, weekNumber: number): boolean {
+  const rule = course.scheduleRule;
+  if (!date || !rule) {
+    return true;
+  }
+
+  if (rule.weekPattern === "odd" && weekNumber % 2 === 0) {
+    return false;
+  }
+
+  if (rule.weekPattern === "even" && weekNumber % 2 !== 0) {
+    return false;
+  }
+
+  if (!rule.applyWholeTerm) {
+    if (rule.startDate && compareIsoDate(date, rule.startDate) < 0) {
+      return false;
+    }
+
+    if (rule.endDate && compareIsoDate(date, rule.endDate) > 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function compareIsoDate(left: string, right: string): number {
+  return left.localeCompare(right);
 }
 
 function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefined): CourseCell {
@@ -996,6 +1047,8 @@ function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefin
   }
 
   if (change.type === "cancel") {
+    const baseColor = change.color ?? course.style?.baseColor ?? course.style?.backgroundColor ?? "#f8fafc";
+    const computedPalette = computeCoursePalette(baseColor);
     return {
       ...course,
       title: change.title || "无课",
@@ -1003,10 +1056,10 @@ function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefin
       style: {
         ...course.style,
         ...(change.style ?? {}),
-        baseColor: change.color ?? course.style?.baseColor ?? "#f8fafc",
-        backgroundColor: change.color ?? course.style?.backgroundColor ?? "#f8fafc",
-        color: computeCoursePalette(change.color ?? course.style?.backgroundColor ?? "#f8fafc").color,
-        iconColor: computeCoursePalette(change.color ?? course.style?.backgroundColor ?? "#f8fafc").iconColor,
+        baseColor,
+        backgroundColor: computedPalette.backgroundColor,
+        color: computedPalette.color,
+        iconColor: computedPalette.iconColor,
       },
     };
   }
@@ -1135,7 +1188,7 @@ function collectProxyHitboxes() {
         ? "menu-button"
         : element.dataset.headerToggle
           ? "header-toggle"
-          : toolbarAction === "layout-toggle"
+          : toolbarAction === "layout-toggle" || toolbarAction === "previous-week" || toolbarAction === "next-week"
             ? toolbarAction
             : courseId
               ? "course"
@@ -1180,6 +1233,7 @@ function handleProxyWidgetHit(
   openFloatingToolbarWindow: () => void,
   openWidgetMenu: () => Promise<void>,
   toggleToolbarLayoutMode: () => Promise<void>,
+  stepWeek: (delta: number) => Promise<void>,
   openCardSettings: (card: SelectedCard) => Promise<void>,
   setActiveCellId: (value: string | null) => void,
   setMenuOpen: (value: boolean) => void,
@@ -1196,6 +1250,16 @@ function handleProxyWidgetHit(
 
   if (hit.kind === "layout-toggle") {
     void toggleToolbarLayoutMode();
+    return;
+  }
+
+  if (hit.kind === "previous-week") {
+    void stepWeek(-1);
+    return;
+  }
+
+  if (hit.kind === "next-week") {
+    void stepWeek(1);
     return;
   }
 
@@ -1282,15 +1346,44 @@ async function resizeDetachedWidgetToSchedule(schedule: Schedule, rowHeight: num
 }
 
 function calculateWeekNumber(startDate: string, currentDate: Date): number {
-  const start = new Date(`${startDate}T00:00:00`);
+  const start = parseIsoDateOnly(startDate);
   if (Number.isNaN(start.getTime())) {
     return 1;
   }
 
-  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
-  const currentDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
+  const currentDayOnly = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
+  const startDay = start.getTime();
+  const currentDay = currentDayOnly.getTime();
   const diffDays = Math.floor((currentDay - startDay) / 86400000);
   return Math.max(1, Math.floor(diffDays / 7) + 1);
+}
+
+function getBeijingToday(): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    const fallback = new Date();
+    return new Date(fallback.getFullYear(), fallback.getMonth(), fallback.getDate());
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function parseIsoDateOnly(value: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) {
+    return new Date(Number.NaN);
+  }
+
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
 
 function buildWidgetStyle(
