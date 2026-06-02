@@ -3326,9 +3326,12 @@ button {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-.settings-window .axis-color-options,
 .settings-window .axis-period-options {
   justify-content: flex-end;
+}
+
+.settings-window .axis-mode-select {
+  width: 138px;
 }
 
 .settings-window .appearance-color-value {

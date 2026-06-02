@@ -418,33 +418,36 @@ function AppearancePanel({
         </AppearanceAccordionCard>
 
         <AppearanceAccordionCard
-          title="轴向配色"
+          title="课次卡片样式"
           tooltip="提升工具栏、日期栏和课次列在复杂背景下的可读性。"
           expanded={expandedSections.axis}
           summary={`${axisColorModeLabels[appearance.axisColorMode]} · ${periodColumnStyleLabels[appearance.periodColumnStyle]}`}
           onToggle={() => toggleSection("axis")}
         >
-          <StaticSettingRow title="颜色模式">
-            <div className="appearance-segmented appearance-segmented-pill axis-color-options" aria-label="轴向颜色模式">
+          <StaticSettingRow title="文字模式">
+            <select
+              className="appearance-combobox axis-mode-select"
+              value={appearance.axisColorMode}
+              aria-label="课次卡片文字模式"
+              onChange={(event) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: { ...appearance, axisColorMode: event.currentTarget.value as AxisColorMode },
+                })
+              }
+            >
               {axisColorModeOptions.map((option) => (
-                <button
+                <option
                   key={option.value}
-                  type="button"
-                  className={appearance.axisColorMode === option.value ? "is-active" : ""}
-                  onClick={() =>
-                    onSettingsChange({
-                      ...settings,
-                      appearance: { ...appearance, axisColorMode: option.value },
-                    })
-                  }
+                  value={option.value}
                 >
                   {option.label}
-                </button>
+                </option>
               ))}
-            </div>
+            </select>
           </StaticSettingRow>
-          <StaticSettingRow title="课次列样式">
-            <div className="appearance-segmented appearance-segmented-pill axis-period-options" aria-label="课次列样式">
+          <StaticSettingRow title="卡片背景色">
+            <div className="appearance-segmented appearance-segmented-pill axis-period-options" aria-label="课次卡片背景色">
               {periodColumnStyleOptions.map((option) => (
                 <button
                   key={option.value}
