@@ -238,14 +238,14 @@ button {
 }
 
 .schedule-shell.background-blur .schedule-background-overlay::before {
-  inset: calc(var(--widget-blur-intensity, 14px) * -1);
+  inset: calc(0px - var(--widget-blur-intensity, 14px));
   background-image: var(--widget-wallpaper-url);
   background-position:
     calc(var(--widget-wallpaper-offset-x) - var(--outer-padding) + var(--widget-blur-intensity, 14px))
     calc(var(--widget-wallpaper-offset-y) - var(--outer-padding) + var(--widget-blur-intensity, 14px));
   background-size: var(--widget-wallpaper-width) var(--widget-wallpaper-height);
   background-repeat: no-repeat;
-  filter: blur(calc(var(--widget-blur-intensity, 14px) * 1)) saturate(1.08);
+  filter: blur(var(--widget-blur-intensity, 14px)) saturate(1.08);
 }
 
 .schedule-shell.background-blur .schedule-background-overlay::after {
