@@ -987,7 +987,7 @@ function normalizeSettingsSection(section: SettingsSection | string): SettingsSe
 }
 
 function limitScheduleRows(scheduleRows: Schedule["rows"], periodCount: number): Schedule["rows"] {
-  const count = Math.max(1, Math.min(periodCount, 12));
+  const count = Math.max(1, Math.min(periodCount, 15));
   const rows = scheduleRows.slice(0, count).map((row) => ensureRowCourses(row));
 
   while (rows.length < count) {
@@ -1006,7 +1006,7 @@ function applyPeriodCountToSchedule(schedule: Schedule, periodCount: number): Sc
 }
 
 function ensureScheduleCapacity(schedule: Schedule, periodCount: number, newlyVisibleWeekdays: Weekday[] = []): Schedule {
-  const count = Math.max(1, Math.min(periodCount, 12));
+  const count = Math.max(1, Math.min(periodCount, 15));
   const rows = schedule.rows.map((row) => ensureRowCourses(row, newlyVisibleWeekdays));
 
   while (rows.length < count) {
@@ -1074,14 +1074,34 @@ function getAddedWorkdays(previousMode: WorkdayMode, nextMode: WorkdayMode): Wee
 
 function applyVisibleCourseForDate(course: CourseCell, date: string | undefined, weekNumber: number): CourseCell {
   if (course.hidden) {
-    return course;
+    return { ...course, renderBadge: undefined };
   }
 
   if (!isCourseScheduledForDate(course, date, weekNumber)) {
-    return { ...course, hidden: true };
+    return { ...course, hidden: true, renderBadge: undefined };
   }
 
-  return applyTemporaryChangeToCourse(course, date);
+  const visibleCourse = applyTemporaryChangeToCourse(course, date);
+  if (visibleCourse.renderBadge === "temporary") {
+    return visibleCourse;
+  }
+
+  return {
+    ...visibleCourse,
+    renderBadge: getWeekPatternRenderBadge(course),
+  };
+}
+
+function getWeekPatternRenderBadge(course: CourseCell): CourseCell["renderBadge"] {
+  if (course.scheduleRule?.weekPattern === "odd") {
+    return "odd";
+  }
+
+  if (course.scheduleRule?.weekPattern === "even") {
+    return "even";
+  }
+
+  return undefined;
 }
 
 function isCourseScheduledForDate(course: CourseCell, date: string | undefined, weekNumber: number): boolean {
@@ -1138,6 +1158,7 @@ function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefin
       ...course,
       title: change.title || "无课",
       room: change.subtitle ?? "",
+      renderBadge: "temporary",
       style: {
         ...course.style,
         ...(change.style ?? {}),
@@ -1155,6 +1176,7 @@ function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefin
     ...course,
     title: change.title ?? change.replaceTitle ?? course.title,
     room: change.subtitle ?? change.replaceSecondary ?? course.room,
+    renderBadge: "temporary",
     style: {
       ...course.style,
       ...(change.style ?? {}),

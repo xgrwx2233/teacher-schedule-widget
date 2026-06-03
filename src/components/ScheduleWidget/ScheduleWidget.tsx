@@ -179,9 +179,10 @@ function CourseCard({
   onCardEdit: (card: SelectedCard) => void;
 }) {
   const displayMetrics = getCourseCardDisplayMetrics(course);
+  const badgeLabel = getCourseBadgeLabel(course.renderBadge);
   return (
     <button
-      className={`course-card ${displayMetrics.isTwoLine ? "is-two-line" : "is-one-line"} ${course.id === activeCellId ? "is-active" : ""}`}
+      className={`course-card ${displayMetrics.isTwoLine ? "is-two-line" : "is-one-line"} ${badgeLabel ? "has-badge" : ""} ${course.id === activeCellId ? "is-active" : ""}`}
       style={toCardCssVars(course.style, displayMetrics)}
       data-course-id={course.id}
       type="button"
@@ -193,10 +194,29 @@ function CourseCard({
         onCardEdit({ type: "course", courseId: course.id });
       }}
     >
-      <span>{course.title}</span>
+      {badgeLabel ? <span className={`course-card-badge is-${course.renderBadge}`} aria-hidden="true">{badgeLabel}</span> : null}
+      <span className="course-card-title-line">
+        <span className="course-card-title-text">{course.title}</span>
+      </span>
       <small>{course.room ?? ""}</small>
     </button>
   );
+}
+
+function getCourseBadgeLabel(badge: CourseCell["renderBadge"]): string {
+  if (badge === "temporary") {
+    return "临";
+  }
+
+  if (badge === "odd") {
+    return "单";
+  }
+
+  if (badge === "even") {
+    return "双";
+  }
+
+  return "";
 }
 
 function ColumnItem({

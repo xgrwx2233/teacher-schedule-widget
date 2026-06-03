@@ -70,6 +70,7 @@ export type CourseCell = {
   style?: CardStyle;
   scheduleRule?: CourseScheduleRule;
   temporaryChanges?: CourseTemporaryChange[];
+  renderBadge?: "temporary" | "odd" | "even";
 };
 
 export type ScheduleCourseRow = {

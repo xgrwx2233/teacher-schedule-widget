@@ -144,7 +144,7 @@ function ScheduleTablePanel({
               type="button"
               className="period-stepper-button"
               aria-label="增加节数"
-              disabled={periodCount >= 12}
+              disabled={periodCount >= 15}
               onClick={() => onSettingsChange({ ...settings, periodCount: clampPeriodCount(periodCount + 1) })}
             >
               <span aria-hidden="true">+</span>
@@ -627,7 +627,7 @@ function clampPeriodCount(value: number): number {
     return 8;
   }
 
-  return Math.max(4, Math.min(12, Math.round(value)));
+  return Math.max(4, Math.min(15, Math.round(value)));
 }
 
 function Icon({ name }: { name: SettingsIconName }) {

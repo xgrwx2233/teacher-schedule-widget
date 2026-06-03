@@ -2907,6 +2907,7 @@ button {
 .course-card {
   width: 100%;
   min-height: min(100%, 42px);
+  position: relative;
   display: grid;
   grid-template-rows: auto auto;
   align-items: center;
@@ -2923,8 +2924,22 @@ button {
   background-clip: padding-box;
 }
 
-.course-card span {
+.course-card-title-line {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: center;
+  font-size: var(--course-card-title-size, var(--card-font-size, var(--course-title-size)));
+  font-weight: var(--card-font-weight, 600);
+  line-height: 1.15;
+}
+
+.course-card-title-text {
   max-width: 100%;
   min-width: 0;
   display: block;
@@ -2933,9 +2948,47 @@ button {
   text-align: center;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 calc(100% - 1px), transparent 100%);
   mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 calc(100% - 1px), transparent 100%);
-  font-size: var(--course-card-title-size, var(--card-font-size, var(--course-title-size)));
-  font-weight: var(--card-font-weight, 600);
-  line-height: 1.15;
+}
+
+.course-card.has-badge .course-card-title-line {
+  padding-top: 2px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.course-card-badge {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  z-index: 20;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #ffffff;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  color: #ffffff;
+  pointer-events: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.16), 0 1px 2px rgba(0, 0, 0, 0.10);
+}
+
+.course-card-badge.is-odd {
+  background: #fa8c16;
+}
+
+.course-card-badge.is-even {
+  background: #1890ff;
+}
+
+.course-card-badge.is-temporary {
+  background: #ff4d4f;
 }
 
 .course-card small {
@@ -2958,7 +3011,7 @@ button {
   grid-template-rows: auto;
 }
 
-.course-card.is-one-line span {
+.course-card.is-one-line .course-card-title-line {
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
@@ -2969,14 +3022,13 @@ button {
   justify-items: center;
 }
 
-.course-card.is-two-line span,
+.course-card.is-two-line .course-card-title-line,
 .course-card.is-two-line small {
-  display: block;
   white-space: nowrap;
   overflow: hidden;
 }
 
-.course-card.is-two-line span {
+.course-card.is-two-line .course-card-title-line {
   font-weight: var(--card-font-weight, 600);
 }
 
