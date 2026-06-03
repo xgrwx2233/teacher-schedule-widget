@@ -2861,9 +2861,11 @@ button {
 }
 
 .period-card strong {
+  width: 100%;
   max-width: 100%;
   min-width: 0;
   display: block;
+  justify-self: stretch;
   overflow: hidden;
   white-space: nowrap;
   text-align: right;
@@ -2875,9 +2877,11 @@ button {
 }
 
 .period-card span {
+  width: 100%;
   max-width: 100%;
   min-width: 0;
   display: block;
+  justify-self: stretch;
   overflow: hidden;
   white-space: nowrap;
   text-align: right;
@@ -2920,12 +2924,30 @@ button {
 }
 
 .course-card span {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: center;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 calc(100% - 1px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 calc(100% - 1px), transparent 100%);
   font-size: var(--course-card-title-size, var(--card-font-size, var(--course-title-size)));
   font-weight: var(--card-font-weight, 600);
   line-height: 1.15;
 }
 
 .course-card small {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: center;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 calc(100% - 1px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 calc(100% - 1px), transparent 100%);
   opacity: 0.82;
   font-size: var(--course-card-subtitle-size, var(--course-meta-size));
   font-weight: var(--card-subtitle-font-weight, 400);
@@ -2940,7 +2962,6 @@ button {
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .course-card.is-two-line {
@@ -2953,7 +2974,6 @@ button {
   display: block;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .course-card.is-two-line span {

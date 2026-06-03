@@ -445,7 +445,17 @@ export function App() {
   useEffect(() => {
     const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
       const nextSettings = event.payload.settings;
-      const shouldResizeWidget = nextSettings.periodCount !== settingsRef.current.periodCount;
+      const previousSettings = settingsRef.current;
+      const previousAppearance = normalizeAppearanceSettings(previousSettings.appearance);
+      const nextAppearance = normalizeAppearanceSettings(nextSettings.appearance);
+      const previousAxisColor = buildAxisPalette(previousAppearance.axisColorMode, previousAppearance.backgroundColor).main;
+      const nextAxisColor = buildAxisPalette(nextAppearance.axisColorMode, nextAppearance.backgroundColor).main;
+      const shouldResizeWidget = nextSettings.periodCount !== previousSettings.periodCount;
+      const shouldMaterializeScheduleGrid =
+        nextSettings.periodCount !== previousSettings.periodCount ||
+        nextSettings.workdayMode !== previousSettings.workdayMode;
+      const shouldSyncPeriodTextColor = previousAxisColor !== nextAxisColor;
+      const addedWeekdays = getAddedWorkdays(previousSettings.workdayMode, nextSettings.workdayMode);
 
       settingsRef.current = nextSettings;
       if (event.payload.windowMode && event.payload.windowMode !== modeRef.current) {
@@ -455,17 +465,33 @@ export function App() {
       settingsSectionRef.current = normalizeSettingsSection(event.payload.activeSection);
       setSettingsSection(normalizeSettingsSection(event.payload.activeSection));
       setSettings(nextSettings);
-      setSchedule((current) => {
-        const nextSchedule = ensureScheduleCapacity(current, nextSettings.periodCount);
+
+      if (shouldMaterializeScheduleGrid || shouldSyncPeriodTextColor) {
+        let nextSchedule = shouldMaterializeScheduleGrid
+          ? ensureScheduleCapacity(scheduleRef.current, nextSettings.periodCount, addedWeekdays)
+          : scheduleRef.current;
+
+        if (shouldSyncPeriodTextColor) {
+          nextSchedule = applyAxisTextColorToPeriods(nextSchedule, nextAxisColor);
+        }
+
         scheduleRef.current = nextSchedule;
-        return nextSchedule;
-      });
+        setSchedule(nextSchedule);
+
+        const currentCard = selectedCardRef.current;
+        if (cardSettingsWindowOpenRef.current && currentCard?.type === "period") {
+          const nextDraft = createDraftForCard(nextSchedule, currentCard, nextSettings.term);
+          cardDraftRef.current = nextDraft;
+          setCardDraft(nextDraft);
+          void emitCardSettingsState(CARD_SETTINGS_WINDOW_LABEL, currentCard, nextDraft, nextSchedule, nextSettings.term);
+        }
+      }
 
       if (!shouldResizeWidget) {
         return;
       }
 
-      const visibleScheduleForRows = applyPeriodCountToSchedule(ensureScheduleCapacity(scheduleRef.current, nextSettings.periodCount), nextSettings.periodCount);
+      const visibleScheduleForRows = applyPeriodCountToSchedule(ensureScheduleCapacity(scheduleRef.current, nextSettings.periodCount, addedWeekdays), nextSettings.periodCount);
       const scaleFactor = window.devicePixelRatio || 1;
       const measuredRowHeight = measureCurrentCourseRowHeight();
       if (measuredRowHeight) {
@@ -955,7 +981,7 @@ function normalizeSettingsSection(section: SettingsSection | string): SettingsSe
 
 function limitScheduleRows(scheduleRows: Schedule["rows"], periodCount: number): Schedule["rows"] {
   const count = Math.max(1, Math.min(periodCount, 12));
-  const rows = scheduleRows.slice(0, count).map(ensureRowCourses);
+  const rows = scheduleRows.slice(0, count).map((row) => ensureRowCourses(row));
 
   while (rows.length < count) {
     const previous = rows[rows.length - 1];
@@ -972,9 +998,9 @@ function applyPeriodCountToSchedule(schedule: Schedule, periodCount: number): Sc
   };
 }
 
-function ensureScheduleCapacity(schedule: Schedule, periodCount: number): Schedule {
+function ensureScheduleCapacity(schedule: Schedule, periodCount: number, newlyVisibleWeekdays: Weekday[] = []): Schedule {
   const count = Math.max(1, Math.min(periodCount, 12));
-  const rows = schedule.rows.map(ensureRowCourses);
+  const rows = schedule.rows.map((row) => ensureRowCourses(row, newlyVisibleWeekdays));
 
   while (rows.length < count) {
     const previous = rows[rows.length - 1];
@@ -1012,16 +1038,31 @@ function applyVisibleCourseRulesToSchedule(schedule: Schedule, weekNumber: numbe
   };
 }
 
-function ensureRowCourses(row: ScheduleRow): ScheduleRow {
+function ensureRowCourses(row: ScheduleRow, newlyVisibleWeekdays: Weekday[] = []): ScheduleRow {
+  const newWeekdaySet = new Set(newlyVisibleWeekdays);
   return {
     ...row,
     courses: Object.fromEntries(
-      allScheduleDays.map((day) => [
-        day.id,
-        row.courses[day.id] ?? createEmptyCourseCell(`${row.id}-${day.id}`),
-      ]),
+      allScheduleDays.map((day) => {
+        const course = row.courses[day.id];
+
+        if (newWeekdaySet.has(day.id)) {
+          return [day.id, createEmptyCourseCell(course?.id ?? `${row.id}-${day.id}`)];
+        }
+
+        if (!course) {
+          return [day.id, createEmptyCourseCell(`${row.id}-${day.id}`)];
+        }
+
+        return [day.id, course];
+      }),
     ) as Record<Weekday, CourseCell>,
   };
+}
+
+function getAddedWorkdays(previousMode: WorkdayMode, nextMode: WorkdayMode): Weekday[] {
+  const previous = new Set(getWorkdayWeekdays(previousMode));
+  return getWorkdayWeekdays(nextMode).filter((weekday) => !previous.has(weekday));
 }
 
 function applyVisibleCourseForDate(course: CourseCell, date: string | undefined, weekNumber: number): CourseCell {
@@ -1630,7 +1671,7 @@ function createDraftForCard(
       color: period?.style?.color ?? "#ffffff",
       iconColor: period?.style?.iconColor ?? period?.style?.color ?? "#ffffff",
       fontFamily: period?.style?.fontFamily ?? base.fontFamily,
-      fontSize: period?.style?.fontSize ?? 12,
+      fontSize: clampPeriodFontSize(period?.style?.fontSize ?? 12),
       fontWeight: period?.style?.fontWeight ?? base.fontWeight,
       displayMode: "auto",
     };
@@ -1756,6 +1797,23 @@ function applyGlobalScheduleToSchedule(schedule: Schedule, draft: CardDraft): Sc
   };
 }
 
+function applyAxisTextColorToPeriods(schedule: Schedule, color: string): Schedule {
+  return {
+    ...schedule,
+    rows: schedule.rows.map((row) => ({
+      ...row,
+      period: {
+        ...row.period,
+        style: {
+          ...row.period.style,
+          color,
+          iconColor: color,
+        },
+      },
+    })),
+  };
+}
+
 function toPeriodCardStyle(draft: CardDraft): CardStyle {
   return {
     baseColor: draft.backgroundColor,
@@ -1763,10 +1821,18 @@ function toPeriodCardStyle(draft: CardDraft): CardStyle {
     color: draft.color,
     iconColor: draft.color,
     fontFamily: draft.fontFamily,
-    fontSize: draft.fontSize,
+    fontSize: clampPeriodFontSize(draft.fontSize),
     fontWeight: draft.fontWeight,
     displayMode: draft.displayMode,
   };
+}
+
+function clampPeriodFontSize(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 12;
+  }
+
+  return Math.max(8, Math.min(16, Math.round(value)));
 }
 
 function applyDraftToRow(
@@ -1860,7 +1926,7 @@ type CourseLocation = {
 };
 
 function findCourseLocation(schedule: Schedule, courseId: string): CourseLocation | null {
-  const weekdays = schedule.days.map((day) => day.id);
+  const weekdays = allScheduleDays.map((day) => day.id);
   for (const [rowIndex, row] of schedule.rows.entries()) {
     for (const [weekdayIndex, weekday] of weekdays.entries()) {
       const course = row.courses[weekday];
@@ -1880,6 +1946,8 @@ function findRightNeighbor(location: CourseLocation): CourseCell | null {
 
 function canMergeCourses(left: CourseCell, right: CourseCell): boolean {
   return (
+    !left.hidden &&
+    !right.hidden &&
     !left.mergedInto &&
     !right.mergedInto &&
     (right.colSpan ?? 1) === 1 &&

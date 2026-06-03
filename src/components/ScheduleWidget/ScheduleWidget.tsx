@@ -104,7 +104,11 @@ export function ScheduleWidget({
           <div className="timetable-period-column">
             {schedule.rows.map((row, index) => (
               <ColumnItem key={row.id} variant="period" showRowDivider={index < schedule.rows.length - 1}>
-                <PeriodCard period={row.period} onClick={() => onCardEdit({ type: "period", periodId: row.period.id })} />
+                <PeriodCard
+                  period={row.period}
+                  periodColumnStyle={periodColumnStyle}
+                  onClick={() => onCardEdit({ type: "period", periodId: row.period.id })}
+                />
               </ColumnItem>
             ))}
           </div>
@@ -190,7 +194,7 @@ function CourseCard({
       }}
     >
       <span>{course.title}</span>
-      {displayMetrics.isTwoLine && <small>{course.room}</small>}
+      <small>{course.room ?? ""}</small>
     </button>
   );
 }
@@ -222,9 +226,23 @@ function ColumnItem({
   );
 }
 
-function PeriodCard({ period, onClick }: { period: PeriodInfo; onClick: () => void }) {
+function PeriodCard({
+  period,
+  periodColumnStyle,
+  onClick,
+}: {
+  period: PeriodInfo;
+  periodColumnStyle: PeriodColumnStyle;
+  onClick: () => void;
+}) {
   return (
-    <button className="period-card" type="button" data-period-id={period.id} style={toCardCssVars(period.style)} onDoubleClick={onClick}>
+    <button
+      className="period-card"
+      type="button"
+      data-period-id={period.id}
+      style={toPeriodCardCssVars(period.style, periodColumnStyle)}
+      onDoubleClick={onClick}
+    >
       <strong>{period.label}</strong>
       <span>{period.time}</span>
     </button>
@@ -239,14 +257,11 @@ type CourseCardDisplayMetrics = {
 
 function getCourseCardDisplayMetrics(course: CourseCell): CourseCardDisplayMetrics {
   const baseFontSize = clampNumber(course.style?.fontSize ?? 14, 8, 16);
-  const hasSubtitle = Boolean(course.room?.trim());
-  const mode = course.style?.displayMode ?? "auto";
-  const isTwoLine = hasSubtitle && mode !== "oneLine";
-  const titleSize = isTwoLine ? clampNumber(baseFontSize, 8, 16) : clampNumber(baseFontSize + 1, 9, 17);
+  const titleSize = clampNumber(baseFontSize, 8, 16);
   const subtitleSize = clampNumber(roundToHalf(baseFontSize * 0.68), 7, 11);
 
   return {
-    isTwoLine,
+    isTwoLine: true,
     titleSize,
     subtitleSize,
   };
@@ -281,4 +296,48 @@ function toCardCssVars(style?: CardStyle, courseMetrics?: CourseCardDisplayMetri
     "--course-card-title-size": courseMetrics ? `${courseMetrics.titleSize}px` : undefined,
     "--course-card-subtitle-size": courseMetrics ? `${courseMetrics.subtitleSize}px` : undefined,
   } as CSSProperties;
+}
+
+function toPeriodCardCssVars(style: CardStyle | undefined, periodColumnStyle: PeriodColumnStyle): CSSProperties {
+  const cssVars = toCardCssVars(style) as CSSProperties & Record<string, string | undefined>;
+  const baseColor = style?.baseColor ?? style?.backgroundColor;
+  cssVars["--card-font-size"] = style?.fontSize ? `${clampNumber(style.fontSize, 8, 16)}px` : undefined;
+
+  if (!baseColor) {
+    return cssVars;
+  }
+
+  if (periodColumnStyle === "soft") {
+    cssVars["--card-bg"] = buildSoftPeriodBackground(baseColor);
+  }
+
+  if (periodColumnStyle === "solid") {
+    cssVars["--card-bg"] = baseColor;
+  }
+
+  return cssVars;
+}
+
+function buildSoftPeriodBackground(value: string): string {
+  const rgb = parseHexColor(value);
+  if (!rgb) {
+    return value;
+  }
+
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.18)`;
+}
+
+function parseHexColor(value: string): { r: number; g: number; b: number } | null {
+  const normalized = value.trim().replace(/^#/, "");
+  const expanded = normalized.length === 3 ? normalized.split("").map((item) => item + item).join("") : normalized;
+  const match = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(expanded);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    r: Number.parseInt(match[1], 16),
+    g: Number.parseInt(match[2], 16),
+    b: Number.parseInt(match[3], 16),
+  };
 }

@@ -30,7 +30,7 @@ type CardSettingsWindowProps = {
 type CardSettingsTab = "course" | "temporary";
 
 const courseFontSizeOptions = Array.from({ length: 9 }, (_, index) => index + 8);
-const periodFontSizeOptions = Array.from({ length: 15 }, (_, index) => index + 10);
+const periodFontSizeOptions = Array.from({ length: 9 }, (_, index) => index + 8);
 const todayIso = new Date().toISOString().slice(0, 10);
 
 export function CardSettingsWindow({
@@ -145,22 +145,22 @@ function CourseConfigurationTab({
           <div className="basic-info-inline">
             <label className="basic-info-field">
               <span>课程名</span>
-              <input
+              <LimitedTextInput
                 className="card-settings-input"
                 value={draft.title}
                 maxLength={4}
                 placeholder="社团"
-                onChange={(event) => onDraftChange({ ...draft, title: limitCardText(event.currentTarget.value) })}
+                onCommit={(title) => onDraftChange({ ...draft, title })}
               />
             </label>
             <label className="basic-info-field">
               <span>辅助信息</span>
-              <input
+              <LimitedTextInput
                 className="card-settings-input"
                 value={draft.secondary}
-                maxLength={4}
+                maxLength={5}
                 placeholder="活动室"
-                onChange={(event) => onDraftChange({ ...draft, secondary: limitCardText(event.currentTarget.value) })}
+                onCommit={(secondary) => onDraftChange({ ...draft, secondary })}
               />
             </label>
           </div>
@@ -328,7 +328,7 @@ function PeriodConfigurationTab({
         <div className="period-primary-grid">
           <label className="period-settings-field">
             <span>课次</span>
-            <input className="card-settings-input period-name-input" value={draft.title} maxLength={3} placeholder="第5节" onChange={(event) => onDraftChange({ ...draft, title: event.currentTarget.value.slice(0, 3) })} />
+            <LimitedTextInput className="card-settings-input period-name-input" value={draft.title} maxLength={3} placeholder="第5节" onCommit={(title) => onDraftChange({ ...draft, title })} />
           </label>
           <TimeRangeField value={draft.secondary} onChange={(secondary) => onDraftChange({ ...draft, secondary })} />
         </div>
@@ -347,7 +347,7 @@ function PeriodConfigurationTab({
           </label>
           <label className="period-settings-field">
             <span>字号</span>
-            <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 10, 24) })}>
+            <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 8, 16) })}>
               {periodFontSizeOptions.map((size) => (
                 <option key={size} value={size}>
                   {size}
@@ -398,7 +398,7 @@ function PeriodConfigurationTab({
           </label>
           <label>
             <span>字号</span>
-            <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 10, 24) })}>
+            <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 8, 16) })}>
               {periodFontSizeOptions.map((size) => (
                 <option key={size} value={size}>
                   {size}
@@ -840,6 +840,70 @@ function SettingsCard({ title, action, className, children }: { title?: string; 
   );
 }
 
+function LimitedTextInput({
+  value,
+  maxLength,
+  className,
+  placeholder,
+  disabled = false,
+  onCommit,
+}: {
+  value: string;
+  maxLength: number;
+  className?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  onCommit: (value: string) => void;
+}) {
+  const [localValue, setLocalValue] = useState(value);
+  const composingRef = useRef(false);
+
+  useEffect(() => {
+    if (!composingRef.current) {
+      setLocalValue(value);
+    }
+  }, [value]);
+
+  const commit = (nextValue: string) => {
+    const normalized = limitTextByCharacters(nextValue, maxLength);
+    setLocalValue(normalized);
+    onCommit(normalized);
+  };
+
+  return (
+    <input
+      className={className}
+      value={localValue}
+      placeholder={placeholder}
+      disabled={disabled}
+      onCompositionStart={() => {
+        composingRef.current = true;
+      }}
+      onCompositionEnd={(event) => {
+        composingRef.current = false;
+        commit(event.currentTarget.value);
+      }}
+      onChange={(event) => {
+        const nextValue = event.currentTarget.value;
+        const isComposing = composingRef.current || (event.nativeEvent as InputEvent).isComposing;
+        if (isComposing) {
+          setLocalValue(nextValue);
+          return;
+        }
+
+        commit(nextValue);
+      }}
+      onBlur={(event) => {
+        if (composingRef.current) {
+          composingRef.current = false;
+        }
+
+        commit(event.currentTarget.value);
+      }}
+    />
+  );
+}
+
 function CompactField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="card-settings-field">
@@ -1076,5 +1140,9 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function limitCardText(value: string): string {
-  return value.slice(0, 4);
+  return limitTextByCharacters(value, 4);
+}
+
+function limitTextByCharacters(value: string, maxLength: number): string {
+  return Array.from(value).slice(0, maxLength).join("");
 }

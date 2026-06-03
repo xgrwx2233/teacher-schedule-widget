@@ -25,6 +25,7 @@ import {
 
 const MOVE_SUPPRESSION_MS = 300;
 const FOCUS_LOSS_CHECK_MS = 120;
+const LOCAL_DRAFT_SYNC_GUARD_MS = 900;
 
 export function CardSettingsWindowHost() {
   const currentWindow = useMemo(() => getCurrentWindow(), []);
@@ -37,11 +38,22 @@ export function CardSettingsWindowHost() {
   const isClosingRef = useRef(false);
   const lastMovedAtRef = useRef(0);
   const focusLossTimerRef = useRef<number | null>(null);
+  const selectedCardRef = useRef<SelectedCard | null>(null);
+  const localDraftSyncGuardUntilRef = useRef(0);
+
+  useEffect(() => {
+    selectedCardRef.current = selectedCard;
+  }, [selectedCard]);
 
   useEffect(() => {
     const unlistenState = listen<CardSettingsWindowStatePayload>(CARD_SETTINGS_WINDOW_STATE_EVENT, (event) => {
+      const isCurrentCard = isSameSelectedCard(selectedCardRef.current, event.payload.selectedCard);
+      const shouldKeepLocalDraft = isCurrentCard && Date.now() < localDraftSyncGuardUntilRef.current;
+
       setSelectedCard(event.payload.selectedCard);
-      setDraft(event.payload.draft);
+      if (!shouldKeepLocalDraft) {
+        setDraft(event.payload.draft);
+      }
       setMergeState(event.payload.mergeState);
       setTerm(event.payload.term);
       setTemporaryChanges(event.payload.temporaryChanges ?? []);
@@ -67,6 +79,7 @@ export function CardSettingsWindowHost() {
     }
 
     setDraft(nextDraft);
+    localDraftSyncGuardUntilRef.current = Date.now() + LOCAL_DRAFT_SYNC_GUARD_MS;
     void emitTo<CardSettingsWindowUpdatePayload>(WIDGET_WINDOW_LABEL, CARD_SETTINGS_WINDOW_UPDATE_EVENT, {
       windowLabel: currentWindow.label,
       selectedCard,
@@ -220,4 +233,12 @@ export function CardSettingsWindowHost() {
       />
     </main>
   );
+}
+
+function isSameSelectedCard(left: SelectedCard | null, right: SelectedCard | null): boolean {
+  if (!left || !right || left.type !== right.type) {
+    return false;
+  }
+
+  return left.type === "course" ? right.type === "course" && left.courseId === right.courseId : right.type === "period" && left.periodId === right.periodId;
 }
