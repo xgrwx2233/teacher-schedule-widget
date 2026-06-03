@@ -21,11 +21,13 @@ import {
   type CardSettingsWindowActionPayload,
   type CardSettingsWindowStatePayload,
   type CardSettingsWindowUpdatePayload,
+  type CardSettingsTitleContext,
 } from "../features/settings/windowEvents";
 
 const MOVE_SUPPRESSION_MS = 300;
 const FOCUS_LOSS_CHECK_MS = 120;
 const LOCAL_DRAFT_SYNC_GUARD_MS = 900;
+type CardSettingsTab = "course" | "temporary";
 
 export function CardSettingsWindowHost() {
   const currentWindow = useMemo(() => getCurrentWindow(), []);
@@ -35,6 +37,9 @@ export function CardSettingsWindowHost() {
   const [mergeState, setMergeState] = useState<CourseCardMergeState>({ canMergeRight: false, canSplit: false });
   const [temporaryChanges, setTemporaryChanges] = useState<TemporaryChangeDraft[]>([]);
   const [activeTemporaryChangeId, setActiveTemporaryChangeId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<CardSettingsTab>("course");
+  const [titleContext, setTitleContext] = useState<CardSettingsTitleContext | undefined>(undefined);
+  const [temporaryDraftTitle, setTemporaryDraftTitle] = useState("");
   const isClosingRef = useRef(false);
   const lastMovedAtRef = useRef(0);
   const focusLossTimerRef = useRef<number | null>(null);
@@ -56,8 +61,15 @@ export function CardSettingsWindowHost() {
       }
       setMergeState(event.payload.mergeState);
       setTerm(event.payload.term);
+      setTitleContext(event.payload.titleContext);
       setTemporaryChanges(event.payload.temporaryChanges ?? []);
-      setActiveTemporaryChangeId(event.payload.activeTemporaryChangeId ?? event.payload.temporaryChanges?.[0]?.id ?? null);
+      setActiveTemporaryChangeId((currentActiveId) =>
+        event.payload.activeTemporaryChangeId ?? (isCurrentCard ? currentActiveId : event.payload.temporaryChanges?.[0]?.id ?? null),
+      );
+      if (!isCurrentCard) {
+        setActiveTab("course");
+        setTemporaryDraftTitle("");
+      }
     });
 
     void emitTo(WIDGET_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT, {
@@ -70,8 +82,18 @@ export function CardSettingsWindowHost() {
   }, [currentWindow.label]);
 
   useEffect(() => {
-    void currentWindow.setTitle(selectedCard?.type === "period" ? "课次卡片设置" : "课程卡片设置");
-  }, [currentWindow, selectedCard]);
+    if (selectedCard?.type === "period") {
+      void currentWindow.setTitle("课次卡片设置");
+      return;
+    }
+
+    void currentWindow.setTitle(buildCourseSettingsTitle(activeTab, titleContext, draft, temporaryChanges, activeTemporaryChangeId, temporaryDraftTitle));
+  }, [activeTab, activeTemporaryChangeId, currentWindow, draft, selectedCard, temporaryChanges, temporaryDraftTitle, titleContext]);
+
+  const defaultTemporaryDate = useMemo(
+    () => resolveTitleContextDate(titleContext, term),
+    [term, titleContext],
+  );
 
   const emitUpdate = (nextDraft: CardDraft) => {
     if (!selectedCard) {
@@ -215,11 +237,15 @@ export function CardSettingsWindowHost() {
     <main className="dialog-window-root">
       <CardSettingsWindow
         selectedCard={selectedCard}
+        activeTab={activeTab}
         draft={draft}
         mergeState={mergeState}
         term={term}
+        titleContext={titleContext}
+        defaultTemporaryDate={defaultTemporaryDate}
         temporaryChanges={temporaryChanges}
         activeTemporaryChangeId={activeTemporaryChangeId}
+        onActiveTabChange={setActiveTab}
         onDraftChange={emitUpdate}
         onMergeRight={() => emitAction("merge-right")}
         onSplit={() => emitAction("split")}
@@ -230,9 +256,89 @@ export function CardSettingsWindowHost() {
         onTemporaryChangeSelect={setActiveTemporaryChangeId}
         onTemporaryChangeUpdate={updateTemporaryChange}
         onTemporaryChangeRemove={removeTemporaryChange}
+        onTemporaryDraftTitleChange={setTemporaryDraftTitle}
       />
     </main>
   );
+}
+
+function buildCourseSettingsTitle(
+  activeTab: CardSettingsTab,
+  titleContext: CardSettingsTitleContext | undefined,
+  draft: CardDraft,
+  temporaryChanges: TemporaryChangeDraft[],
+  activeTemporaryChangeId: string | null,
+  temporaryDraftTitle: string,
+): string {
+  const courseTitle = activeTab === "temporary"
+    ? getTemporaryTitleForTitlebar(temporaryChanges, activeTemporaryChangeId, temporaryDraftTitle)
+    : draft.title.trim() || "未命名课程";
+  const context = [
+    titleContext?.weekdayLabel,
+    titleContext?.periodLabel,
+    courseTitle,
+  ].filter(Boolean).join(" ");
+
+  return activeTab === "temporary"
+    ? ["课程设置", "｜", "〔临〕", context || "临时改动"].join(" ")
+    : ["课程设置", "｜", context || "未命名课程"].join(" ");
+}
+
+function getTemporaryTitleForTitlebar(
+  changes: TemporaryChangeDraft[],
+  activeChangeId: string | null,
+  draftTitle: string,
+): string {
+  const activeChange = changes.find((change) => change.id === activeChangeId);
+  if (activeChange) {
+    return getTemporaryChangeTitle(activeChange);
+  }
+
+  const effectiveChange = changes.find(isEffectiveTemporaryChange);
+  if (effectiveChange) {
+    return getTemporaryChangeTitle(effectiveChange);
+  }
+
+  return draftTitle.trim() || "临时改动";
+}
+
+function getTemporaryChangeTitle(change: TemporaryChangeDraft): string {
+  return (change.title || change.replaceTitle || "").trim() || "临时改动";
+}
+
+function isEffectiveTemporaryChange(change: TemporaryChangeDraft): boolean {
+  const today = formatLocalIsoDate(new Date());
+  return change.dates.some((date) => date >= today);
+}
+
+function formatLocalIsoDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function resolveTitleContextDate(
+  titleContext: CardSettingsTitleContext | undefined,
+  term: TermSettings,
+): string | undefined {
+  if (titleContext?.date) {
+    return titleContext.date;
+  }
+
+  const match = /^(\d{1,2})\/(\d{1,2})$/.exec(titleContext?.dateLabel ?? "");
+  if (!match) {
+    return undefined;
+  }
+
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  if (!Number.isInteger(month) || !Number.isInteger(day)) {
+    return undefined;
+  }
+
+  const startYear = Number(term.startDate.slice(0, 4));
+  const endYear = Number(term.endDate.slice(0, 4));
+  const startMonth = Number(term.startDate.slice(5, 7));
+  const year = endYear !== startYear && month < startMonth ? endYear : startYear;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function isSameSelectedCard(left: SelectedCard | null, right: SelectedCard | null): boolean {

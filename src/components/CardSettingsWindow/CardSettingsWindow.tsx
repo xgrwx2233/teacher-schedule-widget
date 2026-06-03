@@ -7,14 +7,19 @@ import type {
   TemporaryChangeDraft,
 } from "../../features/settings/settingsTypes";
 import { courseCardPresetColors } from "../../features/settings/settingsTypes";
+import type { CardSettingsTitleContext } from "../../features/settings/windowEvents";
 
 type CardSettingsWindowProps = {
   selectedCard: SelectedCard | null;
+  activeTab: CardSettingsTab;
   draft: CardDraft;
   mergeState: CourseCardMergeState;
   term: { startDate: string; endDate: string };
+  titleContext?: CardSettingsTitleContext;
+  defaultTemporaryDate?: string;
   temporaryChanges: TemporaryChangeDraft[];
   activeTemporaryChangeId: string | null;
+  onActiveTabChange: (tab: CardSettingsTab) => void;
   onDraftChange: (draft: CardDraft) => void;
   onMergeRight: () => void;
   onSplit: () => void;
@@ -25,6 +30,7 @@ type CardSettingsWindowProps = {
   onTemporaryChangeSelect: (id: string | null) => void;
   onTemporaryChangeUpdate: (change: TemporaryChangeDraft) => void;
   onTemporaryChangeRemove: (id: string) => void;
+  onTemporaryDraftTitleChange: (title: string) => void;
 };
 
 type CardSettingsTab = "course" | "temporary";
@@ -35,11 +41,15 @@ const todayIso = new Date().toISOString().slice(0, 10);
 
 export function CardSettingsWindow({
   selectedCard,
+  activeTab,
   draft,
   mergeState,
   term,
+  titleContext,
+  defaultTemporaryDate,
   temporaryChanges,
   activeTemporaryChangeId,
+  onActiveTabChange,
   onDraftChange,
   onMergeRight,
   onSplit,
@@ -50,19 +60,21 @@ export function CardSettingsWindow({
   onTemporaryChangeSelect,
   onTemporaryChangeUpdate,
   onTemporaryChangeRemove,
+  onTemporaryDraftTitleChange,
 }: CardSettingsWindowProps) {
-  const [activeTab, setActiveTab] = useState<CardSettingsTab>("course");
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const temporaryTabInitializedCardRef = useRef<string | null>(null);
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [activeTab, selectedCard]);
 
   useEffect(() => {
+    temporaryTabInitializedCardRef.current = null;
     if (selectedCard?.type === "period") {
-      setActiveTab("course");
+      onActiveTabChange("course");
     }
-  }, [selectedCard]);
+  }, [onActiveTabChange, selectedCard]);
 
   if (!selectedCard) {
     return null;
@@ -80,14 +92,23 @@ export function CardSettingsWindow({
     );
   }
 
+  const openTemporaryTab = () => {
+    if (temporaryTabInitializedCardRef.current !== selectedCard.courseId) {
+      temporaryTabInitializedCardRef.current = selectedCard.courseId;
+      onTemporaryChangeSelect(null);
+    }
+
+    onActiveTabChange("temporary");
+  };
+
   return (
     <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="课程卡片设置">
       <section className="card-settings-window">
         <nav className="card-settings-tabs" aria-label="卡片设置分类">
-          <button type="button" className={activeTab === "course" ? "is-active" : ""} onClick={() => setActiveTab("course")}>
+          <button type="button" className={activeTab === "course" ? "is-active" : ""} onClick={() => onActiveTabChange("course")}>
             课程配置
           </button>
-          <button type="button" className={activeTab === "temporary" ? "is-active" : ""} onClick={() => setActiveTab("temporary")}>
+          <button type="button" className={activeTab === "temporary" ? "is-active" : ""} onClick={openTemporaryTab}>
             临时改动
           </button>
         </nav>
@@ -101,11 +122,16 @@ export function CardSettingsWindow({
             )
           ) : (
             <TemporaryChangesTab
+              key={`${selectedCard.courseId}:${activeTemporaryChangeId ?? "new"}`}
               changes={temporaryChanges}
               activeChangeId={activeTemporaryChangeId}
+              term={term}
+              titleContext={titleContext}
+              defaultDate={defaultTemporaryDate}
               onSelectChange={onTemporaryChangeSelect}
               onUpdateChange={onTemporaryChangeUpdate}
               onRemoveChange={onTemporaryChangeRemove}
+              onEditorTitleChange={onTemporaryDraftTitleChange}
             />
           )}
         </div>
@@ -467,27 +493,67 @@ function normalizeTimeValue(value: string): string {
 function TemporaryChangesTab({
   changes,
   activeChangeId,
+  term,
+  titleContext,
+  defaultDate,
   onSelectChange,
   onUpdateChange,
   onRemoveChange,
+  onEditorTitleChange,
 }: {
   changes: TemporaryChangeDraft[];
   activeChangeId: string | null;
+  term: { startDate: string; endDate: string };
+  titleContext?: CardSettingsTitleContext;
+  defaultDate?: string;
   onSelectChange: (id: string | null) => void;
   onUpdateChange: (change: TemporaryChangeDraft) => void;
   onRemoveChange: (id: string) => void;
+  onEditorTitleChange: (title: string) => void;
 }) {
   const sortedChanges = useMemo(() => [...changes].sort(sortTemporaryChangesByUpdatedAt), [changes]);
   const activeChange = sortedChanges.find((change) => change.id === activeChangeId) ?? null;
-  const [editor, setEditor] = useState<TemporaryChangeDraft>(() => createEditableTemporaryChange(activeChange));
+  const resolvedDefaultDate = useMemo(
+    () => resolveDefaultTemporaryDate(defaultDate, titleContext, term),
+    [defaultDate, term, titleContext],
+  );
+  const [editor, setEditor] = useState<TemporaryChangeDraft>(() => createEditableTemporaryChange(activeChange, resolvedDefaultDate));
+  const defaultDateSeededRef = useRef(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [replaceConfirmChange, setReplaceConfirmChange] = useState<TemporaryChangeDraft | null>(null);
 
   useEffect(() => {
-    setEditor(createEditableTemporaryChange(activeChange));
+    setEditor(createEditableTemporaryChange(activeChange, activeChange ? undefined : resolvedDefaultDate));
+    if (activeChange) {
+      defaultDateSeededRef.current = true;
+    } else {
+      defaultDateSeededRef.current = Boolean(resolvedDefaultDate);
+    }
     setFeedback("");
-  }, [activeChange]);
+  }, [activeChange, resolvedDefaultDate]);
+
+  useEffect(() => {
+    if (activeChange || !resolvedDefaultDate || defaultDateSeededRef.current) {
+      return;
+    }
+
+    setEditor((current) => {
+      if (current.dates.length > 0) {
+        return current;
+      }
+
+      return {
+        ...current,
+        dates: [resolvedDefaultDate],
+      };
+    });
+    defaultDateSeededRef.current = true;
+  }, [activeChange, resolvedDefaultDate]);
+
+  useEffect(() => {
+    onEditorTitleChange(editor.title);
+  }, [editor.title, onEditorTitleChange]);
 
   const updateEditor = (patch: Partial<TemporaryChangeDraft>) => {
     setEditor((current) => ({
@@ -569,6 +635,30 @@ function TemporaryChangesTab({
 
   return (
     <div className="temporary-config-stack">
+      <SettingsCard
+        title="改动日期"
+        action={
+          <button type="button" className="card-settings-secondary temporary-pick-date" onClick={() => setCalendarOpen(true)}>
+            选择日期
+          </button>
+        }
+      >
+        <div className="date-chip-row">
+          {sortDates(editor.dates).length === 0 ? (
+            <span className="temporary-date-empty">暂未选择日期</span>
+          ) : (
+            sortDates(editor.dates).map((date) => (
+              <span className="date-chip" key={date}>
+                {formatDateChip(date)}
+                <button type="button" aria-label={`删除 ${date}`} onClick={() => removeDate(date)}>
+                  ×
+                </button>
+              </span>
+            ))
+          )}
+        </div>
+      </SettingsCard>
+
       <SettingsCard>
         <div className="basic-info-grid">
           <div className="basic-info-inline">
@@ -671,32 +761,8 @@ function TemporaryChangesTab({
         </details>
       </div>
 
-      <SettingsCard
-        title="改动日期"
-        action={
-          <button type="button" className="card-settings-secondary temporary-pick-date" onClick={() => setCalendarOpen(true)}>
-            选择日期
-          </button>
-        }
-      >
-        <div className="date-chip-row">
-          {sortDates(editor.dates).length === 0 ? (
-            <span className="temporary-date-empty">暂未选择日期</span>
-          ) : (
-            sortDates(editor.dates).map((date) => (
-              <span className="date-chip" key={date}>
-                {formatDateChip(date)}
-                <button type="button" aria-label={`删除 ${date}`} onClick={() => removeDate(date)}>
-                  ×
-                </button>
-              </span>
-            ))
-          )}
-        </div>
-      </SettingsCard>
-
       <button type="button" className="temporary-save-button" onClick={() => saveChange(false)}>
-        保存本次临时改动
+        确认并保存
       </button>
       {feedback ? <div className="temporary-feedback">{feedback}</div> : null}
 
@@ -998,12 +1064,12 @@ function ColorPickerRow({ value, onChange }: { value: string; onChange: (value: 
   );
 }
 
-function createEditableTemporaryChange(change: TemporaryChangeDraft | null): TemporaryChangeDraft {
+function createEditableTemporaryChange(change: TemporaryChangeDraft | null, defaultDate?: string): TemporaryChangeDraft {
   const now = new Date().toISOString();
   return {
     id: change?.id ?? `temporary-change-${now}-${Math.random().toString(16).slice(2, 8)}`,
     type: change?.type ?? "cancel",
-    dates: [...(change?.dates ?? [])],
+    dates: [...(change?.dates ?? (defaultDate ? [defaultDate] : []))],
     title: change?.title ?? change?.replaceTitle ?? "",
     subtitle: change?.subtitle ?? change?.replaceSecondary ?? "",
     color: change?.color ?? change?.replaceColor ?? "#4f46e5",
@@ -1019,6 +1085,41 @@ function createEditableTemporaryChange(change: TemporaryChangeDraft | null): Tem
     replaceSecondary: change?.replaceSecondary ?? "",
     replaceColor: change?.replaceColor ?? change?.color ?? "#4f46e5",
   };
+}
+
+function resolveDefaultTemporaryDate(
+  defaultDate: string | undefined,
+  titleContext: CardSettingsTitleContext | undefined,
+  term: { startDate: string; endDate: string },
+): string | undefined {
+  if (isIsoDate(defaultDate)) {
+    return defaultDate;
+  }
+
+  if (isIsoDate(titleContext?.date)) {
+    return titleContext?.date;
+  }
+
+  const match = /^(\d{1,2})\/(\d{1,2})$/.exec(titleContext?.dateLabel ?? "");
+  if (!match) {
+    return undefined;
+  }
+
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  if (!Number.isInteger(month) || !Number.isInteger(day)) {
+    return undefined;
+  }
+
+  const startYear = Number(term.startDate.slice(0, 4));
+  const endYear = Number(term.endDate.slice(0, 4));
+  const startMonth = Number(term.startDate.slice(5, 7));
+  const year = endYear !== startYear && month < startMonth ? endYear : startYear;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function isIsoDate(value: string | undefined): value is string {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
 
 function normalizeTemporaryEditor(change: TemporaryChangeDraft): TemporaryChangeDraft {

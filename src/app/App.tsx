@@ -63,6 +63,7 @@ import {
   type CardSettingsWindowActionPayload,
   type CardSettingsWindowUpdatePayload,
   type CardSettingsWindowStateRequestPayload,
+  type CardSettingsTitleContext,
   type SettingsWindowStatePayload,
   type SettingsWindowStateRequestPayload,
   type SettingsWindowUpdatePayload,
@@ -150,6 +151,7 @@ export function App() {
   const settingsSectionRef = useRef(settingsSection);
   const selectedCardRef = useRef<SelectedCard | null>(selectedCard);
   const cardDraftRef = useRef(cardDraft);
+  const cardTitleContextRef = useRef<CardSettingsTitleContext | undefined>(undefined);
 
   const activeWidget = widgetRegistry.widgets.find((widget) => widget.id === widgetRegistry.activeWidgetId);
   const activeSkin = skinThemes.find((theme) => theme.id === activeSkinId) ?? skinThemes[0];
@@ -397,6 +399,7 @@ export function App() {
   const closeCardSettings = useCallback(async () => {
     cardSettingsWindowOpenRef.current = false;
     selectedCardRef.current = null;
+    cardTitleContextRef.current = undefined;
     setSelectedCard(null);
     setActiveCellId(null);
     await invoke("clear_proxy_active_card");
@@ -414,9 +417,11 @@ export function App() {
     scheduleRef.current = currentSchedule;
     setSchedule(currentSchedule);
     const draft = createDraftForCard(currentSchedule, card, settingsRef.current.term);
+    const titleContext = createCardSettingsTitleContext(currentSchedule, card, visibleDays);
     const course = card.type === "course" ? findCourse(currentSchedule, card.courseId) : undefined;
     const temporaryChanges = course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
     selectedCardRef.current = card;
+    cardTitleContextRef.current = titleContext;
     cardDraftRef.current = draft;
     setSelectedCard(card);
     setCardDraft(draft);
@@ -425,7 +430,7 @@ export function App() {
 
     try {
       await invoke("open_card_settings_window", {
-        title: card.type === "period" ? "课次卡片设置" : "课程卡片设置",
+        title: buildInitialCardSettingsWindowTitle(card, titleContext, draft),
       });
       console.info("open card settings window invoked");
       cardSettingsWindowOpenRef.current = true;
@@ -434,13 +439,14 @@ export function App() {
         draft,
         mergeState: getCourseCardMergeState(currentSchedule, card),
         term: settingsRef.current.term,
+        titleContext,
         temporaryChanges,
         activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
       });
     } catch (error) {
       console.error("failed to open card settings window", error);
     }
-  }, [closeCardSettings]);
+  }, [closeCardSettings, visibleDays]);
 
   useEffect(() => {
     const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
@@ -483,7 +489,7 @@ export function App() {
           const nextDraft = createDraftForCard(nextSchedule, currentCard, nextSettings.term);
           cardDraftRef.current = nextDraft;
           setCardDraft(nextDraft);
-          void emitCardSettingsState(CARD_SETTINGS_WINDOW_LABEL, currentCard, nextDraft, nextSchedule, nextSettings.term);
+          void emitCardSettingsState(CARD_SETTINGS_WINDOW_LABEL, currentCard, nextDraft, nextSchedule, nextSettings.term, cardTitleContextRef.current);
         }
       }
 
@@ -561,7 +567,7 @@ export function App() {
           event.payload.activeTemporaryChangeId,
         );
         scheduleRef.current = nextSchedule;
-        void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, event.payload.draft, nextSchedule, settingsRef.current.term);
+        void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, event.payload.draft, nextSchedule, settingsRef.current.term, cardTitleContextRef.current);
         return nextSchedule;
       });
     });
@@ -578,7 +584,7 @@ export function App() {
       cardDraftRef.current = nextDraft;
       setSchedule(nextSchedule);
       setCardDraft(nextDraft);
-      void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, nextDraft, nextSchedule, settingsRef.current.term);
+      void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, nextDraft, nextSchedule, settingsRef.current.term, cardTitleContextRef.current);
     });
 
     const unlistenRequest = listen<CardSettingsWindowStateRequestPayload>(CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT, (event) => {
@@ -591,10 +597,11 @@ export function App() {
 
       void emitTo<CardSettingsWindowStatePayload>(event.payload.windowLabel, CARD_SETTINGS_WINDOW_STATE_EVENT, {
         selectedCard: currentCard,
-        draft: cardDraftRef.current,
-        mergeState: getCourseCardMergeState(scheduleRef.current, currentCard),
-        term: settingsRef.current.term,
-        temporaryChanges: currentCourse?.temporaryChanges?.map((change) => ({
+          draft: cardDraftRef.current,
+          mergeState: getCourseCardMergeState(scheduleRef.current, currentCard),
+          term: settingsRef.current.term,
+          titleContext: cardTitleContextRef.current,
+          temporaryChanges: currentCourse?.temporaryChanges?.map((change) => ({
           id: change.id,
           type: change.type,
           dates: change.dates,
@@ -1631,6 +1638,48 @@ function hexToRgbParts(value: string): string {
   return `${parseInt(match[1], 16)} ${parseInt(match[2], 16)} ${parseInt(match[3], 16)}`;
 }
 
+function createCardSettingsTitleContext(
+  schedule: Schedule,
+  card: SelectedCard,
+  visibleDays: Schedule["days"],
+): CardSettingsTitleContext | undefined {
+  if (card.type !== "course") {
+    return undefined;
+  }
+
+  const location = findCourseLocation(schedule, card.courseId);
+  if (!location) {
+    return undefined;
+  }
+
+  const day = visibleDays.find((item) => item.id === location.weekday) ?? allScheduleDays.find((item) => item.id === location.weekday);
+  return {
+    date: day?.date,
+    dateLabel: day?.dateLabel,
+    weekdayLabel: day?.label,
+    periodLabel: location.row.period.label,
+  };
+}
+
+function buildInitialCardSettingsWindowTitle(
+  card: SelectedCard,
+  titleContext: CardSettingsTitleContext | undefined,
+  draft: CardDraft,
+): string {
+  if (card.type === "period") {
+    return "课次卡片设置";
+  }
+
+  const courseTitle = draft.title.trim() || "未命名课程";
+  const context = [
+    titleContext?.weekdayLabel,
+    titleContext?.periodLabel,
+    courseTitle,
+  ].filter(Boolean).join(" ");
+
+  return ["课程设置", "｜", context || "未命名课程"].join(" ");
+}
+
 function createDraftForCard(
   schedule: Schedule,
   card: SelectedCard,
@@ -1696,7 +1745,14 @@ function applyCardDraft(
   return selectedCard.type === "course" ? autoSplitInconsistentMergedCourse(nextSchedule, selectedCard.courseId) : nextSchedule;
 }
 
-function emitCardSettingsState(windowLabel: string, selectedCard: SelectedCard, draft: CardDraft, schedule: Schedule, term: WidgetSettingsState["term"]) {
+function emitCardSettingsState(
+  windowLabel: string,
+  selectedCard: SelectedCard,
+  draft: CardDraft,
+  schedule: Schedule,
+  term: WidgetSettingsState["term"],
+  titleContext?: CardSettingsTitleContext,
+) {
   const course = selectedCard.type === "course" ? findCourse(schedule, selectedCard.courseId) : undefined;
   const temporaryChanges = course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
   return emitTo<CardSettingsWindowStatePayload>(windowLabel, CARD_SETTINGS_WINDOW_STATE_EVENT, {
@@ -1704,6 +1760,7 @@ function emitCardSettingsState(windowLabel: string, selectedCard: SelectedCard, 
     draft,
     mergeState: getCourseCardMergeState(schedule, selectedCard),
     term,
+    titleContext,
     temporaryChanges,
     activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
   });

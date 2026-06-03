@@ -82,8 +82,16 @@ export type CardSettingsWindowStatePayload = {
   draft: CardDraft;
   mergeState: CourseCardMergeState;
   term: WidgetSettingsState["term"];
+  titleContext?: CardSettingsTitleContext;
   temporaryChanges?: TemporaryChangeDraft[];
   activeTemporaryChangeId?: string | null;
+};
+
+export type CardSettingsTitleContext = {
+  date?: string;
+  dateLabel?: string;
+  weekdayLabel?: string;
+  periodLabel?: string;
 };
 
 export type CardSettingsWindowUpdatePayload = {
