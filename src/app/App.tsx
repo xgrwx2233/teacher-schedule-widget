@@ -1,4 +1,4 @@
-﻿import { invoke } from "@tauri-apps/api/core";
+﻿import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -83,6 +83,7 @@ import type { ProxyWidgetHit } from "../features/windowMode/types";
 type DesktopWallpaperInfo = {
   path: string | null;
   url: string | null;
+  signature: DesktopWallpaperSignature;
   monitorLeft: number;
   monitorTop: number;
   monitorWidth: number;
@@ -91,6 +92,21 @@ type DesktopWallpaperInfo = {
   windowTop: number;
   windowWidth: number;
   windowHeight: number;
+  wallpaperLeft: number;
+  wallpaperTop: number;
+  wallpaperWidth: number;
+  wallpaperHeight: number;
+};
+
+type DesktopWallpaperSignature = {
+  path: string | null;
+  fileSize: number | null;
+  modifiedMs: number | null;
+  wallpaperPosition: number;
+  monitorLeft: number;
+  monitorTop: number;
+  monitorWidth: number;
+  monitorHeight: number;
   wallpaperLeft: number;
   wallpaperTop: number;
   wallpaperWidth: number;
@@ -116,6 +132,7 @@ const defaultSettings: WidgetSettingsState = {
 const DEFAULT_COURSE_ROW_HEIGHT = 66;
 const SCHEDULE_STORAGE_KEY = "teacher-schedule-widget:schedule";
 const DESKTOP_WALLPAPER_CHANGED_EVENT = "desktop-wallpaper-changed";
+const WALLPAPER_SIGNATURE_CHECK_MS = 5_000;
 
 export function App() {
   const appWindow = useMemo(() => getCurrentWindow(), []);
@@ -144,6 +161,7 @@ export function App() {
   const [activeSkinId, setActiveSkinId] = useState("midnight-coral");
   const [widgetRegistry, setWidgetRegistry] = useState(defaultWidgetRegistry);
   const [wallpaperInfo, setWallpaperInfo] = useState<DesktopWallpaperInfo | null>(null);
+  const [wallpaperVersion, setWallpaperVersion] = useState(0);
   const settingsWindowOpenRef = useRef(false);
   const cardSettingsWindowOpenRef = useRef(false);
   const settingsRef = useRef(settings);
@@ -154,6 +172,7 @@ export function App() {
   const cardDraftRef = useRef(cardDraft);
   const cardTitleContextRef = useRef<CardSettingsTitleContext | undefined>(undefined);
   const wallpaperRequestIdRef = useRef(0);
+  const wallpaperSignatureRef = useRef<DesktopWallpaperSignature | null>(null);
 
   const activeWidget = widgetRegistry.widgets.find((widget) => widget.id === widgetRegistry.activeWidgetId);
   const activeSkin = skinThemes.find((theme) => theme.id === activeSkinId) ?? skinThemes[0];
@@ -210,6 +229,7 @@ export function App() {
   const refreshWallpaperInfo = useCallback(async () => {
     const requestId = ++wallpaperRequestIdRef.current;
     if (normalizedAppearance.backgroundMode !== "blur") {
+      wallpaperSignatureRef.current = null;
       setWallpaperInfo(null);
       return;
     }
@@ -217,23 +237,38 @@ export function App() {
     try {
       const info = await invoke<DesktopWallpaperInfo>("get_desktop_wallpaper");
       if (requestId === wallpaperRequestIdRef.current) {
+        wallpaperSignatureRef.current = info.signature;
         setWallpaperInfo(info);
+        setWallpaperVersion((current) => {
+          const nextVersion = current + 1;
+          console.info("[wallpaper] frontend refresh applied", { path: info.path, version: nextVersion });
+          return nextVersion;
+        });
       }
     } catch (error) {
       console.error("failed to load desktop wallpaper", error);
       if (requestId === wallpaperRequestIdRef.current) {
+        wallpaperSignatureRef.current = null;
         setWallpaperInfo(null);
       }
     }
   }, [normalizedAppearance.backgroundMode]);
 
   useEffect(() => {
+    if (normalizedAppearance.backgroundMode !== "blur") {
+      wallpaperSignatureRef.current = null;
+      setWallpaperInfo(null);
+      return;
+    }
+
+    void refreshWallpaperInfo();
+
     const refreshTimer = window.setTimeout(() => {
       void refreshWallpaperInfo();
     }, 120);
 
     return () => window.clearTimeout(refreshTimer);
-  }, [refreshWallpaperInfo]);
+  }, [normalizedAppearance.backgroundMode, refreshWallpaperInfo]);
 
   useEffect(() => {
     const unlistenPromise = listen(DESKTOP_WALLPAPER_CHANGED_EVENT, () => {
@@ -244,6 +279,36 @@ export function App() {
       void unlistenPromise.then((unlisten) => unlisten());
     };
   }, [refreshWallpaperInfo]);
+
+  useEffect(() => {
+    if (normalizedAppearance.backgroundMode !== "blur") {
+      return;
+    }
+
+    const checkWallpaperSignature = async () => {
+      try {
+        const nextSignature = await invoke<DesktopWallpaperSignature>("get_desktop_wallpaper_signature");
+        const previousSignature = wallpaperSignatureRef.current;
+        if (!previousSignature) {
+          wallpaperSignatureRef.current = nextSignature;
+          return;
+        }
+
+        if (!isSameWallpaperSignature(previousSignature, nextSignature)) {
+          wallpaperSignatureRef.current = nextSignature;
+          void refreshWallpaperInfo();
+        }
+      } catch (error) {
+        console.error("failed to check desktop wallpaper signature", error);
+      }
+    };
+
+    const signatureTimer = window.setInterval(() => {
+      void checkWallpaperSignature();
+    }, WALLPAPER_SIGNATURE_CHECK_MS);
+
+    return () => window.clearInterval(signatureTimer);
+  }, [normalizedAppearance.backgroundMode, refreshWallpaperInfo]);
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -910,6 +975,7 @@ export function App() {
         activeCellId={activeCellId}
         menuButtonRef={menuButtonRef}
         widgetStyle={widgetStyle}
+        wallpaperVersion={wallpaperVersion}
         backgroundMode={normalizedAppearance.backgroundMode}
         periodColumnStyle={normalizedAppearance.periodColumnStyle}
         toolbarLayoutMode={toolbarLayoutMode}
@@ -1490,6 +1556,23 @@ function parseIsoDateOnly(value: string): Date {
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
 
+function isSameWallpaperSignature(left: DesktopWallpaperSignature, right: DesktopWallpaperSignature): boolean {
+  return (
+    left.path === right.path &&
+    left.fileSize === right.fileSize &&
+    left.modifiedMs === right.modifiedMs &&
+    left.wallpaperPosition === right.wallpaperPosition &&
+    left.monitorLeft === right.monitorLeft &&
+    left.monitorTop === right.monitorTop &&
+    left.monitorWidth === right.monitorWidth &&
+    left.monitorHeight === right.monitorHeight &&
+    left.wallpaperLeft === right.wallpaperLeft &&
+    left.wallpaperTop === right.wallpaperTop &&
+    left.wallpaperWidth === right.wallpaperWidth &&
+    left.wallpaperHeight === right.wallpaperHeight
+  );
+}
+
 function buildWidgetStyle(
   appearance: WidgetSettingsState["appearance"],
   schedule: Schedule,
@@ -1541,7 +1624,7 @@ function buildWidgetStyle(
     "--axis-capsule-border": axisPalette.capsuleBorder,
     "--axis-solid-bg": axisPalette.solidBg,
     "--axis-solid-border": axisPalette.solidBorder,
-    "--widget-wallpaper-url": wallpaperInfo?.url ? `url("${wallpaperInfo.url}")` : "none",
+    "--widget-wallpaper-url": buildWallpaperCssImage(wallpaperInfo),
     "--widget-wallpaper-offset-x": wallpaperInfo ? `${Math.round((wallpaperInfo.wallpaperLeft - wallpaperInfo.windowLeft) / deviceScale)}px` : "0px",
     "--widget-wallpaper-offset-y": wallpaperInfo ? `${Math.round((wallpaperInfo.wallpaperTop - wallpaperInfo.windowTop) / deviceScale)}px` : "0px",
     "--widget-wallpaper-width": wallpaperInfo ? `${Math.max(1, Math.round(wallpaperInfo.wallpaperWidth / deviceScale))}px` : "100%",
@@ -1549,6 +1632,54 @@ function buildWidgetStyle(
   } as CSSProperties;
 }
 
+function buildWallpaperCssImage(wallpaperInfo: DesktopWallpaperInfo | null): string {
+  const source = buildWallpaperSourceUrl(wallpaperInfo);
+  return source ? `url("${escapeCssUrl(source)}")` : "none";
+}
+
+function buildWallpaperSourceUrl(wallpaperInfo: DesktopWallpaperInfo | null): string | null {
+  if (!wallpaperInfo) {
+    return null;
+  }
+
+  const source = wallpaperInfo.path
+    ? safeConvertFileSrc(wallpaperInfo.path)
+    : wallpaperInfo.url;
+
+  if (!source) {
+    return null;
+  }
+
+  return appendWallpaperCacheKey(source, wallpaperInfo.signature);
+}
+
+function safeConvertFileSrc(path: string): string | null {
+  try {
+    return convertFileSrc(path);
+  } catch (error) {
+    console.error("failed to convert wallpaper file source", error);
+    return null;
+  }
+}
+
+function appendWallpaperCacheKey(source: string, signature: DesktopWallpaperSignature): string {
+  const keyParts = [
+    signature.path ?? "",
+    signature.fileSize ?? "",
+    signature.modifiedMs ?? "",
+    signature.wallpaperPosition,
+    signature.wallpaperLeft,
+    signature.wallpaperTop,
+    signature.wallpaperWidth,
+    signature.wallpaperHeight,
+  ];
+  const version = encodeURIComponent(keyParts.join("|"));
+  return `${source}${source.includes("?") ? "&" : "?"}v=${version}`;
+}
+
+function escapeCssUrl(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
 function buildGridLineBorder(type: "none" | "solid" | "dashed" | "dotted", color: string, width: number, opacity: number): string {
   if (type === "none" || opacity <= 0 || width <= 0) {
     return "none";
@@ -2455,4 +2586,5 @@ function savePersistedSchedule(schedule: Schedule): void {
     // local persistence is best-effort only
   }
 }
+
 

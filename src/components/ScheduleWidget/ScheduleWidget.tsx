@@ -14,6 +14,7 @@ type ScheduleWidgetProps = {
   activeCellId: string | null;
   menuButtonRef: RefObject<HTMLButtonElement | null>;
   widgetStyle?: CSSProperties;
+  wallpaperVersion: number;
   backgroundMode: WidgetBackgroundMode;
   periodColumnStyle: PeriodColumnStyle;
   toolbarLayoutMode: ToolbarLayoutMode;
@@ -37,6 +38,7 @@ export function ScheduleWidget({
   activeCellId,
   menuButtonRef,
   widgetStyle,
+  wallpaperVersion,
   backgroundMode,
   periodColumnStyle,
   toolbarLayoutMode,
@@ -56,7 +58,7 @@ export function ScheduleWidget({
   return (
     <section className={`schedule-shell mode-${mode} background-${backgroundMode} toolbar-${toolbarLayoutMode} period-column-${periodColumnStyle} ${hovered ? "is-forward-hovered" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
       <div className={`schedule-card ${isMinimalistMode ? "is-minimalist-layout" : ""}`}>
-        <div className="schedule-background-overlay" aria-hidden="true" />
+        <div className="schedule-background-overlay" key={`wallpaper-${wallpaperVersion}`} aria-hidden="true" />
         {!isMinimalistMode ? (
           <ScheduleToolbar
             weekNumber={schedule.weekNumber}

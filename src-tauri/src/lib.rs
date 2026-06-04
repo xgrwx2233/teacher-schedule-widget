@@ -56,6 +56,7 @@ pub fn run() {
             widget_manager::load_widget_registry,
             widget_manager::sync_active_widget_bounds,
             desktop_wallpaper::get_desktop_wallpaper,
+            desktop_wallpaper::get_desktop_wallpaper_signature,
             settings_windows::open_settings_window,
             settings_windows::open_card_settings_window,
             settings_windows::open_widget_menu_window,

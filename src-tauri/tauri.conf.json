@@ -12,7 +12,11 @@
   "app": {
     "withGlobalTauri": false,
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
     },
     "windows": [
       {

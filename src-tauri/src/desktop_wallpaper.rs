@@ -1,13 +1,19 @@
 use serde::Serialize;
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::Path,
+    time::UNIX_EPOCH,
+};
 use tauri::WebviewWindow;
-use base64::{engine::general_purpose, Engine as _};
 use windows::{
     core::{Error, PCWSTR, PWSTR, HRESULT},
     Win32::{
         Foundation::RECT,
         System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED},
-        UI::Shell::{DesktopWallpaper, IDesktopWallpaper, DWPOS_CENTER, DWPOS_FILL, DWPOS_FIT, DWPOS_SPAN, DWPOS_STRETCH, DWPOS_TILE},
+        UI::{
+            Shell::{DesktopWallpaper, IDesktopWallpaper, DWPOS_CENTER, DWPOS_FILL, DWPOS_FIT, DWPOS_SPAN, DWPOS_STRETCH, DWPOS_TILE},
+            WindowsAndMessaging::{SystemParametersInfoW, SPI_GETDESKWALLPAPER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS},
+        },
     },
 };
 
@@ -16,6 +22,7 @@ use windows::{
 pub struct DesktopWallpaperInfo {
     pub path: Option<String>,
     pub url: Option<String>,
+    pub signature: DesktopWallpaperSignature,
     pub monitor_left: i32,
     pub monitor_top: i32,
     pub monitor_width: i32,
@@ -28,6 +35,30 @@ pub struct DesktopWallpaperInfo {
     pub wallpaper_top: i32,
     pub wallpaper_width: i32,
     pub wallpaper_height: i32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWallpaperSignature {
+    pub path: Option<String>,
+    pub file_size: Option<u64>,
+    pub modified_ms: Option<u128>,
+    pub wallpaper_position: i32,
+    pub monitor_left: i32,
+    pub monitor_top: i32,
+    pub monitor_width: i32,
+    pub monitor_height: i32,
+    pub wallpaper_left: i32,
+    pub wallpaper_top: i32,
+    pub wallpaper_width: i32,
+    pub wallpaper_height: i32,
+}
+
+struct SelectedWallpaper {
+    path: String,
+    monitor_rect: RECT,
+    wallpaper_rect: RECT,
+    position: i32,
 }
 
 struct ComApartment {
@@ -61,6 +92,47 @@ impl Drop for ComApartment {
 
 #[tauri::command]
 pub fn get_desktop_wallpaper(window: WebviewWindow) -> Result<DesktopWallpaperInfo, String> {
+    let window_position = window.outer_position().map_err(|error| error.to_string())?;
+    let window_size = window.outer_size().map_err(|error| error.to_string())?;
+    let selected = select_wallpaper_for_window(&window)?;
+    let signature = wallpaper_signature(&selected);
+    println!(
+        "[wallpaper] full refresh path={:?} size={:?} modified_ms={:?}",
+        signature.path, signature.file_size, signature.modified_ms
+    );
+
+    Ok(DesktopWallpaperInfo {
+        path: if selected.path.trim().is_empty() { None } else { Some(selected.path.clone()) },
+        url: file_url_from_path(&selected.path),
+        signature,
+        monitor_left: selected.monitor_rect.left,
+        monitor_top: selected.monitor_rect.top,
+        monitor_width: selected.monitor_rect.right - selected.monitor_rect.left,
+        monitor_height: selected.monitor_rect.bottom - selected.monitor_rect.top,
+        window_left: window_position.x,
+        window_top: window_position.y,
+        window_width: window_size.width,
+        window_height: window_size.height,
+        wallpaper_left: selected.wallpaper_rect.left,
+        wallpaper_top: selected.wallpaper_rect.top,
+        wallpaper_width: selected.wallpaper_rect.right - selected.wallpaper_rect.left,
+        wallpaper_height: selected.wallpaper_rect.bottom - selected.wallpaper_rect.top,
+    })
+}
+
+#[tauri::command]
+pub fn get_desktop_wallpaper_signature(window: WebviewWindow) -> Result<DesktopWallpaperSignature, String> {
+    select_wallpaper_for_window(&window).map(|selected| {
+        let signature = wallpaper_signature(&selected);
+        println!(
+            "[wallpaper] signature path={:?} size={:?} modified_ms={:?}",
+            signature.path, signature.file_size, signature.modified_ms
+        );
+        signature
+    })
+}
+
+fn select_wallpaper_for_window(window: &WebviewWindow) -> Result<SelectedWallpaper, String> {
     let window_position = window.outer_position().map_err(|error| error.to_string())?;
     let window_size = window.outer_size().map_err(|error| error.to_string())?;
     let window_center_x = window_position.x + (window_size.width as i32 / 2);
@@ -113,27 +185,89 @@ pub fn get_desktop_wallpaper(window: WebviewWindow) -> Result<DesktopWallpaperIn
         }
     }
 
-    let (path, rect) = selected
+    let (mut path, monitor_rect) = selected
         .or(fallback)
         .unwrap_or_else(|| (String::new(), RECT::default()));
-    let wallpaper_rect = calculate_wallpaper_rect(&path, rect, position.0);
+    let desktop_wallpaper_path = path.clone();
+    let system_wallpaper_path = get_system_wallpaper_path();
+    if let Some(system_path) = system_wallpaper_path
+        .as_ref()
+        .filter(|value| Path::new(value).exists())
+    {
+        path = system_path.to_string();
+    }
+    println!(
+        "[wallpaper] selected desktop_api_path={:?} system_api_path={:?} final_path={:?}",
+        empty_to_none(&desktop_wallpaper_path),
+        system_wallpaper_path,
+        empty_to_none(&path)
+    );
+    let wallpaper_rect = calculate_wallpaper_rect(&path, monitor_rect, position.0);
 
-    Ok(DesktopWallpaperInfo {
-        path: if path.trim().is_empty() { None } else { Some(path.clone()) },
-        url: data_url_from_path(&path).or_else(|| file_url_from_path(&path)),
-        monitor_left: rect.left,
-        monitor_top: rect.top,
-        monitor_width: rect.right - rect.left,
-        monitor_height: rect.bottom - rect.top,
-        window_left: window_position.x,
-        window_top: window_position.y,
-        window_width: window_size.width,
-        window_height: window_size.height,
-        wallpaper_left: wallpaper_rect.left,
-        wallpaper_top: wallpaper_rect.top,
-        wallpaper_width: wallpaper_rect.right - wallpaper_rect.left,
-        wallpaper_height: wallpaper_rect.bottom - wallpaper_rect.top,
+    Ok(SelectedWallpaper {
+        path,
+        monitor_rect,
+        wallpaper_rect,
+        position: position.0,
     })
+}
+
+fn empty_to_none(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn get_system_wallpaper_path() -> Option<String> {
+    let mut buffer = vec![0u16; 32_768];
+    unsafe {
+        SystemParametersInfoW(
+            SPI_GETDESKWALLPAPER,
+            buffer.len() as u32,
+            Some(buffer.as_mut_ptr().cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+        .ok()?;
+    }
+
+    let length = buffer.iter().position(|value| *value == 0).unwrap_or(buffer.len());
+    if length == 0 {
+        return None;
+    }
+
+    Some(String::from_utf16_lossy(&buffer[..length]).trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn wallpaper_signature(selected: &SelectedWallpaper) -> DesktopWallpaperSignature {
+    let metadata = if selected.path.trim().is_empty() {
+        None
+    } else {
+        fs::metadata(&selected.path).ok()
+    };
+    let modified_ms = metadata
+        .as_ref()
+        .and_then(|item| item.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis());
+
+    DesktopWallpaperSignature {
+        path: if selected.path.trim().is_empty() { None } else { Some(selected.path.clone()) },
+        file_size: metadata.as_ref().map(|item| item.len()),
+        modified_ms,
+        wallpaper_position: selected.position,
+        monitor_left: selected.monitor_rect.left,
+        monitor_top: selected.monitor_rect.top,
+        monitor_width: selected.monitor_rect.right - selected.monitor_rect.left,
+        monitor_height: selected.monitor_rect.bottom - selected.monitor_rect.top,
+        wallpaper_left: selected.wallpaper_rect.left,
+        wallpaper_top: selected.wallpaper_rect.top,
+        wallpaper_width: selected.wallpaper_rect.right - selected.wallpaper_rect.left,
+        wallpaper_height: selected.wallpaper_rect.bottom - selected.wallpaper_rect.top,
+    }
 }
 
 fn calculate_wallpaper_rect(path: &str, monitor: RECT, position: i32) -> RECT {
@@ -216,34 +350,6 @@ fn file_url_from_path(path: &str) -> Option<String> {
     };
 
     Some(prefixed.replace(' ', "%20"))
-}
-
-fn data_url_from_path(path: &str) -> Option<String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let bytes = fs::read(trimmed).ok()?;
-    let mime = match Path::new(trimmed)
-        .extension()
-        .and_then(|item| item.to_str())
-        .map(|item| item.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("bmp") => "image/bmp",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        _ => "image/jpeg",
-    };
-
-    Some(format!(
-        "data:{};base64,{}",
-        mime,
-        general_purpose::STANDARD.encode(bytes)
-    ))
 }
 
 fn pwstr_to_string_and_free(value: PWSTR) -> String {
