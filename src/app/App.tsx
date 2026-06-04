@@ -115,6 +115,7 @@ const defaultSettings: WidgetSettingsState = {
 
 const DEFAULT_COURSE_ROW_HEIGHT = 66;
 const SCHEDULE_STORAGE_KEY = "teacher-schedule-widget:schedule";
+const DESKTOP_WALLPAPER_CHANGED_EVENT = "desktop-wallpaper-changed";
 
 export function App() {
   const appWindow = useMemo(() => getCurrentWindow(), []);
@@ -152,6 +153,7 @@ export function App() {
   const selectedCardRef = useRef<SelectedCard | null>(selectedCard);
   const cardDraftRef = useRef(cardDraft);
   const cardTitleContextRef = useRef<CardSettingsTitleContext | undefined>(undefined);
+  const wallpaperRequestIdRef = useRef(0);
 
   const activeWidget = widgetRegistry.widgets.find((widget) => widget.id === widgetRegistry.activeWidgetId);
   const activeSkin = skinThemes.find((theme) => theme.id === activeSkinId) ?? skinThemes[0];
@@ -206,6 +208,7 @@ export function App() {
   }, [appWindow]);
 
   const refreshWallpaperInfo = useCallback(async () => {
+    const requestId = ++wallpaperRequestIdRef.current;
     if (normalizedAppearance.backgroundMode !== "blur") {
       setWallpaperInfo(null);
       return;
@@ -213,31 +216,34 @@ export function App() {
 
     try {
       const info = await invoke<DesktopWallpaperInfo>("get_desktop_wallpaper");
-      setWallpaperInfo(info);
+      if (requestId === wallpaperRequestIdRef.current) {
+        setWallpaperInfo(info);
+      }
     } catch (error) {
       console.error("failed to load desktop wallpaper", error);
-      setWallpaperInfo(null);
+      if (requestId === wallpaperRequestIdRef.current) {
+        setWallpaperInfo(null);
+      }
     }
   }, [normalizedAppearance.backgroundMode]);
 
   useEffect(() => {
-    void refreshWallpaperInfo();
+    const refreshTimer = window.setTimeout(() => {
+      void refreshWallpaperInfo();
+    }, 120);
+
+    return () => window.clearTimeout(refreshTimer);
   }, [refreshWallpaperInfo]);
 
   useEffect(() => {
-    const unlistenPromise = appWindow.onMoved(() => {
-      void refreshWallpaperInfo();
-    });
-
-    const unlistenResizePromise = appWindow.onResized(() => {
+    const unlistenPromise = listen(DESKTOP_WALLPAPER_CHANGED_EVENT, () => {
       void refreshWallpaperInfo();
     });
 
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
-      void unlistenResizePromise.then((unlisten) => unlisten());
     };
-  }, [appWindow, refreshWallpaperInfo]);
+  }, [refreshWallpaperInfo]);
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -1515,6 +1521,7 @@ function buildWidgetStyle(
     "--widget-background-fill": backgroundFill,
     "--widget-background-opacity": String(normalizedAppearance.backgroundOpacity / 100),
     "--widget-blur-intensity": `${normalizedAppearance.blurIntensity}px`,
+    "--widget-blur-filter": `blur(${normalizedAppearance.blurIntensity}px) saturate(1.08)`,
     "--row-divider": normalizedAppearance.gridLineColor,
     "--row-divider-rgb": hexToRgbParts(normalizedAppearance.gridLineColor),
     "--row-divider-opacity": gridLineOpacity,

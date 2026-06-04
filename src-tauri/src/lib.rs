@@ -7,6 +7,7 @@ mod input_forwarder;
 mod interaction_proxy;
 mod settings_windows;
 mod tray;
+mod wallpaper_watcher;
 mod widget_manager;
 mod window_mode;
 
@@ -95,6 +96,9 @@ pub fn run() {
             settings_windows::create_hidden_auxiliary_windows(app.handle())?;
             interaction_proxy::show_proxy_for_widget(app.handle(), &window, &state)?;
             tray::create_tray(app.handle())?;
+            if let Err(error) = wallpaper_watcher::install_wallpaper_change_listener(&window, app.handle()) {
+                eprintln!("failed to install wallpaper change listener: {error}");
+            }
 
             start_input_forwarder(
                 window.clone(),
