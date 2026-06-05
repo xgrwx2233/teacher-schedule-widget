@@ -66,7 +66,9 @@ export type CourseCell = {
   note?: string;
   hidden?: boolean;
   colSpan?: number;
+  rowSpan?: number;
   mergedInto?: string;
+  mergeDirection?: "horizontal" | "vertical";
   style?: CardStyle;
   scheduleRule?: CourseScheduleRule;
   temporaryChanges?: CourseTemporaryChange[];

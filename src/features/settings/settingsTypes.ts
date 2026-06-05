@@ -46,7 +46,10 @@ export type SelectedCard =
   | { type: "period"; periodId: string };
 
 export type CourseCardMergeState = {
+  canMergeUp: boolean;
+  canMergeLeft: boolean;
   canMergeRight: boolean;
+  canMergeDown: boolean;
   canSplit: boolean;
   reason?: string;
 };
@@ -89,7 +92,7 @@ export const defaultAppearanceSettings: AppearanceSettings = {
   rowDividerOpacity: 0.16,
   rowDividerThickness: 1,
   backgroundMode: "blur",
-  backgroundColor: "#DBE7EF",
+  backgroundColor: "#062032",
   backgroundOpacity: 84,
   blurIntensity: 14,
   cardRadius: 12,
@@ -99,7 +102,7 @@ export const defaultAppearanceSettings: AppearanceSettings = {
   gridLineWidth: 1,
   gridLineOpacity: 18,
   axisColorMode: "auto",
-  periodColumnStyle: "soft",
+  periodColumnStyle: "transparent",
 };
 
 export const cardShadowStrengthLabels = ["无阴影", "极轻", "轻", "标准", "明显"] as const;

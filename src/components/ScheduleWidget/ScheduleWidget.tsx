@@ -1,4 +1,4 @@
-import type { CSSProperties, PointerEvent, ReactNode, RefObject } from "react";
+import type { CSSProperties, MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
 import { ScheduleToolbar } from "../ScheduleToolbar/ScheduleToolbar";
 import type { CardStyle, CourseCell, PeriodInfo, Schedule, Weekday } from "../../features/schedule/types";
 import type { PeriodColumnStyle, SelectedCard, WidgetBackgroundMode } from "../../features/settings/settingsTypes";
@@ -29,6 +29,16 @@ type ScheduleWidgetProps = {
   onResizeStart: (event: PointerEvent<HTMLDivElement>) => void;
 };
 
+type MergeAxis = "horizontal" | "vertical";
+
+type VerticalMergedCourseOverlay = {
+  course: CourseCell;
+  courseIds: string[];
+  rowIndex: number;
+  weekdayIndex: number;
+  rowSpan: number;
+};
+
 export function ScheduleWidget({
   schedule,
   widgetTitle,
@@ -54,6 +64,7 @@ export function ScheduleWidget({
 }: ScheduleWidgetProps) {
   const visibleWeekdays = schedule.days.map((day) => day.id);
   const isMinimalistMode = toolbarLayoutMode === "minimalist";
+  const verticalOverlays = buildVerticalMergedCourseOverlays(schedule, visibleWeekdays);
 
   return (
     <section className={`schedule-shell mode-${mode} background-${backgroundMode} toolbar-${toolbarLayoutMode} period-column-${periodColumnStyle} ${hovered ? "is-forward-hovered" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
@@ -119,19 +130,28 @@ export function ScheduleWidget({
             {schedule.rows.map((row, rowIndex) => (
               <div className={rowIndex < schedule.rows.length - 1 ? "course-row-grid has-row-divider" : "course-row-grid"} key={row.id}>
                 {visibleWeekdays.map((weekday, weekdayIndex) => {
-                  const course = row.courses[weekday];
+                  const course = row.courses[weekday] ?? null;
                   const endsAtLastColumn = weekdayIndex + 1 >= visibleWeekdays.length;
+                  if (course?.mergedInto) {
+                    return course.mergeDirection === "vertical"
+                      ? <ColumnItem key={`${row.id}-${weekday}`} showColumnDivider={!endsAtLastColumn} />
+                      : null;
+                  }
+
                   if (!course) {
                     return <ColumnItem key={`${row.id}-${weekday}`} showColumnDivider={!endsAtLastColumn} />;
                   }
-                  if (course.mergedInto) {
-                    return null;
+
+                  if ((course.rowSpan ?? 1) > 1 && course.mergeDirection === "vertical") {
+                    return <ColumnItem key={`${row.id}-${weekday}`} showColumnDivider={!endsAtLastColumn} />;
                   }
-                  const span = course.colSpan ?? 1;
-                  const courseEndsAtLastColumn = weekdayIndex + span >= visibleWeekdays.length;
+
+                  const colSpan = Math.max(1, Math.min(course.colSpan ?? 1, visibleWeekdays.length - weekdayIndex));
+                  const courseIds = getHorizontalMergedCourseIds(row.courses, visibleWeekdays, weekdayIndex, colSpan);
+                  const courseEndsAtLastColumn = weekdayIndex + colSpan >= visibleWeekdays.length;
 
                   return (
-                    <ColumnItem key={`${row.id}-${weekday}`} span={span} showColumnDivider={!courseEndsAtLastColumn}>
+                    <ColumnItem key={`${row.id}-${weekday}`} span={colSpan} showColumnDivider={!courseEndsAtLastColumn && !endsAtLastColumn}>
                       {course.hidden ? (
                         <button
                           className={`course-card course-card-hidden-hitbox ${course.id === activeCellId ? "is-active" : ""}`}
@@ -141,11 +161,34 @@ export function ScheduleWidget({
                           onDoubleClick={() => onCardEdit({ type: "course", courseId: course.id })}
                         />
                       ) : (
-                        <CourseCard course={course} activeCellId={activeCellId} onCourseClick={onCourseClick} onCardEdit={onCardEdit} />
+                        <CourseCard
+                          course={course}
+                          mergedCourseIds={courseIds}
+                          mergeAxis="horizontal"
+                          activeCellId={activeCellId}
+                          onCourseClick={onCourseClick}
+                          onCardEdit={onCardEdit}
+                        />
                       )}
                     </ColumnItem>
                   );
                 })}
+              </div>
+            ))}
+            {verticalOverlays.map((overlay) => (
+              <div
+                key={`vertical-${overlay.course.id}`}
+                className="vertical-merged-course-overlay"
+                style={toVerticalMergedCourseOverlayStyle(overlay, schedule.rows.length, visibleWeekdays.length)}
+              >
+                <CourseCard
+                  course={overlay.course}
+                  mergedCourseIds={overlay.courseIds}
+                  mergeAxis="vertical"
+                  activeCellId={activeCellId}
+                  onCourseClick={onCourseClick}
+                  onCardEdit={onCardEdit}
+                />
               </div>
             ))}
           </div>
@@ -169,32 +212,106 @@ function MiniToolbarIcon() {
   );
 }
 
+function getHorizontalMergedCourseIds(
+  courses: Partial<Record<Weekday, CourseCell>>,
+  visibleWeekdays: Weekday[],
+  startIndex: number,
+  colSpan: number,
+): string[] {
+  return visibleWeekdays
+    .slice(startIndex, startIndex + colSpan)
+    .map((weekday) => courses[weekday]?.id)
+    .filter((id): id is string => Boolean(id));
+}
+
+function buildVerticalMergedCourseOverlays(schedule: Schedule, visibleWeekdays: Weekday[]): VerticalMergedCourseOverlay[] {
+  const overlays: VerticalMergedCourseOverlay[] = [];
+
+  schedule.rows.forEach((row, rowIndex) => {
+    visibleWeekdays.forEach((weekday, weekdayIndex) => {
+      const course = row.courses[weekday];
+      const rowSpan = course?.rowSpan ?? 1;
+      if (!course || course.mergedInto || course.mergeDirection !== "vertical" || rowSpan <= 1) {
+        return;
+      }
+
+      const clampedRowSpan = Math.max(1, Math.min(rowSpan, schedule.rows.length - rowIndex));
+      const courseIds = schedule.rows
+        .slice(rowIndex, rowIndex + clampedRowSpan)
+        .map((item) => item.courses[weekday]?.id)
+        .filter((id): id is string => Boolean(id));
+
+      overlays.push({
+        course,
+        courseIds,
+        rowIndex,
+        weekdayIndex,
+        rowSpan: clampedRowSpan,
+      });
+    });
+  });
+
+  return overlays;
+}
+
+function toVerticalMergedCourseOverlayStyle(
+  overlay: VerticalMergedCourseOverlay,
+  rowCount: number,
+  dayCount: number,
+): CSSProperties {
+  return {
+    left: `${(overlay.weekdayIndex / dayCount) * 100}%`,
+    top: `${(overlay.rowIndex / rowCount) * 100}%`,
+    width: `${100 / dayCount}%`,
+    height: `${(overlay.rowSpan / rowCount) * 100}%`,
+  };
+}
+
 function CourseCard({
   course,
+  mergedCourseIds,
+  mergeAxis,
   activeCellId,
   onCourseClick,
   onCardEdit,
 }: {
   course: CourseCell;
+  mergedCourseIds: string[];
+  mergeAxis: MergeAxis;
   activeCellId: string | null;
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
 }) {
   const displayMetrics = getCourseCardDisplayMetrics(course);
   const badgeLabel = getCourseBadgeLabel(course.renderBadge);
+  const resolveCourseIdFromPointer = (event: MouseEvent<HTMLButtonElement>) => {
+    if (mergedCourseIds.length <= 1) {
+      return course.id;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = mergeAxis === "vertical"
+      ? rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0
+      : rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+    const index = Math.max(0, Math.min(mergedCourseIds.length - 1, Math.floor(ratio * mergedCourseIds.length)));
+    return mergedCourseIds[index] ?? course.id;
+  };
+  const isActive = activeCellId ? mergedCourseIds.includes(activeCellId) : false;
   const isTemporaryCancel = course.renderBadge === "temporary" && course.title.trim() === "无课" && !(course.room ?? "").trim();
   return (
     <button
-      className={`course-card ${displayMetrics.isTwoLine ? "is-two-line" : "is-one-line"} ${badgeLabel ? "has-badge" : ""} ${isTemporaryCancel ? "is-temporary-cancel" : ""} ${course.id === activeCellId ? "is-active" : ""}`}
+      className={`course-card ${displayMetrics.isTwoLine ? "is-two-line" : "is-one-line"} ${badgeLabel ? "has-badge" : ""} ${isTemporaryCancel ? "is-temporary-cancel" : ""} ${isActive ? "is-active" : ""}`}
       style={toCardCssVars(course.style, displayMetrics)}
       data-course-id={course.id}
+      data-course-hit-ids={mergedCourseIds.join(",")}
+      data-course-hit-axis={mergeAxis}
       type="button"
       title={`${course.title} ${course.room ?? ""}`}
-      onClick={() => {
-        onCourseClick(course.id);
+      onClick={(event) => {
+        onCourseClick(resolveCourseIdFromPointer(event));
       }}
-      onDoubleClick={() => {
-        onCardEdit({ type: "course", courseId: course.id });
+      onDoubleClick={(event) => {
+        onCardEdit({ type: "course", courseId: resolveCourseIdFromPointer(event) });
       }}
     >
       {badgeLabel ? <span className={`course-card-badge is-${course.renderBadge}`} aria-hidden="true">{badgeLabel}</span> : null}

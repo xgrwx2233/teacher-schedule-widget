@@ -21,7 +21,10 @@ type CardSettingsWindowProps = {
   activeTemporaryChangeId: string | null;
   onActiveTabChange: (tab: CardSettingsTab) => void;
   onDraftChange: (draft: CardDraft) => void;
+  onMergeUp: () => void;
+  onMergeLeft: () => void;
   onMergeRight: () => void;
+  onMergeDown: () => void;
   onSplit: () => void;
   onDeleteCourse: () => void;
   onAddCourse: () => void;
@@ -51,7 +54,10 @@ export function CardSettingsWindow({
   activeTemporaryChangeId,
   onActiveTabChange,
   onDraftChange,
+  onMergeUp,
+  onMergeLeft,
   onMergeRight,
+  onMergeDown,
   onSplit,
   onDeleteCourse,
   onAddCourse,
@@ -116,7 +122,7 @@ export function CardSettingsWindow({
         <div className={activeTab === "temporary" ? "card-settings-body is-temporary-tab" : "card-settings-body"} ref={bodyRef}>
           {activeTab === "course" ? (
             selectedCard.type === "course" ? (
-              <CourseConfigurationTab draft={draft} term={term} mergeState={mergeState} onDraftChange={onDraftChange} onMergeRight={onMergeRight} onSplit={onSplit} onDeleteCourse={onDeleteCourse} onAddCourse={onAddCourse} onGlobalStyleApply={onGlobalStyleApply} onGlobalScheduleApply={onGlobalScheduleApply} />
+              <CourseConfigurationTab draft={draft} term={term} mergeState={mergeState} onDraftChange={onDraftChange} onMergeUp={onMergeUp} onMergeLeft={onMergeLeft} onMergeRight={onMergeRight} onMergeDown={onMergeDown} onSplit={onSplit} onDeleteCourse={onDeleteCourse} onAddCourse={onAddCourse} onGlobalStyleApply={onGlobalStyleApply} onGlobalScheduleApply={onGlobalScheduleApply} />
             ) : (
               <PeriodConfigurationTab draft={draft} onDraftChange={onDraftChange} />
             )
@@ -146,7 +152,10 @@ function CourseConfigurationTab({
   term,
   mergeState,
   onDraftChange,
+  onMergeUp,
+  onMergeLeft,
   onMergeRight,
+  onMergeDown,
   onSplit,
   onDeleteCourse,
   onAddCourse,
@@ -157,7 +166,10 @@ function CourseConfigurationTab({
   term: { startDate: string; endDate: string };
   mergeState: CourseCardMergeState;
   onDraftChange: (draft: CardDraft) => void;
+  onMergeUp: () => void;
+  onMergeLeft: () => void;
   onMergeRight: () => void;
+  onMergeDown: () => void;
   onSplit: () => void;
   onDeleteCourse: () => void;
   onAddCourse: () => void;
@@ -309,16 +321,16 @@ function CourseConfigurationTab({
           <div className="row-card-accordion-content">
             <div className="merge-panel">
               <div className="merge-dpad" aria-label="合并方向">
-                <button type="button" disabled>
+                <button type="button" disabled={!mergeState.canMergeUp} onClick={onMergeUp}>
                   上合并
                 </button>
-                <button type="button" disabled>
+                <button type="button" disabled={!mergeState.canMergeLeft} onClick={onMergeLeft}>
                   左合并
                 </button>
                 <button type="button" disabled={!mergeState.canMergeRight} onClick={onMergeRight}>
                   右合并
                 </button>
-                <button type="button" disabled>
+                <button type="button" disabled={!mergeState.canMergeDown} onClick={onMergeDown}>
                   下合并
                 </button>
               </div>

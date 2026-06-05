@@ -418,8 +418,8 @@ function AppearancePanel({
         </AppearanceAccordionCard>
 
         <AppearanceAccordionCard
-          title="课次卡片样式"
-          tooltip="提升工具栏、日期栏和课次列在复杂背景下的可读性。"
+          title="时间日期样式"
+          tooltip="提升工具栏、日期栏和时间日期列在复杂背景下的可读性。"
           expanded={expandedSections.axis}
           summary={`${axisColorModeLabels[appearance.axisColorMode]} · ${periodColumnStyleLabels[appearance.periodColumnStyle]}`}
           onToggle={() => toggleSection("axis")}
@@ -428,7 +428,7 @@ function AppearancePanel({
             <select
               className="appearance-combobox axis-mode-select"
               value={appearance.axisColorMode}
-              aria-label="课次卡片文字模式"
+              aria-label="时间日期文字模式"
               onChange={(event) =>
                 onSettingsChange({
                   ...settings,
@@ -447,7 +447,7 @@ function AppearancePanel({
             </select>
           </StaticSettingRow>
           <StaticSettingRow title="卡片背景色">
-            <div className="appearance-segmented appearance-segmented-pill axis-period-options" aria-label="课次卡片背景色">
+            <div className="appearance-segmented appearance-segmented-pill axis-period-options" aria-label="时间日期背景色">
               {periodColumnStyleOptions.map((option) => (
                 <button
                   key={option.value}

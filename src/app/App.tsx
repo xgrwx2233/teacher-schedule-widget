@@ -1379,16 +1379,18 @@ async function positionFloatingToolbarWindow() {
 }
 
 function collectProxyHitboxes() {
-  return Array.from(
+  const hitboxes = Array.from(
     document.querySelectorAll<HTMLElement>(
       "[data-menu-button], [data-header-toggle], [data-toolbar-action], [data-course-id], [data-period-id]",
     ),
   )
-    .map((element) => {
+    .flatMap((element) => {
       const rect = element.getBoundingClientRect();
       const courseId = element.dataset.courseId;
       const periodId = element.dataset.periodId;
       const toolbarAction = element.dataset.toolbarAction;
+      const courseHitIds = parseCourseHitIds(element.dataset.courseHitIds, courseId);
+      const courseHitAxis = element.dataset.courseHitAxis === "vertical" ? "vertical" : "horizontal";
       const kind = element.dataset.menuButton
         ? "menu-button"
         : element.dataset.headerToggle
@@ -1399,16 +1401,40 @@ function collectProxyHitboxes() {
               ? "course"
               : "period";
 
-      return {
+      if (kind === "course" && courseHitIds.length > 1) {
+        const segmentWidth = rect.width / courseHitIds.length;
+        const segmentHeight = rect.height / courseHitIds.length;
+        return courseHitIds.map((id, index) => ({
+          kind,
+          id,
+          left: courseHitAxis === "vertical" ? rect.left : rect.left + segmentWidth * index,
+          top: courseHitAxis === "vertical" ? rect.top + segmentHeight * index : rect.top,
+          right: courseHitAxis === "vertical" ? rect.right : index === courseHitIds.length - 1 ? rect.right : rect.left + segmentWidth * (index + 1),
+          bottom: courseHitAxis === "vertical" ? index === courseHitIds.length - 1 ? rect.bottom : rect.top + segmentHeight * (index + 1) : rect.bottom,
+        }));
+      }
+
+      return [{
         kind,
         id: courseId ?? periodId,
         left: rect.left,
         top: rect.top,
         right: rect.right,
         bottom: rect.bottom,
-      };
+      }];
     })
     .filter((hitbox) => hitbox.right > hitbox.left && hitbox.bottom > hitbox.top);
+
+  return hitboxes;
+}
+
+function parseCourseHitIds(value: string | undefined, fallback: string | undefined): string[] {
+  const ids = value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
+  if (ids.length > 0) {
+    return ids;
+  }
+
+  return fallback ? [fallback] : [];
 }
 
 async function hideWindowByLabel(label: string) {
@@ -1967,24 +1993,28 @@ function emitCardSettingsState(
 
 function getCourseCardMergeState(schedule: Schedule, selectedCard: SelectedCard): CourseCardMergeState {
   if (selectedCard.type !== "course") {
-    return { canMergeRight: false, canSplit: false };
+    return { canMergeUp: false, canMergeLeft: false, canMergeRight: false, canMergeDown: false, canSplit: false };
   }
 
   const location = findCourseLocation(schedule, selectedCard.courseId);
   if (!location) {
-    return { canMergeRight: false, canSplit: false, reason: "未找到课程卡片" };
+    return { canMergeUp: false, canMergeLeft: false, canMergeRight: false, canMergeDown: false, canSplit: false, reason: "未找到课程卡片" };
   }
 
   const course = location.course;
-  const canSplit = (course.colSpan ?? 1) > 1;
+  const canSplit = (course.colSpan ?? 1) > 1 || (course.rowSpan ?? 1) > 1 || Boolean(course.mergedInto);
+  const leftAnchorLocation = findLeftAnchorLocation(location);
   const rightCourse = findRightNeighbor(location);
-  const canMergeRight = Boolean(rightCourse && canMergeCourses(course, rightCourse));
-  const reason = canMergeRight || canSplit
+  const upAnchorLocation = findUpAnchorLocation(location);
+  const downCourse = findDownNeighbor(location);
+  const canMergeLeft = Boolean(leftAnchorLocation && canMergeCoursesRight(leftAnchorLocation.course, course));
+  const canMergeRight = Boolean(rightCourse && canMergeCoursesRight(course, rightCourse));
+  const canMergeUp = Boolean(upAnchorLocation && canMergeCoursesDown(upAnchorLocation.course, course));
+  const canMergeDown = Boolean(downCourse && canMergeCoursesDown(course, downCourse));
+  const reason = canMergeUp || canMergeLeft || canMergeRight || canMergeDown || canSplit
     ? undefined
-    : hasTemporaryChanges(course) || (rightCourse ? hasTemporaryChanges(rightCourse) : false)
-      ? "有临时改动的课程不能合并"
-      : "右侧相邻卡片内容不一致";
-  return { canMergeRight, canSplit, reason };
+    : "相邻卡片内容不一致";
+  return { canMergeUp, canMergeLeft, canMergeRight, canMergeDown, canSplit, reason };
 }
 
 function applyCourseCardAction(schedule: Schedule, selectedCard: SelectedCard, action: CardSettingsWindowActionPayload["action"]): Schedule {
@@ -1992,8 +2022,20 @@ function applyCourseCardAction(schedule: Schedule, selectedCard: SelectedCard, a
     return schedule;
   }
 
+  if (action === "merge-up") {
+    return mergeCourseCardUp(schedule, selectedCard.courseId);
+  }
+
+  if (action === "merge-left") {
+    return mergeCourseCardLeft(schedule, selectedCard.courseId);
+  }
+
   if (action === "merge-right") {
     return mergeCourseCardRight(schedule, selectedCard.courseId);
+  }
+
+  if (action === "merge-down") {
+    return mergeCourseCardDown(schedule, selectedCard.courseId);
   }
 
   if (action === "split") {
@@ -2183,15 +2225,20 @@ type CourseLocation = {
   row: ScheduleRow;
   course: CourseCell;
   weekdays: Weekday[];
+  rows: ScheduleRow[];
 };
 
 function findCourseLocation(schedule: Schedule, courseId: string): CourseLocation | null {
   const weekdays = allScheduleDays.map((day) => day.id);
-  for (const [rowIndex, row] of schedule.rows.entries()) {
+  return findCourseLocationInRows(schedule.rows, weekdays, courseId);
+}
+
+function findCourseLocationInRows(rows: ScheduleRow[], weekdays: Weekday[], courseId: string): CourseLocation | null {
+  for (const [rowIndex, row] of rows.entries()) {
     for (const [weekdayIndex, weekday] of weekdays.entries()) {
       const course = row.courses[weekday];
       if (course?.id === courseId) {
-        return { rowIndex, weekday, weekdayIndex, row, course, weekdays };
+        return { rowIndex, weekday, weekdayIndex, row, course, weekdays, rows };
       }
     }
   }
@@ -2204,14 +2251,61 @@ function findRightNeighbor(location: CourseLocation): CourseCell | null {
   return nextWeekday ? location.row.courses[nextWeekday] ?? null : null;
 }
 
-function canMergeCourses(left: CourseCell, right: CourseCell): boolean {
+function findLeftAnchorLocation(location: CourseLocation): CourseLocation | null {
+  if (location.weekdayIndex <= 0) {
+    return null;
+  }
+
+  const previousWeekday = location.weekdays[location.weekdayIndex - 1];
+  const previousCourse = location.row.courses[previousWeekday];
+  if (!previousCourse) {
+    return null;
+  }
+
+  const anchorId = previousCourse.mergedInto ?? previousCourse.id;
+  const anchorLocation = findCourseLocationInRows(location.rows, location.weekdays, anchorId);
+  if (!anchorLocation || anchorLocation.rowIndex !== location.rowIndex) {
+    return null;
+  }
+
+  const anchorEndIndex = anchorLocation.weekdayIndex + (anchorLocation.course.colSpan ?? 1);
+  return anchorEndIndex === location.weekdayIndex ? anchorLocation : null;
+}
+
+function findUpAnchorLocation(location: CourseLocation): CourseLocation | null {
+  if (location.rowIndex <= 0) {
+    return null;
+  }
+
+  const previousRow = location.rows[location.rowIndex - 1];
+  const previousCourse = previousRow?.courses[location.weekday];
+  if (!previousCourse) {
+    return null;
+  }
+
+  const anchorId = previousCourse.mergedInto ?? previousCourse.id;
+  const anchorLocation = findCourseLocationInRows(location.rows, location.weekdays, anchorId);
+  if (!anchorLocation || anchorLocation.weekday !== location.weekday) {
+    return null;
+  }
+
+  const anchorEndIndex = anchorLocation.rowIndex + (anchorLocation.course.rowSpan ?? 1);
+  return anchorEndIndex === location.rowIndex ? anchorLocation : null;
+}
+
+function findDownNeighbor(location: CourseLocation): CourseCell | null {
+  const nextRow = location.rows[location.rowIndex + (location.course.rowSpan ?? 1)] ?? null;
+  return nextRow?.courses[location.weekday] ?? null;
+}
+
+function canMergeBase(left: CourseCell, right: CourseCell): boolean {
   return (
     !left.hidden &&
     !right.hidden &&
     !left.mergedInto &&
     !right.mergedInto &&
-    !hasTemporaryChanges(left) &&
-    !hasTemporaryChanges(right) &&
+    left.renderBadge !== "temporary" &&
+    right.renderBadge !== "temporary" &&
     (right.colSpan ?? 1) === 1 &&
     left.title === right.title &&
     (left.room ?? "") === (right.room ?? "") &&
@@ -2219,8 +2313,22 @@ function canMergeCourses(left: CourseCell, right: CourseCell): boolean {
   );
 }
 
-function hasTemporaryChanges(course: CourseCell): boolean {
-  return Boolean(course.temporaryChanges?.length);
+function canMergeCoursesRight(left: CourseCell, right: CourseCell): boolean {
+  return (
+    canMergeBase(left, right) &&
+    (left.rowSpan ?? 1) === 1 &&
+    (right.colSpan ?? 1) === 1 &&
+    (right.rowSpan ?? 1) === 1
+  );
+}
+
+function canMergeCoursesDown(top: CourseCell, bottom: CourseCell): boolean {
+  return (
+    canMergeBase(top, bottom) &&
+    (top.colSpan ?? 1) === 1 &&
+    (bottom.colSpan ?? 1) === 1 &&
+    (bottom.rowSpan ?? 1) === 1
+  );
 }
 
 function areScheduleRulesEqual(left?: CourseScheduleRule, right?: CourseScheduleRule): boolean {
@@ -2243,7 +2351,7 @@ function areScheduleRulesEqual(left?: CourseScheduleRule, right?: CourseSchedule
 function mergeCourseCardRight(schedule: Schedule, courseId: string): Schedule {
   const location = findCourseLocation(schedule, courseId);
   const rightCourse = location ? findRightNeighbor(location) : null;
-  if (!location || !rightCourse || !canMergeCourses(location.course, rightCourse)) {
+  if (!location || !rightCourse || !canMergeCoursesRight(location.course, rightCourse)) {
     return schedule;
   }
 
@@ -2264,10 +2372,146 @@ function mergeCourseCardRight(schedule: Schedule, courseId: string): Schedule {
         [location.weekday]: {
           ...location.course,
           colSpan: (location.course.colSpan ?? 1) + 1,
+          rowSpan: 1,
+          mergeDirection: "horizontal",
         },
         [rightWeekday]: {
           ...rightCourse,
           mergedInto: location.course.id,
+          colSpan: 1,
+          rowSpan: 1,
+          mergeDirection: "horizontal",
+        },
+      },
+    };
+  });
+
+  return { ...schedule, rows };
+}
+
+function mergeCourseCardLeft(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  const leftAnchorLocation = location ? findLeftAnchorLocation(location) : null;
+  if (!location || !leftAnchorLocation || !canMergeCoursesRight(leftAnchorLocation.course, location.course)) {
+    return schedule;
+  }
+
+  const rows = schedule.rows.map((row, rowIndex) => {
+    if (rowIndex !== location.rowIndex) {
+      return row;
+    }
+
+    return {
+      ...row,
+      courses: {
+        ...row.courses,
+        [leftAnchorLocation.weekday]: {
+          ...leftAnchorLocation.course,
+          colSpan: (leftAnchorLocation.course.colSpan ?? 1) + 1,
+          rowSpan: 1,
+          mergeDirection: "horizontal",
+        },
+        [location.weekday]: {
+          ...location.course,
+          colSpan: 1,
+          rowSpan: 1,
+          mergedInto: leftAnchorLocation.course.id,
+          mergeDirection: "horizontal",
+        },
+      },
+    };
+  });
+
+  return { ...schedule, rows };
+}
+
+function mergeCourseCardDown(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  const downCourse = location ? findDownNeighbor(location) : null;
+  if (!location || !downCourse || !canMergeCoursesDown(location.course, downCourse)) {
+    return schedule;
+  }
+
+  const downRowIndex = location.rowIndex + (location.course.rowSpan ?? 1);
+  if (downRowIndex >= schedule.rows.length) {
+    return schedule;
+  }
+
+  const rows = schedule.rows.map((row, rowIndex) => {
+    if (rowIndex !== location.rowIndex && rowIndex !== downRowIndex) {
+      return row;
+    }
+
+    if (rowIndex === location.rowIndex) {
+      return {
+        ...row,
+        courses: {
+          ...row.courses,
+          [location.weekday]: {
+            ...location.course,
+            colSpan: 1,
+            rowSpan: (location.course.rowSpan ?? 1) + 1,
+            mergeDirection: "vertical",
+          },
+        },
+      };
+    }
+
+    return {
+      ...row,
+      courses: {
+        ...row.courses,
+        [location.weekday]: {
+          ...downCourse,
+          colSpan: 1,
+          rowSpan: 1,
+          mergedInto: location.course.id,
+          mergeDirection: "vertical",
+        },
+      },
+    };
+  });
+
+  return { ...schedule, rows };
+}
+
+function mergeCourseCardUp(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  const upAnchorLocation = location ? findUpAnchorLocation(location) : null;
+  if (!location || !upAnchorLocation || !canMergeCoursesDown(upAnchorLocation.course, location.course)) {
+    return schedule;
+  }
+
+  const rows = schedule.rows.map((row, rowIndex) => {
+    if (rowIndex !== upAnchorLocation.rowIndex && rowIndex !== location.rowIndex) {
+      return row;
+    }
+
+    if (rowIndex === upAnchorLocation.rowIndex) {
+      return {
+        ...row,
+        courses: {
+          ...row.courses,
+          [upAnchorLocation.weekday]: {
+            ...upAnchorLocation.course,
+            colSpan: 1,
+            rowSpan: (upAnchorLocation.course.rowSpan ?? 1) + 1,
+            mergeDirection: "vertical",
+          },
+        },
+      };
+    }
+
+    return {
+      ...row,
+      courses: {
+        ...row.courses,
+        [location.weekday]: {
+          ...location.course,
+          colSpan: 1,
+          rowSpan: 1,
+          mergedInto: upAnchorLocation.course.id,
+          mergeDirection: "vertical",
         },
       },
     };
@@ -2278,8 +2522,20 @@ function mergeCourseCardRight(schedule: Schedule, courseId: string): Schedule {
 
 function splitCourseCard(schedule: Schedule, courseId: string): Schedule {
   const location = findCourseLocation(schedule, courseId);
-  if (!location || (location.course.colSpan ?? 1) <= 1) {
+  if (!location) {
     return schedule;
+  }
+
+  if (location.course.mergedInto) {
+    return splitCourseCardPreservingMembers(schedule, location.course.mergedInto);
+  }
+
+  if ((location.course.colSpan ?? 1) <= 1 && (location.course.rowSpan ?? 1) <= 1) {
+    return schedule;
+  }
+
+  if ((location.course.rowSpan ?? 1) > 1 || location.course.mergeDirection === "vertical") {
+    return splitVerticalCourseCard(schedule, location, false);
   }
 
   const span = location.course.colSpan ?? 1;
@@ -2290,7 +2546,7 @@ function splitCourseCard(schedule: Schedule, courseId: string): Schedule {
     }
 
     const courses = { ...row.courses };
-    courses[location.weekday] = { ...location.course, colSpan: 1 };
+    courses[location.weekday] = { ...location.course, colSpan: 1, rowSpan: 1, mergedInto: undefined, mergeDirection: undefined };
     for (const weekday of coveredWeekdays) {
       courses[weekday] = {
         ...courses[weekday],
@@ -2300,7 +2556,9 @@ function splitCourseCard(schedule: Schedule, courseId: string): Schedule {
         scheduleRule: location.course.scheduleRule,
         temporaryChanges: location.course.temporaryChanges,
         colSpan: 1,
+        rowSpan: 1,
         mergedInto: undefined,
+        mergeDirection: undefined,
       };
     }
 
@@ -2320,7 +2578,7 @@ function splitCourseCardForTemporaryChange(schedule: Schedule, courseId: string)
     return splitCourseCardPreservingMembers(schedule, location.course.mergedInto);
   }
 
-  if ((location.course.colSpan ?? 1) > 1) {
+  if ((location.course.colSpan ?? 1) > 1 || (location.course.rowSpan ?? 1) > 1) {
     return splitCourseCardPreservingMembers(schedule, courseId);
   }
 
@@ -2338,26 +2596,17 @@ function autoSplitInconsistentMergedCourse(schedule: Schedule, courseId: string)
     return splitCourseCardPreservingMembers(schedule, course.mergedInto);
   }
 
-  const span = course.colSpan ?? 1;
-  if (span <= 1) {
+  const colSpan = course.colSpan ?? 1;
+  const rowSpan = course.rowSpan ?? 1;
+  if (colSpan <= 1 && rowSpan <= 1) {
     return schedule;
   }
 
-  const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + span);
-  const row = location.row;
-  const reference = row.courses[location.weekday];
+  const reference = location.row.courses[location.weekday];
   const baseSignature = buildCourseSignature(reference);
+  const members = collectMergedMemberCourses(location);
 
-  for (const weekday of coveredWeekdays) {
-    const neighbor = row.courses[weekday];
-    if (!neighbor) {
-      continue;
-    }
-
-    if (neighbor.mergedInto !== course.id) {
-      continue;
-    }
-
+  for (const neighbor of members) {
     if (buildCourseSignature(neighbor) !== baseSignature) {
       return splitCourseCardPreservingMembers(schedule, courseId);
     }
@@ -2368,7 +2617,19 @@ function autoSplitInconsistentMergedCourse(schedule: Schedule, courseId: string)
 
 function splitCourseCardPreservingMembers(schedule: Schedule, courseId: string): Schedule {
   const location = findCourseLocation(schedule, courseId);
-  if (!location || (location.course.colSpan ?? 1) <= 1) {
+  if (!location) {
+    return schedule;
+  }
+
+  if (location.course.mergedInto) {
+    return splitCourseCardPreservingMembers(schedule, location.course.mergedInto);
+  }
+
+  if ((location.course.rowSpan ?? 1) > 1 || location.course.mergeDirection === "vertical") {
+    return splitVerticalCourseCard(schedule, location, true);
+  }
+
+  if ((location.course.colSpan ?? 1) <= 1) {
     return schedule;
   }
 
@@ -2380,12 +2641,14 @@ function splitCourseCardPreservingMembers(schedule: Schedule, courseId: string):
     }
 
     const courses = { ...row.courses };
-    courses[location.weekday] = { ...location.course, colSpan: 1, mergedInto: undefined };
+    courses[location.weekday] = { ...location.course, colSpan: 1, rowSpan: 1, mergedInto: undefined, mergeDirection: undefined };
     for (const weekday of coveredWeekdays) {
       courses[weekday] = {
         ...courses[weekday],
         colSpan: 1,
+        rowSpan: 1,
         mergedInto: undefined,
+        mergeDirection: undefined,
       };
     }
 
@@ -2395,7 +2658,82 @@ function splitCourseCardPreservingMembers(schedule: Schedule, courseId: string):
   return { ...schedule, rows };
 }
 
+function splitVerticalCourseCard(schedule: Schedule, location: CourseLocation, preserveMembers: boolean): Schedule {
+  const span = location.course.rowSpan ?? 1;
+  if (span <= 1) {
+    return schedule;
+  }
+
+  const coveredRowIndexes = Array.from({ length: span }, (_, index) => location.rowIndex + index)
+    .filter((rowIndex) => rowIndex < schedule.rows.length);
+  const rows = schedule.rows.map((row, rowIndex) => {
+    if (!coveredRowIndexes.includes(rowIndex)) {
+      return row;
+    }
+
+    const currentCourse = row.courses[location.weekday];
+    if (!currentCourse) {
+      return row;
+    }
+
+    const nextCourse = preserveMembers
+      ? currentCourse
+      : {
+          ...currentCourse,
+          title: location.course.title,
+          room: location.course.room,
+          style: location.course.style,
+          scheduleRule: location.course.scheduleRule,
+          temporaryChanges: location.course.temporaryChanges,
+        };
+
+    return {
+      ...row,
+      courses: {
+        ...row.courses,
+        [location.weekday]: {
+          ...nextCourse,
+          colSpan: 1,
+          rowSpan: 1,
+          mergedInto: undefined,
+          mergeDirection: undefined,
+        },
+      },
+    };
+  });
+
+  return { ...schedule, rows };
+}
+
+function collectMergedMemberCourses(location: CourseLocation): CourseCell[] {
+  if ((location.course.rowSpan ?? 1) > 1 || location.course.mergeDirection === "vertical") {
+    return location.rows
+      .slice(location.rowIndex + 1, location.rowIndex + (location.course.rowSpan ?? 1))
+      .map((row) => row.courses[location.weekday])
+      .filter((course): course is CourseCell => Boolean(course && course.mergedInto === location.course.id));
+  }
+
+  const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + (location.course.colSpan ?? 1));
+  return coveredWeekdays
+    .map((weekday) => location.row.courses[weekday])
+    .filter((course): course is CourseCell => Boolean(course && course.mergedInto === location.course.id));
+}
+
 function deleteCourseCard(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  if (!location) {
+    return schedule;
+  }
+
+  if (location.course.mergedInto || (location.course.colSpan ?? 1) > 1 || (location.course.rowSpan ?? 1) > 1) {
+    const splitSchedule = splitCourseCardPreservingMembers(schedule, location.course.mergedInto ?? courseId);
+    return hideSingleCourseCard(splitSchedule, courseId);
+  }
+
+  return hideSingleCourseCard(schedule, courseId);
+}
+
+function hideSingleCourseCard(schedule: Schedule, courseId: string): Schedule {
   const location = findCourseLocation(schedule, courseId);
   if (!location) {
     return schedule;
@@ -2412,27 +2750,14 @@ function deleteCourseCard(schedule: Schedule, courseId: string): Schedule {
       return row;
     }
 
-    const span = target.colSpan ?? 1;
-    const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + span);
     courses[location.weekday] = {
       ...target,
       hidden: true,
       colSpan: 1,
+      rowSpan: 1,
       mergedInto: undefined,
+      mergeDirection: undefined,
     };
-
-    for (const weekday of coveredWeekdays) {
-      const neighbor = courses[weekday];
-      if (!neighbor) {
-        continue;
-      }
-
-      courses[weekday] = {
-        ...neighbor,
-        mergedInto: undefined,
-        hidden: true,
-      };
-    }
 
     return { ...row, courses };
   });
@@ -2461,7 +2786,9 @@ function restoreHiddenCourseCard(schedule: Schedule, courseId: string): Schedule
       ...target,
       hidden: false,
       colSpan: 1,
+      rowSpan: 1,
       mergedInto: undefined,
+      mergeDirection: undefined,
     };
 
     return { ...row, courses };
@@ -2478,6 +2805,7 @@ function createEmptyCourseCell(id: string): CourseCell {
     note: "",
     hidden: true,
     colSpan: 1,
+    rowSpan: 1,
     scheduleRule: {
       weekPattern: "all",
       applyWholeTerm: true,
@@ -2541,7 +2869,7 @@ function resolveForwardedClickHit(payload: DesktopInputEvent, scaleFactor: numbe
 
   for (const point of candidates) {
     const element = document.elementFromPoint(point.x, point.y) as HTMLElement | null;
-    const hit = hitTestForwardedElement(element);
+    const hit = hitTestForwardedElement(element, point.x, point.y);
     if (hit.menuButton || hit.headerToggle || hit.menuAction || hit.editableCard) {
       return hit;
     }
@@ -2590,14 +2918,14 @@ function dedupePoints(points: Array<{ x: number; y: number }>): Array<{ x: numbe
   });
 }
 
-function hitTestForwardedElement(element: HTMLElement | null): ForwardedClickHit {
+function hitTestForwardedElement(element: HTMLElement | null, x?: number, y?: number): ForwardedClickHit {
   const menuButton = Boolean(element?.closest("[data-menu-button]"));
   const headerToggle = Boolean(element?.closest("[data-header-toggle]"));
   const menuActionElement = element?.closest<HTMLElement>("[data-menu-action]");
   const editableElement = element?.closest<HTMLElement>("[data-course-id], [data-period-id]");
 
   const menuAction = readMenuAction(menuActionElement);
-  const editableCard = readEditableCard(editableElement);
+  const editableCard = readEditableCard(editableElement, x, y);
 
   return { menuButton, headerToggle, menuAction, editableCard };
 }
@@ -2607,8 +2935,8 @@ function readMenuAction(element: HTMLElement | null | undefined): ForwardedClick
   return action === "settings" || action === "mode" || action === "close" ? action : null;
 }
 
-function readEditableCard(element: HTMLElement | null | undefined): SelectedCard | null {
-  const courseId = element?.dataset.courseId;
+function readEditableCard(element: HTMLElement | null | undefined, x?: number, y?: number): SelectedCard | null {
+  const courseId = resolveCourseElementId(element, x, y);
   if (courseId) {
     return { type: "course", courseId };
   }
@@ -2630,10 +2958,35 @@ function findEditableCardByGeometry(x: number, y: number): SelectedCard | null {
       continue;
     }
 
+    const courseId = resolveCourseElementId(element, x, y);
+    if (courseId) {
+      return { type: "course", courseId };
+    }
+
     return readEditableCard(element);
   }
 
   return null;
+}
+
+function resolveCourseElementId(element: HTMLElement | null | undefined, x?: number, y?: number): string | undefined {
+  const courseId = element?.dataset.courseId;
+  if (!courseId) {
+    return undefined;
+  }
+
+  const hitIds = parseCourseHitIds(element.dataset.courseHitIds, courseId);
+  if (hitIds.length <= 1 || (x === undefined && y === undefined)) {
+    return hitIds[0] ?? courseId;
+  }
+
+  const rect = element.getBoundingClientRect();
+  const axis = element.dataset.courseHitAxis === "vertical" ? "vertical" : "horizontal";
+  const ratio = axis === "vertical"
+    ? rect.height > 0 ? ((y ?? rect.top) - rect.top) / rect.height : 0
+    : rect.width > 0 ? ((x ?? rect.left) - rect.left) / rect.width : 0;
+  const index = Math.max(0, Math.min(hitIds.length - 1, Math.floor(ratio * hitIds.length)));
+  return hitIds[index] ?? courseId;
 }
 
 function loadPersistedSchedule(): Schedule | null {

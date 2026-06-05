@@ -105,7 +105,7 @@ export type CardSettingsWindowUpdatePayload = {
 export type CardSettingsWindowActionPayload = {
   windowLabel: string;
   selectedCard: SelectedCard;
-  action: "merge-right" | "split" | "delete" | "add" | "apply-style" | "apply-schedule";
+  action: "merge-up" | "merge-left" | "merge-right" | "merge-down" | "split" | "delete" | "add" | "apply-style" | "apply-schedule";
   draft?: CardDraft;
   temporaryChanges?: TemporaryChangeDraft[];
   activeTemporaryChangeId?: string | null;

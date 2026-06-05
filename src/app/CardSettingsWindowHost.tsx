@@ -34,7 +34,13 @@ export function CardSettingsWindowHost() {
   const [selectedCard, setSelectedCard] = useState<SelectedCard | null>(null);
   const [draft, setDraft] = useState<CardDraft>(defaultCardDraft);
   const [term, setTerm] = useState<TermSettings>({ startDate: defaultCardDraft.startDate, endDate: defaultCardDraft.endDate });
-  const [mergeState, setMergeState] = useState<CourseCardMergeState>({ canMergeRight: false, canSplit: false });
+  const [mergeState, setMergeState] = useState<CourseCardMergeState>({
+    canMergeUp: false,
+    canMergeLeft: false,
+    canMergeRight: false,
+    canMergeDown: false,
+    canSplit: false,
+  });
   const [temporaryChanges, setTemporaryChanges] = useState<TemporaryChangeDraft[]>([]);
   const [activeTemporaryChangeId, setActiveTemporaryChangeId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<CardSettingsTab>("course");
@@ -247,7 +253,10 @@ export function CardSettingsWindowHost() {
         activeTemporaryChangeId={activeTemporaryChangeId}
         onActiveTabChange={setActiveTab}
         onDraftChange={emitUpdate}
+        onMergeUp={() => emitAction("merge-up")}
+        onMergeLeft={() => emitAction("merge-left")}
         onMergeRight={() => emitAction("merge-right")}
+        onMergeDown={() => emitAction("merge-down")}
         onSplit={() => emitAction("split")}
         onDeleteCourse={() => emitAction("delete")}
         onAddCourse={() => emitAction("add", true)}
