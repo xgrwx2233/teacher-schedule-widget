@@ -3143,6 +3143,29 @@ button {
   background: #ff4d4f;
 }
 
+.course-card.is-temporary-cancel {
+  border: 1px dashed rgba(203, 213, 225, 0.36);
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.course-card.is-temporary-cancel .course-card-title-line {
+  padding-left: 18px;
+  padding-right: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(248, 250, 252, 0.38);
+}
+
+.course-card.is-temporary-cancel .course-card-title-text {
+  font-weight: 400;
+}
+
+.course-card.is-temporary-cancel small {
+  display: none;
+}
+
 .course-card small {
   width: 100%;
   max-width: 100%;

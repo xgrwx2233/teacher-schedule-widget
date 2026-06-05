@@ -182,9 +182,10 @@ function CourseCard({
 }) {
   const displayMetrics = getCourseCardDisplayMetrics(course);
   const badgeLabel = getCourseBadgeLabel(course.renderBadge);
+  const isTemporaryCancel = course.renderBadge === "temporary" && course.title.trim() === "无课" && !(course.room ?? "").trim();
   return (
     <button
-      className={`course-card ${displayMetrics.isTwoLine ? "is-two-line" : "is-one-line"} ${badgeLabel ? "has-badge" : ""} ${course.id === activeCellId ? "is-active" : ""}`}
+      className={`course-card ${displayMetrics.isTwoLine ? "is-two-line" : "is-one-line"} ${badgeLabel ? "has-badge" : ""} ${isTemporaryCancel ? "is-temporary-cancel" : ""} ${course.id === activeCellId ? "is-active" : ""}`}
       style={toCardCssVars(course.style, displayMetrics)}
       data-course-id={course.id}
       type="button"

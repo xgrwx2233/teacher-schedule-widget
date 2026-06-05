@@ -1095,17 +1095,61 @@ function applyVisibleCourseRulesToSchedule(schedule: Schedule, weekNumber: numbe
     ...schedule,
     rows: schedule.rows.map((row) => {
       const rowWithCourses = ensureRowCourses(row);
+      const visibleCourses = Object.fromEntries(
+        Object.entries(rowWithCourses.courses).map(([weekday, course]) => [
+          weekday,
+          applyVisibleCourseForDate(course, visibleDateByWeekday.get(weekday as Weekday), weekNumber),
+        ]),
+      ) as Record<Weekday, CourseCell>;
+
       return {
         ...rowWithCourses,
-        courses: Object.fromEntries(
-          Object.entries(rowWithCourses.courses).map(([weekday, course]) => [
-            weekday,
-            applyVisibleCourseForDate(course, visibleDateByWeekday.get(weekday as Weekday), weekNumber),
-          ]),
-        ) as Record<Weekday, CourseCell>,
+        courses: atomizeTemporaryMergedCoursesForRender(visibleCourses, schedule.days.map((day) => day.id)),
       };
     }),
   };
+}
+
+function atomizeTemporaryMergedCoursesForRender(courses: Record<Weekday, CourseCell>, weekdays: Weekday[]): Record<Weekday, CourseCell> {
+  const nextCourses = { ...courses };
+  for (const weekday of weekdays) {
+    const course = nextCourses[weekday];
+    if (!course) {
+      continue;
+    }
+
+    if (course.mergedInto && course.renderBadge === "temporary") {
+      const anchorLocation = weekdays.find((item) => nextCourses[item]?.id === course.mergedInto);
+      if (anchorLocation) {
+        atomizeRenderMergeGroup(nextCourses, weekdays, anchorLocation);
+      }
+      nextCourses[weekday] = { ...course, colSpan: 1, mergedInto: undefined };
+      continue;
+    }
+
+    if (!course.mergedInto && (course.colSpan ?? 1) > 1 && course.renderBadge === "temporary") {
+      atomizeRenderMergeGroup(nextCourses, weekdays, weekday);
+    }
+  }
+
+  return nextCourses;
+}
+
+function atomizeRenderMergeGroup(courses: Record<Weekday, CourseCell>, weekdays: Weekday[], anchorWeekday: Weekday): void {
+  const anchor = courses[anchorWeekday];
+  if (!anchor) {
+    return;
+  }
+
+  const span = anchor.colSpan ?? 1;
+  const startIndex = weekdays.indexOf(anchorWeekday);
+  courses[anchorWeekday] = { ...anchor, colSpan: 1, mergedInto: undefined };
+  for (const coveredWeekday of weekdays.slice(startIndex + 1, startIndex + span)) {
+    const coveredCourse = courses[coveredWeekday];
+    if (coveredCourse?.mergedInto === anchor.id) {
+      courses[coveredWeekday] = { ...coveredCourse, colSpan: 1, mergedInto: undefined };
+    }
+  }
 }
 
 function ensureRowCourses(row: ScheduleRow, newlyVisibleWeekdays: Weekday[] = []): ScheduleRow {
@@ -1890,9 +1934,13 @@ function applyCardDraft(
     return schedule;
   }
 
+  const sourceSchedule =
+    selectedCard.type === "course" && temporaryChanges !== undefined
+      ? splitCourseCardForTemporaryChange(schedule, selectedCard.courseId)
+      : schedule;
   const style = selectedCard.type === "period" ? toPeriodCardStyle(draft) : toCardStyle(draft);
-  const rows = schedule.rows.map((row) => applyDraftToRow(row, selectedCard, draft, style, temporaryChanges));
-  const nextSchedule = { ...schedule, rows };
+  const rows = sourceSchedule.rows.map((row) => applyDraftToRow(row, selectedCard, draft, style, temporaryChanges));
+  const nextSchedule = { ...sourceSchedule, rows };
   return selectedCard.type === "course" ? autoSplitInconsistentMergedCourse(nextSchedule, selectedCard.courseId) : nextSchedule;
 }
 
@@ -1931,7 +1979,11 @@ function getCourseCardMergeState(schedule: Schedule, selectedCard: SelectedCard)
   const canSplit = (course.colSpan ?? 1) > 1;
   const rightCourse = findRightNeighbor(location);
   const canMergeRight = Boolean(rightCourse && canMergeCourses(course, rightCourse));
-  const reason = canMergeRight || canSplit ? undefined : "右侧相邻卡片内容不一致";
+  const reason = canMergeRight || canSplit
+    ? undefined
+    : hasTemporaryChanges(course) || (rightCourse ? hasTemporaryChanges(rightCourse) : false)
+      ? "有临时改动的课程不能合并"
+      : "右侧相邻卡片内容不一致";
   return { canMergeRight, canSplit, reason };
 }
 
@@ -2158,11 +2210,17 @@ function canMergeCourses(left: CourseCell, right: CourseCell): boolean {
     !right.hidden &&
     !left.mergedInto &&
     !right.mergedInto &&
+    !hasTemporaryChanges(left) &&
+    !hasTemporaryChanges(right) &&
     (right.colSpan ?? 1) === 1 &&
     left.title === right.title &&
     (left.room ?? "") === (right.room ?? "") &&
     areScheduleRulesEqual(left.scheduleRule, right.scheduleRule)
   );
+}
+
+function hasTemporaryChanges(course: CourseCell): boolean {
+  return Boolean(course.temporaryChanges?.length);
 }
 
 function areScheduleRulesEqual(left?: CourseScheduleRule, right?: CourseScheduleRule): boolean {
@@ -2250,6 +2308,23 @@ function splitCourseCard(schedule: Schedule, courseId: string): Schedule {
   });
 
   return { ...schedule, rows };
+}
+
+function splitCourseCardForTemporaryChange(schedule: Schedule, courseId: string): Schedule {
+  const location = findCourseLocation(schedule, courseId);
+  if (!location) {
+    return schedule;
+  }
+
+  if (location.course.mergedInto) {
+    return splitCourseCardPreservingMembers(schedule, location.course.mergedInto);
+  }
+
+  if ((location.course.colSpan ?? 1) > 1) {
+    return splitCourseCardPreservingMembers(schedule, courseId);
+  }
+
+  return schedule;
 }
 
 function autoSplitInconsistentMergedCourse(schedule: Schedule, courseId: string): Schedule {
