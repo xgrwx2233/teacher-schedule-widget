@@ -96,10 +96,6 @@ pub fn get_desktop_wallpaper(window: WebviewWindow) -> Result<DesktopWallpaperIn
     let window_size = window.outer_size().map_err(|error| error.to_string())?;
     let selected = select_wallpaper_for_window(&window)?;
     let signature = wallpaper_signature(&selected);
-    println!(
-        "[wallpaper] full refresh path={:?} size={:?} modified_ms={:?}",
-        signature.path, signature.file_size, signature.modified_ms
-    );
 
     Ok(DesktopWallpaperInfo {
         path: if selected.path.trim().is_empty() { None } else { Some(selected.path.clone()) },
@@ -124,10 +120,6 @@ pub fn get_desktop_wallpaper(window: WebviewWindow) -> Result<DesktopWallpaperIn
 pub fn get_desktop_wallpaper_signature(window: WebviewWindow) -> Result<DesktopWallpaperSignature, String> {
     select_wallpaper_for_window(&window).map(|selected| {
         let signature = wallpaper_signature(&selected);
-        println!(
-            "[wallpaper] signature path={:?} size={:?} modified_ms={:?}",
-            signature.path, signature.file_size, signature.modified_ms
-        );
         signature
     })
 }
@@ -188,7 +180,6 @@ fn select_wallpaper_for_window(window: &WebviewWindow) -> Result<SelectedWallpap
     let (mut path, monitor_rect) = selected
         .or(fallback)
         .unwrap_or_else(|| (String::new(), RECT::default()));
-    let desktop_wallpaper_path = path.clone();
     let system_wallpaper_path = get_system_wallpaper_path();
     if let Some(system_path) = system_wallpaper_path
         .as_ref()
@@ -196,12 +187,6 @@ fn select_wallpaper_for_window(window: &WebviewWindow) -> Result<SelectedWallpap
     {
         path = system_path.to_string();
     }
-    println!(
-        "[wallpaper] selected desktop_api_path={:?} system_api_path={:?} final_path={:?}",
-        empty_to_none(&desktop_wallpaper_path),
-        system_wallpaper_path,
-        empty_to_none(&path)
-    );
     let wallpaper_rect = calculate_wallpaper_rect(&path, monitor_rect, position.0);
 
     Ok(SelectedWallpaper {
@@ -210,15 +195,6 @@ fn select_wallpaper_for_window(window: &WebviewWindow) -> Result<SelectedWallpap
         wallpaper_rect,
         position: position.0,
     })
-}
-
-fn empty_to_none(value: &str) -> Option<&str> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed)
-    }
 }
 
 fn get_system_wallpaper_path() -> Option<String> {

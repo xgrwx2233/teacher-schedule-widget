@@ -239,11 +239,7 @@ export function App() {
       if (requestId === wallpaperRequestIdRef.current) {
         wallpaperSignatureRef.current = info.signature;
         setWallpaperInfo(info);
-        setWallpaperVersion((current) => {
-          const nextVersion = current + 1;
-          console.info("[wallpaper] frontend refresh applied", { path: info.path, version: nextVersion });
-          return nextVersion;
-        });
+        setWallpaperVersion((current) => current + 1);
       }
     } catch (error) {
       console.error("failed to load desktop wallpaper", error);
@@ -440,10 +436,8 @@ export function App() {
       return;
     }
 
-    console.info("open widget menu requested");
     try {
       await invoke("open_widget_menu_window");
-      console.info("open widget menu window invoked");
       await positionWidgetMenuWindow(sourceWindowLabel, anchor);
       await emitWidgetMenuState(modeRef.current);
       menuOpenRef.current = true;
@@ -483,7 +477,6 @@ export function App() {
       return;
     }
 
-    console.info("open card settings requested", card);
     const currentSchedule = ensureScheduleCapacity(scheduleRef.current, settingsRef.current.periodCount);
     scheduleRef.current = currentSchedule;
     setSchedule(currentSchedule);
@@ -503,7 +496,6 @@ export function App() {
       await invoke("open_card_settings_window", {
         title: buildInitialCardSettingsWindowTitle(card, titleContext, draft),
       });
-      console.info("open card settings window invoked");
       cardSettingsWindowOpenRef.current = true;
       await emitTo<CardSettingsWindowStatePayload>(CARD_SETTINGS_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_EVENT, {
         selectedCard: card,
@@ -821,7 +813,6 @@ export function App() {
 
     const unlistenPromise = listen<ProxyWidgetHit>(PROXY_TRIGGER_EVENT, (event) => {
       const hit = event.payload;
-      console.info("proxy trigger", hit);
       handleProxyWidgetHit(
         hit,
         openFloatingToolbarWindow,

@@ -182,7 +182,7 @@ pub fn ensure_proxy_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         WebviewUrl::App("index.html#interaction-proxy".into()),
     )
     .title("Teacher Schedule Interaction Proxy")
-    .devtools(true)
+    .devtools(false)
     .decorations(false)
     .transparent(true)
     .shadow(false)
@@ -226,8 +226,6 @@ pub fn start_proxy_input_manager(
         let mut pending_card_click: Option<(ProxyWidgetHit, Instant)> = None;
         let double_click_interval = Duration::from_millis(500);
         let mut passthrough = true;
-        let mut last_debug_state = String::new();
-
         loop {
             if !widget_visible.load(Ordering::Relaxed) {
                 if let Some(proxy) = app.get_webview_window(PROXY_WINDOW_LABEL) {
@@ -238,7 +236,6 @@ pub fn start_proxy_input_manager(
                 was_left_down = false;
                 pressed_hit = None;
                 pending_card_click = None;
-                last_debug_state.clear();
                 thread::sleep(Duration::from_millis(50));
                 continue;
             }
@@ -295,17 +292,6 @@ pub fn start_proxy_input_manager(
             let desktop_icon_hit = desktop_icons::is_desktop_icon_at_screen_point(cursor.x, cursor.y);
             let point_exposed = is_widget_point_exposed(&app, &widget, cursor.x, cursor.y);
             let can_interact = !desktop_icon_hit && widget_hit.is_some() && point_exposed;
-            let debug_state = format!(
-                "hit={:?}; icon={}; exposed={}; interact={}",
-                widget_hit.as_ref().map(|hit| (&hit.kind, &hit.id)),
-                desktop_icon_hit,
-                point_exposed,
-                can_interact,
-            );
-            if debug_state != last_debug_state {
-                eprintln!("interaction proxy: {debug_state}");
-                last_debug_state = debug_state;
-            }
 
             if passthrough == can_interact {
                 let _ = proxy.set_ignore_cursor_events(!can_interact);
@@ -336,11 +322,6 @@ pub fn start_proxy_input_manager(
                 // icon priority is already included in can_interact, so an icon
                 // covering the widget records no widget target.
                 pressed_hit = if can_interact { widget_hit.clone() } else { None };
-                eprintln!(
-                    "interaction proxy press: hit={:?}; fast_click={}",
-                    pressed_hit.as_ref().map(|hit| (&hit.kind, &hit.id)),
-                    fast_click_between_polls,
-                );
             }
 
             // Treat the mouse-up edge as click confirmation for the element that
@@ -351,7 +332,6 @@ pub fn start_proxy_input_manager(
                 if let Some(hit) = pressed_hit.take() {
                     let _ = proxy.set_ignore_cursor_events(true);
                     passthrough = true;
-                    last_debug_state.clear();
                     let _ = app.emit(PROXY_EVENT, ProxyHitboxResult {
                         screen_x: cursor.x,
                         screen_y: cursor.y,
@@ -361,7 +341,6 @@ pub fn start_proxy_input_manager(
                         desktop_icon_hit,
                         widget_hit: Some(hit.clone()),
                     });
-                    eprintln!("interaction proxy click: {:?}", hit);
                     handle_proxy_click(
                         &app,
                         &ui_state,
@@ -410,7 +389,6 @@ fn handle_proxy_click(
 
     if double_clicked {
         pending_card_click.take();
-        eprintln!("interaction proxy double click: {:?}", hit);
         let _ = app.emit(PROXY_TRIGGER_EVENT, hit.clone());
         return;
     }

@@ -522,6 +522,8 @@ function TemporaryChangesTab({
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [replaceConfirmChange, setReplaceConfirmChange] = useState<TemporaryChangeDraft | null>(null);
+  const isNoClass = editor.type === "cancel";
+  const sortedEditorDates = sortDates(editor.dates);
 
   useEffect(() => {
     setEditor(createEditableTemporaryChange(activeChange, activeChange ? undefined : resolvedDefaultDate));
@@ -565,15 +567,21 @@ function TemporaryChangesTab({
     }));
   };
 
-  const markNoClass = () => {
+  const setTemporaryMode = (mode: TemporaryChangeDraft["type"]) => {
+    if (mode === "cancel") {
+      updateEditor({
+        type: "cancel",
+        title: "无课",
+        subtitle: "",
+      });
+      return;
+    }
+
     updateEditor({
-      type: "cancel",
-      title: "无课",
-      subtitle: "",
+      type: "replace",
+      title: editor.title.trim() === "无课" ? "" : editor.title,
     });
   };
-
-  const isNoClass = editor.title.trim() === "无课";
 
   const removeDate = (date: string) => {
     const nextDates = editor.dates.filter((item) => item !== date);
@@ -590,13 +598,13 @@ function TemporaryChangesTab({
 
   const saveChange = (forceReplace = false) => {
     const normalized = normalizeTemporaryEditor(editor);
-    if (!normalized.title.trim()) {
-      setFeedback("请先填写课程名");
+    if (normalized.dates.length === 0) {
+      setFeedback("请至少选择一个改动日期");
       return;
     }
 
-    if (normalized.dates.length === 0) {
-      setFeedback("请至少选择一个改动日期");
+    if (normalized.type === "replace" && !normalized.title.trim()) {
+      setFeedback("请先填写课程名");
       return;
     }
 
@@ -635,160 +643,164 @@ function TemporaryChangesTab({
 
   return (
     <div className="temporary-config-stack">
-      <SettingsCard
-        title="改动日期"
-        action={
-          <button type="button" className="card-settings-secondary temporary-pick-date" onClick={() => setCalendarOpen(true)}>
-            选择日期
-          </button>
-        }
-      >
-        <div className="date-chip-row">
-          {sortDates(editor.dates).length === 0 ? (
-            <span className="temporary-date-empty">暂未选择日期</span>
-          ) : (
-            sortDates(editor.dates).map((date) => (
-              <span className="date-chip" key={date}>
-                {formatDateChip(date)}
-                <button type="button" aria-label={`删除 ${date}`} onClick={() => removeDate(date)}>
-                  ×
-                </button>
-              </span>
-            ))
-          )}
-        </div>
-      </SettingsCard>
-
-      <SettingsCard>
-        <div className="basic-info-grid">
-          <div className="basic-info-inline">
-            <label className={isNoClass ? "basic-info-field is-disabled" : "basic-info-field"}>
-              <div className="basic-info-field-head">
-                <span>课程名</span>
-                <button
-                  type="button"
-                  className={isNoClass ? "temporary-no-class-button is-active" : "temporary-no-class-button"}
-                  onClick={markNoClass}
-                >
-                  不上啦
-                </button>
-              </div>
-              <input
-                className="card-settings-input"
-                value={editor.title}
-                maxLength={4}
-                placeholder="社团"
-                disabled={isNoClass}
-                onChange={(event) => updateEditor({ title: limitCardText(event.currentTarget.value) })}
-              />
-            </label>
-            <label className={isNoClass ? "basic-info-field is-disabled" : "basic-info-field"}>
-              <span>辅助信息</span>
-              <input
-                className="card-settings-input"
-                value={editor.subtitle}
-                maxLength={4}
-                placeholder="活动室"
-                disabled={isNoClass}
-                onChange={(event) => updateEditor({ subtitle: limitCardText(event.currentTarget.value) })}
-              />
-            </label>
-          </div>
-          <div className="basic-info-color">
-            <span>颜色</span>
-            <ColorPickerRow value={editor.color} onChange={(color) => updateEditor({ color })} />
-          </div>
-        </div>
-      </SettingsCard>
-
-      <div className="accordion-group temporary-style-group">
-        <details className="row-card row-card-accordion accordion-style">
-          <summary>
-            <span className="row-card-label">风格</span>
-            <span className="card-settings-accordion-chevron" aria-hidden="true">
-              ▾
+      <SettingsCard title="改动日期" className="temporary-date-card">
+        <div className="date-chip-row temporary-date-chip-row">
+          {sortedEditorDates.map((date) => (
+            <span className="date-chip" key={date}>
+              {formatDateChip(date)}
+              <button type="button" aria-label={`删除 ${date}`} onClick={() => removeDate(date)}>
+                ×
+              </button>
             </span>
-          </summary>
-          <div className="row-card-accordion-content">
-            <div className="style-row-stack">
-              <div className="style-row-grid">
-                <CompactField label="字体">
-                  <select className="card-settings-select" value={editor.style.fontFamily} onChange={(event) => updateEditor({ style: { ...editor.style, fontFamily: event.currentTarget.value } })}>
-                    <option value="Microsoft YaHei">微软雅黑</option>
-                    <option value="Segoe UI">Segoe UI</option>
-                    <option value="SimSun">宋体</option>
-                    <option value="KaiTi">楷体</option>
-                  </select>
-                </CompactField>
-                <CompactField label="字号">
-                  <select className="card-settings-select" value={editor.style.fontSize} onChange={(event) => updateEditor({ style: { ...editor.style, fontSize: clamp(Number(event.currentTarget.value), 8, 16) } })}>
-                    {courseFontSizeOptions.map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </CompactField>
-                <CompactField label="粗细">
-                  <select className="card-settings-select" value={editor.style.fontWeight} onChange={(event) => updateEditor({ style: { ...editor.style, fontWeight: event.currentTarget.value as CardDraft["fontWeight"] } })}>
-                    <option value="regular">常规</option>
-                    <option value="medium">中等</option>
-                    <option value="bold">加粗</option>
-                  </select>
-                </CompactField>
+          ))}
+          <button type="button" className="temporary-date-add" title="选择日期" aria-label="选择日期" onClick={() => setCalendarOpen(true)}>
+            +
+          </button>
+        </div>
+      </SettingsCard>
+
+      <div className="temporary-mode-radio-row" role="radiogroup" aria-label="临时改动类型">
+        <button type="button" role="radio" aria-checked={isNoClass} className={isNoClass ? "temporary-radio-option is-active" : "temporary-radio-option"} onClick={() => setTemporaryMode("cancel")}>
+          <span aria-hidden="true" />
+          不上啦
+        </button>
+        <button type="button" role="radio" aria-checked={!isNoClass} className={!isNoClass ? "temporary-radio-option is-active" : "temporary-radio-option"} onClick={() => setTemporaryMode("replace")}>
+          <span aria-hidden="true" />
+          换课
+        </button>
+      </div>
+
+      {!isNoClass ? (
+        <SettingsCard className="temporary-content-form-card">
+          <div className="temporary-content-form">
+            <div className="basic-info-grid">
+              <div className="basic-info-inline">
+                <label className="basic-info-field">
+                  <span>课程名</span>
+                  <LimitedTextInput
+                    className="card-settings-input"
+                    value={editor.title}
+                    maxLength={4}
+                    placeholder="社团"
+                    onCommit={(title) => updateEditor({ title })}
+                  />
+                </label>
+                <label className="basic-info-field">
+                  <span>辅助信息</span>
+                  <LimitedTextInput
+                    className="card-settings-input"
+                    value={editor.subtitle}
+                    maxLength={5}
+                    placeholder="活动室"
+                    onCommit={(subtitle) => updateEditor({ subtitle })}
+                  />
+                </label>
               </div>
-              <div className="style-row-secondary temporary-display-row">
-                <div className="card-settings-field display-mode-control">
-                  <select
-                    className="card-settings-select card-settings-select-narrow display-mode-select"
-                    value={editor.style.displayMode}
-                    onChange={(event) => updateEditor({ style: { ...editor.style, displayMode: event.currentTarget.value as CardDraft["displayMode"] } })}
-                  >
-                    <option value="auto" title="有辅助信息时自动显示双行，没有辅助信息时显示单行">
-                      自动
-                    </option>
-                    <option value="oneLine" title="只显示一行课程名">
-                      单行
-                    </option>
-                    <option value="twoLine" title="有辅助信息时固定双行，没有辅助信息时自动退回单行">
-                      双行
-                    </option>
-                  </select>
-                </div>
+              <div className="basic-info-color">
+                <span>颜色</span>
+                <ColorPickerRow value={editor.color} onChange={(color) => updateEditor({ color })} />
               </div>
             </div>
+
+            <div className="accordion-group temporary-style-group">
+              <details className="row-card row-card-accordion accordion-style">
+                <summary>
+                  <span className="row-card-label">风格</span>
+                  <span className="card-settings-accordion-chevron" aria-hidden="true">
+                    ▾
+                  </span>
+                </summary>
+                <div className="row-card-accordion-content">
+                  <div className="style-row-stack">
+                    <div className="style-row-grid">
+                      <CompactField label="字体">
+                        <select className="card-settings-select" value={editor.style.fontFamily} onChange={(event) => updateEditor({ style: { ...editor.style, fontFamily: event.currentTarget.value } })}>
+                          <option value="Microsoft YaHei">微软雅黑</option>
+                          <option value="Segoe UI">Segoe UI</option>
+                          <option value="SimSun">宋体</option>
+                          <option value="KaiTi">楷体</option>
+                        </select>
+                      </CompactField>
+                      <CompactField label="字号">
+                        <select className="card-settings-select" value={editor.style.fontSize} onChange={(event) => updateEditor({ style: { ...editor.style, fontSize: clamp(Number(event.currentTarget.value), 8, 16) } })}>
+                          {courseFontSizeOptions.map((size) => (
+                            <option key={size} value={size}>
+                              {size}
+                            </option>
+                          ))}
+                        </select>
+                      </CompactField>
+                      <CompactField label="粗细">
+                        <select className="card-settings-select" value={editor.style.fontWeight} onChange={(event) => updateEditor({ style: { ...editor.style, fontWeight: event.currentTarget.value as CardDraft["fontWeight"] } })}>
+                          <option value="regular">常规</option>
+                          <option value="medium">中等</option>
+                          <option value="bold">加粗</option>
+                        </select>
+                      </CompactField>
+                    </div>
+                    <div className="style-row-secondary temporary-display-row">
+                      <div className="card-settings-field display-mode-control">
+                        <select
+                          className="card-settings-select card-settings-select-narrow display-mode-select"
+                          value={editor.style.displayMode}
+                          onChange={(event) => updateEditor({ style: { ...editor.style, displayMode: event.currentTarget.value as CardDraft["displayMode"] } })}
+                        >
+                          <option value="auto" title="有辅助信息时自动显示双行，没有辅助信息时显示单行">
+                            自动
+                          </option>
+                          <option value="oneLine" title="只显示一行课程名">
+                            单行
+                          </option>
+                          <option value="twoLine" title="有辅助信息时固定双行，没有辅助信息时自动退回单行">
+                            双行
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
           </div>
-        </details>
-      </div>
+        </SettingsCard>
+      ) : null}
 
       <button type="button" className="temporary-save-button" onClick={() => saveChange(false)}>
         确认并保存
       </button>
       {feedback ? <div className="temporary-feedback">{feedback}</div> : null}
 
-      <SettingsCard
-        title="改动历史"
-        action={
-          <button type="button" className="card-settings-secondary temporary-delete-history" disabled={!activeChange} onClick={deleteHistory}>
-            删除该条历史
-          </button>
-        }
-      >
-        {sortedChanges.length === 0 ? (
-          <div className="temporary-list-empty">暂无改动历史</div>
-        ) : (
-          <select className="card-settings-select temporary-history-select" value={activeChange?.id ?? ""} onChange={(event) => onSelectChange(event.currentTarget.value || null)}>
-            <option value="" disabled>
-              选择改动历史
-            </option>
-            {sortedChanges.map((change) => (
-              <option key={change.id} value={change.id}>
-                {formatTemporaryHistorySummary(change)}
-              </option>
-            ))}
-          </select>
-        )}
-      </SettingsCard>
+      <details className="settings-card temporary-history-drawer">
+        <summary>
+          <span>改动历史</span>
+          <span className="card-settings-accordion-chevron" aria-hidden="true">
+            ▾
+          </span>
+        </summary>
+        <div className="settings-card-content temporary-history-content">
+          <div className="temporary-history-actions">
+            <button type="button" className="card-settings-secondary temporary-delete-history" disabled={!activeChange} onClick={deleteHistory}>
+              删除该条历史
+            </button>
+          </div>
+          {sortedChanges.length === 0 ? (
+            <div className="temporary-list-empty">暂无改动历史</div>
+          ) : (
+            <div className="temporary-history-list">
+              {sortedChanges.map((change) => (
+                <button
+                  key={change.id}
+                  type="button"
+                  className={change.id === activeChange?.id ? "temporary-history-item is-active" : "temporary-history-item"}
+                  onClick={() => onSelectChange(change.id)}
+                >
+                  {formatTemporaryHistorySummary(change)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </details>
 
       {calendarOpen ? (
         <MultiSelectCalendarDialog
@@ -1124,11 +1136,13 @@ function isIsoDate(value: string | undefined): value is string {
 
 function normalizeTemporaryEditor(change: TemporaryChangeDraft): TemporaryChangeDraft {
   const now = new Date().toISOString();
-  const title = limitCardText(change.title || change.replaceTitle || "");
-  const subtitle = limitCardText(change.subtitle || change.replaceSecondary || "");
+  const isCancel = change.type === "cancel";
+  const title = isCancel ? "无课" : limitCardText(change.title || change.replaceTitle || "");
+  const subtitle = isCancel ? "" : limitTextByCharacters(change.subtitle || change.replaceSecondary || "", 5);
   const color = (change.color || change.replaceColor || "#4f46e5").trim();
   return {
     ...change,
+    type: isCancel ? "cancel" : "replace",
     title,
     subtitle,
     color,
@@ -1155,9 +1169,13 @@ function sortDates(dates: string[]): string[] {
 
 function formatTemporaryHistorySummary(change: TemporaryChangeDraft): string {
   const datePart = summarizeDates(change.dates);
+  if (change.type === "cancel") {
+    return [datePart, "不上啦"].filter(Boolean).join(" · ");
+  }
+
   const titlePart = change.title || change.replaceTitle || "未命名";
   const subtitlePart = change.subtitle || change.replaceSecondary || "";
-  return [datePart, titlePart, subtitlePart].filter(Boolean).join(" · ");
+  return [datePart, "换课", titlePart, subtitlePart].filter(Boolean).join(" · ");
 }
 
 function summarizeDates(dates: string[]): string {

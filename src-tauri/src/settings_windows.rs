@@ -95,7 +95,7 @@ fn create_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
 
     WebviewWindowBuilder::new(app, SETTINGS_WINDOW_LABEL, WebviewUrl::App("index.html#settings".into()))
         .title("设置")
-        .devtools(true)
+        .devtools(false)
         .decorations(true)
         .transparent(false)
         .resizable(false)
@@ -115,7 +115,7 @@ fn create_widget_menu_window(app: &AppHandle) -> Result<WebviewWindow, String> {
 
     WebviewWindowBuilder::new(app, WIDGET_MENU_WINDOW_LABEL, WebviewUrl::App("index.html#widget-menu".into()))
         .title("课程表菜单")
-        .devtools(true)
+        .devtools(false)
         .decorations(false)
         .transparent(false)
         .resizable(false)
@@ -136,7 +136,7 @@ fn create_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String>
 
     WebviewWindowBuilder::new(app, CARD_SETTINGS_WINDOW_LABEL, WebviewUrl::App("index.html#card-settings".into()))
         .title("课程卡片设置")
-        .devtools(true)
+        .devtools(false)
         .decorations(true)
         .transparent(false)
         .resizable(false)
@@ -156,7 +156,7 @@ fn create_floating_toolbar_window(app: &AppHandle) -> Result<WebviewWindow, Stri
 
     WebviewWindowBuilder::new(app, FLOATING_TOOLBAR_WINDOW_LABEL, WebviewUrl::App("index.html#floating-toolbar".into()))
         .title("浮动工具栏")
-        .devtools(true)
+        .devtools(false)
         .decorations(false)
         .transparent(true)
         .resizable(false)

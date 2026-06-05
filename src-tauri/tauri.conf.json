@@ -32,7 +32,7 @@
         "visible": false,
         "resizable": false,
         "shadow": false,
-        "devtools":true
+        "devtools": false
       }
     ]
   },
