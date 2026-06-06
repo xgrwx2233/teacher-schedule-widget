@@ -18,10 +18,13 @@ type ScheduleWidgetProps = {
   backgroundMode: WidgetBackgroundMode;
   periodColumnStyle: PeriodColumnStyle;
   toolbarLayoutMode: ToolbarLayoutMode;
+  authLabel: string;
+  loggedIn: boolean;
   onPreviousWeek: () => void;
   onNextWeek: () => void;
   onToggleFloatingToolbar: () => void;
   onToggleLayoutMode: () => void;
+  onOpenAuth: () => void;
   onToggleMenu: () => void;
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
@@ -52,10 +55,13 @@ export function ScheduleWidget({
   backgroundMode,
   periodColumnStyle,
   toolbarLayoutMode,
+  authLabel,
+  loggedIn,
   onPreviousWeek,
   onNextWeek,
   onToggleFloatingToolbar,
   onToggleLayoutMode,
+  onOpenAuth,
   onToggleMenu,
   onCourseClick,
   onCardEdit,
@@ -79,6 +85,9 @@ export function ScheduleWidget({
             onPreviousWeek={onPreviousWeek}
             onNextWeek={onNextWeek}
             onToggleLayoutMode={onToggleLayoutMode}
+            authLabel={authLabel}
+            loggedIn={loggedIn}
+            onOpenAuth={onOpenAuth}
             onToggleMenu={onToggleMenu}
             onDragStart={onDragStart}
           />

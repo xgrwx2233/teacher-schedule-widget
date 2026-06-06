@@ -5,6 +5,7 @@ mod desktop_layer;
 mod desktop_wallpaper;
 mod input_forwarder;
 mod interaction_proxy;
+mod local_account;
 mod settings_windows;
 mod tray;
 mod wallpaper_watcher;
@@ -61,6 +62,16 @@ pub fn run() {
             settings_windows::open_card_settings_window,
             settings_windows::open_widget_menu_window,
             settings_windows::open_floating_toolbar_window,
+            settings_windows::open_auth_window,
+            settings_windows::hide_auth_window,
+            settings_windows::toggle_auth_window,
+            local_account::load_local_account_state,
+            local_account::load_current_schedule,
+            local_account::save_current_schedule,
+            local_account::register_local_account,
+            local_account::login_with_password,
+            local_account::login_with_code,
+            local_account::logout_local_account,
             interaction_proxy::proxy_hitbox_probe,
             interaction_proxy::set_proxy_passthrough,
             interaction_proxy::update_proxy_hitboxes,

@@ -96,6 +96,7 @@ function findWidgetHit(hitboxes: RectHitbox[], x: number, y: number): ProxyWidge
     }
 
     if (
+      hitbox.kind === "auth-button" ||
       hitbox.kind === "menu-button" ||
       hitbox.kind === "header-toggle" ||
       hitbox.kind === "layout-toggle" ||

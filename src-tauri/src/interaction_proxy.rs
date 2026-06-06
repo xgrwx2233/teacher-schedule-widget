@@ -366,7 +366,7 @@ fn handle_proxy_click(
 ) {
     if matches!(
         hit.kind.as_str(),
-        "menu-button" | "header-toggle" | "layout-toggle" | "previous-week" | "next-week"
+        "auth-button" | "menu-button" | "header-toggle" | "layout-toggle" | "previous-week" | "next-week"
     ) {
         pending_card_click.take();
         let _ = app.emit(PROXY_TRIGGER_EVENT, hit.clone());
@@ -542,7 +542,7 @@ fn top_window_kind(app: &AppHandle, widget: &WebviewWindow, screen_x: i32, scree
 }
 
 fn is_overlay_window(app: &AppHandle, hwnd: HWND) -> bool {
-    for label in ["settings", "card-settings", "widget-menu"] {
+    for label in ["settings", "card-settings", "widget-menu", "auth"] {
         if let Some(window) = app.get_webview_window(label) {
             if let Ok(raw) = window.hwnd() {
                 if same_hwnd(hwnd, HWND(raw.0)) {

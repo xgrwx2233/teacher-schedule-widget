@@ -9,6 +9,7 @@ use crate::{app_state::AppState, interaction_proxy, settings_windows};
 const TRAY_ID: &str = "teacher-schedule-widget";
 const TOGGLE_SCHEDULE_ID: &str = "toggle-schedule-widget";
 const SHOW_CALENDAR_ID: &str = "show-calendar-widget";
+const OPEN_AUTH_ID: &str = "open-auth";
 const OPEN_SETTINGS_ID: &str = "open-settings";
 const EXIT_APP_ID: &str = "exit-app";
 
@@ -22,6 +23,9 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
         .on_menu_event(|app, event| match event.id().0.as_str() {
             TOGGLE_SCHEDULE_ID => {
                 let _ = toggle_schedule_widget(app);
+            }
+            OPEN_AUTH_ID => {
+                let _ = settings_windows::show_auth_window_if_hidden(app);
             }
             OPEN_SETTINGS_ID => {
                 let _ = settings_windows::ensure_settings_window(app);
@@ -48,6 +52,7 @@ fn build_tray_menu(app: &AppHandle, widget_visible: bool) -> Result<Menu<Wry>, S
     let show_calendar = MenuItemBuilder::with_id(SHOW_CALENDAR_ID, "校历挂件（稍后）")
         .enabled(false)
         .build(app);
+    let open_auth = MenuItemBuilder::with_id(OPEN_AUTH_ID, "登录 / 账号").build(app);
     let open_settings = MenuItemBuilder::with_id(OPEN_SETTINGS_ID, "设置").build(app);
     let exit_item = MenuItemBuilder::with_id(EXIT_APP_ID, "退出程序").build(app);
 
@@ -55,6 +60,7 @@ fn build_tray_menu(app: &AppHandle, widget_visible: bool) -> Result<Menu<Wry>, S
         .item(&toggle_schedule.map_err(|error| error.to_string())?)
         .item(&show_calendar.map_err(|error| error.to_string())?)
         .separator()
+        .item(&open_auth.map_err(|error| error.to_string())?)
         .item(&open_settings.map_err(|error| error.to_string())?)
         .separator()
         .item(&exit_item.map_err(|error| error.to_string())?)

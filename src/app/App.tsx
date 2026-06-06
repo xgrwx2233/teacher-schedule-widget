@@ -5,6 +5,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { CSSProperties, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScheduleWidget } from "../components/ScheduleWidget/ScheduleWidget";
+import { defaultLocalAccountState, type LocalAccountState, type StoredSchedulePayload } from "../features/account/types";
 import { allScheduleDays, mockSchedule } from "../features/schedule/mockSchedule";
 import type {
   CardStyle,
@@ -51,6 +52,7 @@ import {
   WIDGET_MENU_WINDOW_LABEL,
   WIDGET_WINDOW_LABEL,
   FLOATING_TOOLBAR_ACTION_EVENT,
+  AUTH_STATE_CHANGED_EVENT,
   FLOATING_TOOLBAR_CLOSE_EVENT,
   FLOATING_TOOLBAR_STATE_EVENT,
   FLOATING_TOOLBAR_WINDOW_LABEL,
@@ -153,6 +155,8 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("schedule");
   const [settings, setSettings] = useState<WidgetSettingsState>(defaultSettings);
   const [schedule, setSchedule] = useState<Schedule>(() => loadPersistedSchedule() ?? mockSchedule);
+  const [accountState, setAccountState] = useState<LocalAccountState>(defaultLocalAccountState);
+  const [schedulePersistenceReady, setSchedulePersistenceReady] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
@@ -166,6 +170,7 @@ export function App() {
   const cardSettingsWindowOpenRef = useRef(false);
   const settingsRef = useRef(settings);
   const scheduleRef = useRef(schedule);
+  const accountStateRef = useRef(accountState);
   const courseRowHeightRef = useRef<number | null>(null);
   const settingsSectionRef = useRef(settingsSection);
   const selectedCardRef = useRef<SelectedCard | null>(selectedCard);
@@ -314,7 +319,16 @@ export function App() {
 
   useEffect(() => {
     savePersistedSchedule(schedule);
-  }, [schedule]);
+    if (!schedulePersistenceReady) {
+      return;
+    }
+
+    void invoke("save_current_schedule", { schedule });
+  }, [schedule, schedulePersistenceReady]);
+
+  useEffect(() => {
+    accountStateRef.current = accountState;
+  }, [accountState]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -339,6 +353,31 @@ export function App() {
   useEffect(() => {
     cardDraftRef.current = cardDraft;
   }, [cardDraft]);
+
+  const refreshAccountAndSchedule = useCallback(async () => {
+    setSchedulePersistenceReady(false);
+    const nextAccountState = await invoke<LocalAccountState>("load_local_account_state");
+    const storedSchedule = await invoke<StoredSchedulePayload<Schedule>>("load_current_schedule");
+    accountStateRef.current = nextAccountState;
+    setAccountState(nextAccountState);
+
+    if (storedSchedule.schedule) {
+      scheduleRef.current = storedSchedule.schedule;
+      setSchedule(storedSchedule.schedule);
+      setSchedulePersistenceReady(true);
+      return;
+    }
+
+    const fallbackSchedule = loadPersistedSchedule() ?? scheduleRef.current ?? mockSchedule;
+    scheduleRef.current = fallbackSchedule;
+    setSchedule(fallbackSchedule);
+    await invoke("save_current_schedule", { schedule: fallbackSchedule });
+    setSchedulePersistenceReady(true);
+  }, []);
+
+  useEffect(() => {
+    void refreshAccountAndSchedule();
+  }, [refreshAccountAndSchedule]);
 
   const switchMode = useCallback(async () => {
     const command = modeRef.current === "attached" ? "switch_to_detached" : "switch_to_attached";
@@ -411,6 +450,16 @@ export function App() {
         activeSection: currentSection,
         windowMode: modeRef.current,
       });
+    } catch {
+    }
+  }, []);
+
+  const openAuth = useCallback(async () => {
+    menuOpenRef.current = false;
+    setMenuOpen(false);
+
+    try {
+      await invoke("toggle_auth_window");
     } catch {
     }
   }, []);
@@ -597,6 +646,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const unlistenPromise = listen<LocalAccountState>(AUTH_STATE_CHANGED_EVENT, () => {
+      void refreshAccountAndSchedule();
+    });
+
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [refreshAccountAndSchedule]);
+
+  useEffect(() => {
     if (!settingsWindowOpenRef.current) {
       return;
     }
@@ -724,6 +783,11 @@ export function App() {
         return;
       }
 
+      if (hit.authButton) {
+        void openAuth();
+        return;
+      }
+
       if (menuOpenRef.current && hit.menuAction === "settings") {
         void openSettings();
         return;
@@ -763,7 +827,7 @@ export function App() {
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [closeWidgetMenu, hideScheduleWidget, openCardSettings, openSettings, openWidgetMenu, switchMode]);
+  }, [closeWidgetMenu, hideScheduleWidget, openAuth, openCardSettings, openSettings, openWidgetMenu, switchMode]);
 
   useEffect(() => {
     const publishHitboxes = () => {
@@ -797,6 +861,7 @@ export function App() {
       handleProxyWidgetHit(
         hit,
         openFloatingToolbarWindow,
+        openAuth,
         openWidgetMenu,
         toggleToolbarLayoutMode,
         stepWeek,
@@ -811,6 +876,7 @@ export function App() {
       handleProxyWidgetHit(
         hit,
         openFloatingToolbarWindow,
+        openAuth,
         openWidgetMenu,
         toggleToolbarLayoutMode,
         stepWeek,
@@ -826,7 +892,7 @@ export function App() {
       }
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [openCardSettings, openFloatingToolbarWindow, openWidgetMenu, toggleToolbarLayoutMode]);
+  }, [openAuth, openCardSettings, openFloatingToolbarWindow, openWidgetMenu, toggleToolbarLayoutMode]);
 
   useEffect(() => {
     const unlistenPromise = listen<WidgetMenuAction>(WIDGET_MENU_ACTION_EVENT, (event) => {
@@ -965,10 +1031,13 @@ export function App() {
         backgroundMode={normalizedAppearance.backgroundMode}
         periodColumnStyle={normalizedAppearance.periodColumnStyle}
         toolbarLayoutMode={toolbarLayoutMode}
+        authLabel={getAuthToolbarLabel(accountState)}
+        loggedIn={accountState.loggedIn}
         onPreviousWeek={() => void stepWeek(-1)}
         onNextWeek={() => void stepWeek(1)}
         onToggleFloatingToolbar={openFloatingToolbarWindow}
         onToggleLayoutMode={toggleToolbarLayoutMode}
+        onOpenAuth={openAuth}
         onToggleMenu={openWidgetMenu}
         onCourseClick={onCourseClick}
         onCardEdit={openCardSettings}
@@ -1376,7 +1445,7 @@ async function positionFloatingToolbarWindow() {
 function collectProxyHitboxes() {
   const hitboxes = Array.from(
     document.querySelectorAll<HTMLElement>(
-      "[data-menu-button], [data-header-toggle], [data-toolbar-action], [data-course-id], [data-period-id]",
+      "[data-auth-button], [data-menu-button], [data-header-toggle], [data-toolbar-action], [data-course-id], [data-period-id]",
     ),
   )
     .flatMap((element) => {
@@ -1386,7 +1455,9 @@ function collectProxyHitboxes() {
       const toolbarAction = element.dataset.toolbarAction;
       const courseHitIds = parseCourseHitIds(element.dataset.courseHitIds, courseId);
       const courseHitAxis = element.dataset.courseHitAxis === "vertical" ? "vertical" : "horizontal";
-      const kind = element.dataset.menuButton
+      const kind = element.dataset.authButton
+        ? "auth-button"
+        : element.dataset.menuButton
         ? "menu-button"
         : element.dataset.headerToggle
           ? "header-toggle"
@@ -1457,6 +1528,7 @@ function selectedCardKey(card: SelectedCard): string {
 function handleProxyWidgetHit(
   hit: ProxyWidgetHit,
   openFloatingToolbarWindow: () => void,
+  openAuth: () => Promise<void>,
   openWidgetMenu: () => Promise<void>,
   toggleToolbarLayoutMode: () => Promise<void>,
   stepWeek: (delta: number) => Promise<void>,
@@ -1466,6 +1538,11 @@ function handleProxyWidgetHit(
 ) {
   if (hit.kind === "menu-button") {
     void openWidgetMenu();
+    return;
+  }
+
+  if (hit.kind === "auth-button") {
+    void openAuth();
     return;
   }
 
@@ -1514,7 +1591,7 @@ async function positionWidgetMenuWindow(
 
   const scaleFactor = window.devicePixelRatio || 1;
   const width = 132;
-  const height = 132;
+  const height = 168;
   const fallbackButton = document.querySelector<HTMLButtonElement>("[data-menu-button]");
   const rect = anchor ? { right: anchor.x + anchor.width, bottom: anchor.y + anchor.height } : fallbackButton?.getBoundingClientRect();
   if (!rect) {
@@ -2872,6 +2949,7 @@ function findPeriod(schedule: Schedule, periodId: string): PeriodInfo | undefine
 
 type ForwardedClickHit = {
   menuButton: boolean;
+  authButton: boolean;
   headerToggle: boolean;
   menuAction: "settings" | "mode" | "close" | null;
   editableCard: SelectedCard | null;
@@ -2888,17 +2966,17 @@ function resolveForwardedClickHit(payload: DesktopInputEvent, scaleFactor: numbe
   for (const point of candidates) {
     const element = document.elementFromPoint(point.x, point.y) as HTMLElement | null;
     const hit = hitTestForwardedElement(element, point.x, point.y);
-    if (hit.menuButton || hit.headerToggle || hit.menuAction || hit.editableCard) {
+    if (hit.menuButton || hit.authButton || hit.headerToggle || hit.menuAction || hit.editableCard) {
       return hit;
     }
 
     const editableCard = findEditableCardByGeometry(point.x, point.y);
     if (editableCard) {
-      return { menuButton: false, headerToggle: false, menuAction: null, editableCard };
+      return { menuButton: false, authButton: false, headerToggle: false, menuAction: null, editableCard };
     }
   }
 
-  return { menuButton: false, headerToggle: false, menuAction: null, editableCard: null };
+  return { menuButton: false, authButton: false, headerToggle: false, menuAction: null, editableCard: null };
 }
 
 function createForwardedPointCandidates(
@@ -2938,6 +3016,7 @@ function dedupePoints(points: Array<{ x: number; y: number }>): Array<{ x: numbe
 
 function hitTestForwardedElement(element: HTMLElement | null, x?: number, y?: number): ForwardedClickHit {
   const menuButton = Boolean(element?.closest("[data-menu-button]"));
+  const authButton = Boolean(element?.closest("[data-auth-button]"));
   const headerToggle = Boolean(element?.closest("[data-header-toggle]"));
   const menuActionElement = element?.closest<HTMLElement>("[data-menu-action]");
   const editableElement = element?.closest<HTMLElement>("[data-course-id], [data-period-id]");
@@ -2945,7 +3024,7 @@ function hitTestForwardedElement(element: HTMLElement | null, x?: number, y?: nu
   const menuAction = readMenuAction(menuActionElement);
   const editableCard = readEditableCard(editableElement, x, y);
 
-  return { menuButton, headerToggle, menuAction, editableCard };
+  return { menuButton, authButton, headerToggle, menuAction, editableCard };
 }
 
 function readMenuAction(element: HTMLElement | null | undefined): ForwardedClickHit["menuAction"] {
@@ -3024,4 +3103,10 @@ function savePersistedSchedule(schedule: Schedule): void {
   }
 }
 
+function getAuthToolbarLabel(accountState: LocalAccountState): string {
+  if (!accountState.loggedIn) {
+    return "账号";
+  }
 
+  return accountState.user?.phone?.slice(-2) ?? "账";
+}

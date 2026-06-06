@@ -9,9 +9,12 @@ type ScheduleToolbarProps = {
   backgroundMode?: WidgetBackgroundMode;
   variant?: "embedded" | "floating";
   menuButtonRef?: RefObject<HTMLButtonElement | null>;
+  authLabel?: string;
+  loggedIn?: boolean;
   onPreviousWeek: () => void;
   onNextWeek: () => void;
   onToggleLayoutMode: () => void;
+  onOpenAuth?: () => void;
   onToggleMenu: () => void;
   onDragStart?: (event: PointerEvent<HTMLDivElement>) => void;
 };
@@ -23,9 +26,12 @@ export function ScheduleToolbar({
   backgroundMode = "blur",
   variant = "embedded",
   menuButtonRef,
+  authLabel,
+  loggedIn = false,
   onPreviousWeek,
   onNextWeek,
   onToggleLayoutMode,
+  onOpenAuth,
   onToggleMenu,
   onDragStart,
 }: ScheduleToolbarProps) {
@@ -58,6 +64,18 @@ export function ScheduleToolbar({
       />
 
       <div className="toolbar-right">
+        {onOpenAuth ? (
+          <button
+            type="button"
+            className={loggedIn ? "toolbar-account-button is-logged-in" : "toolbar-account-button"}
+            title={loggedIn ? "账号" : "登录 / 账号"}
+            aria-label={loggedIn ? "账号" : "登录 / 账号"}
+            data-auth-button="true"
+            onClick={onOpenAuth}
+          >
+            {loggedIn ? <span>{authLabel}</span> : <UserIcon />}
+          </button>
+        ) : null}
         <ToolbarIconButton
           transparent
           dataToolbarAction="layout-toggle"
@@ -81,6 +99,15 @@ export function ScheduleToolbar({
         </ToolbarIconButton>
       </div>
     </header>
+  );
+}
+
+function UserIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+      <path d="M12 12.2a3.6 3.6 0 1 0 0-7.2 3.6 3.6 0 0 0 0 7.2Z" stroke="currentColor" strokeWidth="1.9" />
+      <path d="M5.7 20a6.5 6.5 0 0 1 12.6 0" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
   );
 }
 

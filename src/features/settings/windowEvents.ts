@@ -14,6 +14,7 @@ export const CARD_SETTINGS_WINDOW_LABEL = "card-settings";
 export const WIDGET_MENU_WINDOW_LABEL = "widget-menu";
 export const FLOATING_TOOLBAR_WINDOW_LABEL = "floating-toolbar";
 export const WIDGET_WINDOW_LABEL = "widget";
+export const AUTH_WINDOW_LABEL = "auth";
 
 export const SETTINGS_WINDOW_STATE_EVENT = "settings-window-state";
 export const SETTINGS_WINDOW_STATE_REQUEST_EVENT = "settings-window-state-request";
@@ -32,6 +33,8 @@ export const WIDGET_MENU_CLOSE_EVENT = "widget-menu-close";
 export const FLOATING_TOOLBAR_ACTION_EVENT = "floating-toolbar-action";
 export const FLOATING_TOOLBAR_STATE_EVENT = "floating-toolbar-state";
 export const FLOATING_TOOLBAR_CLOSE_EVENT = "floating-toolbar-close";
+export const AUTH_STATE_CHANGED_EVENT = "auth-state-changed";
+export const AUTH_WINDOW_CLOSED_EVENT = "auth-window-closed";
 
 export type WidgetMenuAction = "settings" | "mode" | "hide";
 export type ToolbarLayoutMode = "normal" | "minimalist";
