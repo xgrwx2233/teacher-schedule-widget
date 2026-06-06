@@ -38,6 +38,10 @@ impl AppState {
         Arc::clone(&self.widget_visible)
     }
 
+    pub fn is_widget_visible(&self) -> bool {
+        self.widget_visible.load(Ordering::Relaxed)
+    }
+
     pub fn set_widget_visible(&self, visible: bool) {
         self.widget_visible.store(visible, Ordering::Relaxed);
     }
