@@ -43,8 +43,7 @@ pub fn start_input_forwarder<R: Runtime>(
     thread::spawn(move || {
         let hwnd = match window.hwnd() {
             Ok(hwnd) => HWND(hwnd.0),
-            Err(error) => {
-                eprintln!("failed to get widget hwnd for input forwarding: {error}");
+            Err(_) => {
                 return;
             }
         };

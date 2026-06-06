@@ -1,4 +1,4 @@
-import type { CourseCell, Schedule, ScheduleCourseRow, Weekday } from "./types";
+import type { CardStyle, CourseCell, Schedule, ScheduleCourseRow, Weekday } from "./types";
 
 export const allScheduleDays: Schedule["days"] = [
   { id: "monday", label: "周一", dateLabel: "05/18" },
@@ -12,24 +12,92 @@ export const allScheduleDays: Schedule["days"] = [
 
 const weekdayIds = allScheduleDays.map((day) => day.id);
 
+const palettes = {
+  lavender: { baseColor: "#9b5de5", backgroundColor: "#eadbff", color: "#6f3fba", iconColor: "#6f3fba" },
+  mint: { baseColor: "#06d6a0", backgroundColor: "#d9fff1", color: "#008f6b", iconColor: "#008f6b" },
+  cream: { baseColor: "#ffd166", backgroundColor: "#fff6df", color: "#9a6a1b", iconColor: "#9a6a1b" },
+  coral: { baseColor: "#ff6b5f", backgroundColor: "#ffe2db", color: "#c73225", iconColor: "#c73225" },
+  peach: { baseColor: "#ff8a4c", backgroundColor: "#ffe7dc", color: "#a64724", iconColor: "#a64724" },
+  green: { baseColor: "#22c55e", backgroundColor: "#d7ffe1", color: "#10853c", iconColor: "#10853c" },
+} satisfies Record<string, CardStyle>;
+
+type PaletteName = keyof typeof palettes;
+type CourseEntry = {
+  title: string;
+  room?: string;
+  color?: PaletteName;
+  hidden?: boolean;
+  weekPattern?: CourseCell["scheduleRule"] extends infer Rule
+    ? Rule extends { weekPattern: infer Pattern }
+      ? Pattern
+      : never
+    : never;
+  colSpan?: number;
+  rowSpan?: number;
+  mergedInto?: string;
+  mergeDirection?: CourseCell["mergeDirection"];
+};
+
+function emptyCourseCell(id: string): CourseCell {
+  return {
+    id,
+    title: "",
+    room: "",
+    hidden: true,
+    colSpan: 1,
+    rowSpan: 1,
+    scheduleRule: {
+      weekPattern: "all",
+      applyWholeTerm: true,
+    },
+    style: {
+      baseColor: "#ffffff",
+      backgroundColor: "#ffffff",
+      color: "#64748b",
+      iconColor: "#64748b",
+      displayMode: "auto",
+    },
+  };
+}
+
+function courseCell(id: string, entry?: CourseEntry): CourseCell {
+  if (!entry) {
+    return emptyCourseCell(id);
+  }
+
+  const palette = palettes[entry.color ?? "lavender"];
+
+  return {
+    id,
+    title: entry.title,
+    room: entry.room ?? "",
+    hidden: entry.hidden ?? false,
+    colSpan: entry.colSpan ?? 1,
+    rowSpan: entry.rowSpan ?? 1,
+    mergedInto: entry.mergedInto,
+    mergeDirection: entry.mergeDirection,
+    scheduleRule: {
+      weekPattern: entry.weekPattern ?? "all",
+      applyWholeTerm: true,
+    },
+    style: {
+      ...palette,
+      displayMode: "auto",
+      fontFamily: "Microsoft YaHei",
+      fontWeight: "medium",
+    },
+  };
+}
+
 function row(
   id: string,
   label: string,
   time: string,
-  titles: Record<Weekday, string>,
-  rooms: Record<Weekday, string>,
+  entries: Partial<Record<Weekday, CourseEntry>>,
 ): ScheduleCourseRow {
   const courses = weekdayIds.reduce<Record<Weekday, CourseCell>>(
     (result, weekday) => {
-      result[weekday] = {
-        id: `${id}-${weekday}`,
-        title: titles[weekday],
-        room: rooms[weekday],
-        scheduleRule: {
-          weekPattern: "all",
-          applyWholeTerm: true,
-        },
-      };
+      result[weekday] = courseCell(`${id}-${weekday}`, entries[weekday]);
       return result;
     },
     {} as Record<Weekday, CourseCell>,
@@ -42,16 +110,6 @@ function row(
   };
 }
 
-const commonRooms: Record<Weekday, string> = {
-  monday: "高一1班",
-  tuesday: "高一2班",
-  wednesday: "高一3班",
-  thursday: "高一4班",
-  friday: "高一5班",
-  saturday: "选修A",
-  sunday: "线上",
-};
-
 export const mockSchedule: Schedule = {
   id: "mock-teacher-week",
   teacherName: "林老师",
@@ -61,122 +119,31 @@ export const mockSchedule: Schedule = {
   days: allScheduleDays.slice(0, 5),
   rows: [
     row("p1", "第1节", "08:00-08:45", {
-      monday: "语文",
-      tuesday: "数学",
-      wednesday: "英语",
-      thursday: "物理",
-      friday: "化学",
-      saturday: "阅读",
-      sunday: "预习",
-    }, commonRooms),
+      monday: { title: "1班", room: "八年级", color: "lavender" },
+      wednesday: { title: "3班", room: "高一3班", color: "mint" },
+    }),
     row("p2", "第2节", "08:55-09:40", {
-      monday: "数学",
-      tuesday: "英语",
-      wednesday: "物理",
-      thursday: "化学",
-      friday: "语文",
-      saturday: "写作",
-      sunday: "自习",
-    }, commonRooms),
+      tuesday: { title: "数学", room: "高一2班", color: "mint" },
+      wednesday: { title: "物理", room: "高一3班", color: "coral" },
+    }),
     row("p3", "第3节", "10:10-10:55", {
-      monday: "英语",
-      tuesday: "物理",
-      wednesday: "化学",
-      thursday: "语文",
-      friday: "数学",
-      saturday: "答疑",
-      sunday: "备课",
-    }, commonRooms),
+      tuesday: { title: "数学", room: "高一2班", color: "mint" },
+    }),
     row("p4", "第4节", "11:05-11:50", {
-      monday: "物理",
-      tuesday: "化学",
-      wednesday: "语文",
-      thursday: "数学",
-      friday: "英语",
-      saturday: "社团",
-      sunday: "休息",
-    }, commonRooms),
-    row(
-      "lunch",
-      "午休",
-      "12:00-14:00",
-      {
-        monday: "午休",
-        tuesday: "午休",
-        wednesday: "午休",
-        thursday: "午休",
-        friday: "午休",
-        saturday: "午休",
-        sunday: "午休",
-      },
-      {
-        monday: "备课 / 休息",
-        tuesday: "备课 / 休息",
-        wednesday: "备课 / 休息",
-        thursday: "备课 / 休息",
-        friday: "备课 / 休息",
-        saturday: "备课 / 休息",
-        sunday: "备课 / 休息",
-      },
-    ),
+      monday: { title: "物理", room: "高一1班", color: "cream" },
+      wednesday: { title: "生物", room: "高一3班", color: "mint", weekPattern: "even" },
+    }),
     row("p5", "第5节", "14:30-15:15", {
-      monday: "阅读课",
-      tuesday: "教研",
-      wednesday: "写作",
-      thursday: "自习",
-      friday: "班会",
-      saturday: "拓展",
-      sunday: "线上答疑",
-    }, {
-      ...commonRooms,
-      monday: "阅览室",
-      tuesday: "语文组",
-      saturday: "活动室",
-      sunday: "腾讯会议",
+      tuesday: { title: "教研", room: "语文组", color: "peach", hidden: true },
     }),
     row("p6", "第6节", "15:25-16:10", {
-      monday: "作文评讲",
-      tuesday: "公开课",
-      wednesday: "社团",
-      thursday: "答疑",
-      friday: "语文",
-      saturday: "竞赛",
-      sunday: "休息",
-    }, {
-      ...commonRooms,
-      tuesday: "录播室",
-      wednesday: "活动室",
-      thursday: "办公室",
+      tuesday: { title: "公开课", room: "录播室", color: "peach" },
+      thursday: { title: "2班", room: "3年级", color: "green" },
     }),
     row("p7", "第7节", "16:20-17:05", {
-      monday: "答疑",
-      tuesday: "备课",
-      wednesday: "阅读课",
-      thursday: "作文批改",
-      friday: "自习",
-      saturday: "自习",
-      sunday: "休息",
-    }, {
-      ...commonRooms,
-      monday: "办公室",
-      tuesday: "办公室",
-      wednesday: "阅览室",
-      thursday: "办公室",
+      wednesday: { title: "3班", room: "八年级", color: "lavender" },
+      thursday: { title: "作文", room: "办公室", color: "lavender" },
     }),
-    row("p8", "第8节", "17:15-18:00", {
-      monday: "值班",
-      tuesday: "家校沟通",
-      wednesday: "备课",
-      thursday: "社团",
-      friday: "周总结",
-      saturday: "整理",
-      sunday: "休息",
-    }, {
-      ...commonRooms,
-      monday: "年级组",
-      tuesday: "办公室",
-      wednesday: "办公室",
-      thursday: "活动室",
-    }),
+    row("p8", "第8节", "17:15-18:00", {}),
   ],
 };

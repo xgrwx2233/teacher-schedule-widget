@@ -35,14 +35,10 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().0.as_str() {
             SHOW_SCHEDULE_ID => {
-                if let Err(error) = show_schedule_widget(app) {
-                    eprintln!("failed to show schedule widget from tray: {error}");
-                }
+                let _ = show_schedule_widget(app);
             }
             OPEN_SETTINGS_ID => {
-                if let Err(error) = settings_windows::ensure_settings_window(app) {
-                    eprintln!("failed to open settings from tray: {error}");
-                }
+                let _ = settings_windows::ensure_settings_window(app);
             }
             EXIT_APP_ID => exit_app(app),
             _ => {}

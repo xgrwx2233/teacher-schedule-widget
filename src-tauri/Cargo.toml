@@ -21,6 +21,8 @@ codegen-units = 1
 lto = true
 strip = true
 opt-level = 3
+debug = false
+incremental = false
 
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }

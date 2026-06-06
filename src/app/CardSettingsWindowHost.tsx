@@ -112,8 +112,6 @@ export function CardSettingsWindowHost() {
       windowLabel: currentWindow.label,
       selectedCard,
       draft: nextDraft,
-      temporaryChanges,
-      activeTemporaryChangeId,
     });
   };
 

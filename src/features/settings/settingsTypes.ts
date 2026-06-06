@@ -93,7 +93,7 @@ export const defaultAppearanceSettings: AppearanceSettings = {
   rowDividerThickness: 1,
   backgroundMode: "blur",
   backgroundColor: "#062032",
-  backgroundOpacity: 84,
+  backgroundOpacity: 0,
   blurIntensity: 14,
   cardRadius: 12,
   cardShadowStrength: 2,
@@ -155,7 +155,7 @@ function normalizeAxisColorMode(value: AxisColorMode | undefined): AxisColorMode
 }
 
 function normalizePeriodColumnStyle(value: PeriodColumnStyle | undefined): PeriodColumnStyle {
-  if (value === "transparent" || value === "solid") {
+  if (value === "soft" || value === "transparent" || value === "solid") {
     return value;
   }
 

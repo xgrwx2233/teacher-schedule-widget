@@ -78,9 +78,6 @@ pub fn run() {
             let attached_flag = state.attached_flag();
             let visible_flag = state.widget_visible_flag();
 
-            #[cfg(debug_assertions)]
-            window.open_devtools();
-
             if let Some(bounds) = registry.active_widget_bounds() {
                 window.set_position(Position::Physical(tauri::PhysicalPosition {
                     x: bounds.x,
@@ -97,9 +94,7 @@ pub fn run() {
             settings_windows::create_hidden_auxiliary_windows(app.handle())?;
             interaction_proxy::show_proxy_for_widget(app.handle(), &window, &state)?;
             tray::create_tray(app.handle())?;
-            if let Err(error) = wallpaper_watcher::install_wallpaper_change_listener(&window, app.handle()) {
-                eprintln!("failed to install wallpaper change listener: {error}");
-            }
+            let _ = wallpaper_watcher::install_wallpaper_change_listener(&window, app.handle());
 
             start_input_forwarder(
                 window.clone(),
@@ -131,17 +126,12 @@ pub fn run() {
                         return;
                     }
 
-                    if let Err(error) =
-                        widget_manager::save_window_bounds(&listener_target, &registry_store)
-                    {
-                        eprintln!("failed to persist widget bounds: {error}");
+                    if widget_manager::save_window_bounds(&listener_target, &registry_store).is_err() {
                         return;
                     }
 
                     if let Some(proxy) = app_handle.get_webview_window(interaction_proxy::PROXY_WINDOW_LABEL) {
-                        if let Err(error) = interaction_proxy::sync_proxy_bounds(&proxy, &listener_target) {
-                            eprintln!("failed to resync proxy after window event: {error}");
-                        }
+                        let _ = interaction_proxy::sync_proxy_bounds(&proxy, &listener_target);
                     }
                 }
                 _ => {}
@@ -179,19 +169,13 @@ fn start_desktop_layer_guard(
 
         let attached_and_visible = is_attached_to_desktop_icon_layer(&window).unwrap_or(false);
         if !attached_and_visible {
-            if let Err(error) = attach_to_desktop_icon_layer(&window) {
-                eprintln!("failed to restore widget desktop layer: {error}");
-            }
+            let _ = attach_to_desktop_icon_layer(&window);
 
-            if let Err(error) = window.show() {
-                eprintln!("failed to show widget window: {error}");
-            }
+            let _ = window.show();
         }
 
         if let Some(proxy) = app.get_webview_window(interaction_proxy::PROXY_WINDOW_LABEL) {
-            if let Err(error) = interaction_proxy::sync_proxy_bounds(&proxy, &window) {
-                eprintln!("failed to sync interaction proxy: {error}");
-            }
+            let _ = interaction_proxy::sync_proxy_bounds(&proxy, &window);
         }
 
         thread::sleep(Duration::from_millis(1000));
