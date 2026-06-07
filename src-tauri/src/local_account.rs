@@ -38,6 +38,16 @@ pub struct StoredSchedulePayload {
     pub schedule: Option<Value>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSyncStatus {
+    pub owner_user_id: String,
+    pub dirty_count: u32,
+    pub local_revision: u32,
+    pub last_sync_error: Option<String>,
+    pub has_pending_changes: bool,
+}
+
 #[tauri::command]
 pub fn load_local_account_state(app: AppHandle) -> Result<LocalAccountState, String> {
     let conn = open_db(&app)?;
@@ -74,6 +84,14 @@ pub fn save_current_schedule(app: AppHandle, schedule: Value) -> Result<(), Stri
     ensure_default_user(&conn)?;
     let owner_user_id = active_user_id(&conn)?;
     save_schedule_for_user(&conn, &owner_user_id, &schedule)
+}
+
+#[tauri::command]
+pub fn load_local_sync_status(app: AppHandle) -> Result<LocalSyncStatus, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    load_sync_status_for_user(&conn, &owner_user_id)
 }
 
 #[tauri::command]
@@ -428,6 +446,7 @@ fn copy_default_schedule_if_needed(conn: &Connection, user_id: &str) -> Result<(
             params![user_id, schedule_json, now_string()],
         )
         .map_err(|error| error.to_string())?;
+        mark_schedule_snapshot_dirty(conn, user_id)?;
     }
 
     Ok(())
@@ -443,15 +462,52 @@ fn save_schedule_for_user(conn: &Connection, owner_user_id: &str, schedule: &Val
         params![owner_user_id, raw, now],
     )
     .map_err(|error| error.to_string())?;
+    mark_schedule_snapshot_dirty(conn, owner_user_id)?;
+    Ok(())
+}
+
+fn mark_schedule_snapshot_dirty(conn: &Connection, owner_user_id: &str) -> Result<(), String> {
     conn.execute(
         "INSERT INTO sync_state (owner_user_id, entity_type, entity_id, dirty, local_revision)
          VALUES (?1, 'schedule_snapshot', ?1, 1, 1)
          ON CONFLICT(owner_user_id, entity_type, entity_id)
-         DO UPDATE SET dirty = 1, local_revision = local_revision + 1",
+         DO UPDATE SET dirty = 1, local_revision = local_revision + 1, last_sync_error = NULL",
         params![owner_user_id],
     )
     .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn load_sync_status_for_user(conn: &Connection, owner_user_id: &str) -> Result<LocalSyncStatus, String> {
+    let (dirty_count, local_revision): (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(MAX(local_revision), 0)
+             FROM sync_state
+             WHERE owner_user_id = ?1 AND dirty = 1",
+            params![owner_user_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| error.to_string())?;
+    let last_sync_error = conn
+        .query_row(
+            "SELECT last_sync_error
+             FROM sync_state
+             WHERE owner_user_id = ?1 AND last_sync_error IS NOT NULL
+             ORDER BY local_revision DESC
+             LIMIT 1",
+            params![owner_user_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    Ok(LocalSyncStatus {
+        owner_user_id: owner_user_id.to_string(),
+        dirty_count: dirty_count.max(0) as u32,
+        local_revision: local_revision.max(0) as u32,
+        last_sync_error,
+        has_pending_changes: dirty_count > 0,
+    })
 }
 
 fn get_meta(conn: &Connection, key: &str) -> Result<Option<String>, String> {

@@ -66,6 +66,7 @@ pub fn run() {
             settings_windows::hide_auth_window,
             settings_windows::toggle_auth_window,
             local_account::load_local_account_state,
+            local_account::load_local_sync_status,
             local_account::load_current_schedule,
             local_account::save_current_schedule,
             local_account::register_local_account,
@@ -118,6 +119,7 @@ pub fn run() {
                 Arc::clone(&proxy_hitboxes),
                 Arc::clone(&proxy_geometry),
                 Arc::clone(&proxy_ui_state),
+                state.attached_flag(),
                 state.widget_visible_flag(),
             );
             start_desktop_layer_guard(

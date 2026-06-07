@@ -218,6 +218,7 @@ pub fn start_proxy_input_manager(
     hitboxes: ProxyHitboxStore,
     geometry: ProxyGeometryStore,
     ui_state: ProxyUiStateStore,
+    attached_mode: Arc<AtomicBool>,
     widget_visible: Arc<AtomicBool>,
 ) {
     thread::spawn(move || {
@@ -227,7 +228,7 @@ pub fn start_proxy_input_manager(
         let double_click_interval = Duration::from_millis(500);
         let mut passthrough = true;
         loop {
-            if !widget_visible.load(Ordering::Relaxed) {
+            if !attached_mode.load(Ordering::Relaxed) || !widget_visible.load(Ordering::Relaxed) {
                 if let Some(proxy) = app.get_webview_window(PROXY_WINDOW_LABEL) {
                     let _ = proxy.set_ignore_cursor_events(true);
                     let _ = proxy.hide();

@@ -26,6 +26,7 @@ import {
 
 const MOVE_SUPPRESSION_MS = 300;
 const FOCUS_LOSS_CHECK_MS = 120;
+const OPEN_FOCUS_GUARD_MS = 500;
 const LOCAL_DRAFT_SYNC_GUARD_MS = 900;
 type CardSettingsTab = "course" | "temporary";
 
@@ -47,6 +48,8 @@ export function CardSettingsWindowHost() {
   const [titleContext, setTitleContext] = useState<CardSettingsTitleContext | undefined>(undefined);
   const [temporaryDraftTitle, setTemporaryDraftTitle] = useState("");
   const isClosingRef = useRef(false);
+  const openedAtRef = useRef(0);
+  const hasFocusedSinceOpenRef = useRef(false);
   const lastMovedAtRef = useRef(0);
   const focusLossTimerRef = useRef<number | null>(null);
   const selectedCardRef = useRef<SelectedCard | null>(null);
@@ -61,6 +64,8 @@ export function CardSettingsWindowHost() {
       const isCurrentCard = isSameSelectedCard(selectedCardRef.current, event.payload.selectedCard);
       const shouldKeepLocalDraft = isCurrentCard && Date.now() < localDraftSyncGuardUntilRef.current;
 
+      openedAtRef.current = Date.now();
+      hasFocusedSinceOpenRef.current = false;
       setSelectedCard(event.payload.selectedCard);
       if (!shouldKeepLocalDraft) {
         setDraft(event.payload.draft);
@@ -76,6 +81,10 @@ export function CardSettingsWindowHost() {
         setActiveTab("course");
         setTemporaryDraftTitle("");
       }
+
+      window.setTimeout(() => {
+        void currentWindow.setFocus();
+      }, 80);
     });
 
     void emitTo(WIDGET_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT, {
@@ -208,11 +217,21 @@ export function CardSettingsWindowHost() {
 
     const unlistenFocusPromise = currentWindow.onFocusChanged(async ({ payload: focused }) => {
       if (focused) {
+        hasFocusedSinceOpenRef.current = true;
         clearFocusLossTimer();
         return;
       }
 
       clearFocusLossTimer();
+      if (!hasFocusedSinceOpenRef.current) {
+        return;
+      }
+
+      const elapsedSinceOpen = Date.now() - openedAtRef.current;
+      const focusLossDelay = Math.max(
+        FOCUS_LOSS_CHECK_MS,
+        OPEN_FOCUS_GUARD_MS - elapsedSinceOpen + FOCUS_LOSS_CHECK_MS,
+      );
       focusLossTimerRef.current = window.setTimeout(() => {
         focusLossTimerRef.current = null;
         void (async () => {
@@ -226,7 +245,7 @@ export function CardSettingsWindowHost() {
 
           await closeWindow();
         })();
-      }, FOCUS_LOSS_CHECK_MS);
+      }, focusLossDelay);
     });
 
     return () => {

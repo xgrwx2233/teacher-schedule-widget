@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
-import { ScheduleToolbar } from "../ScheduleToolbar/ScheduleToolbar";
+import { ScheduleToolbar, type ToolbarSyncStatus } from "../ScheduleToolbar/ScheduleToolbar";
 import type { CardStyle, CourseCell, PeriodInfo, Schedule, Weekday } from "../../features/schedule/types";
 import type { PeriodColumnStyle, SelectedCard, WidgetBackgroundMode } from "../../features/settings/settingsTypes";
 import type { WindowMode } from "../../features/windowMode/types";
@@ -19,7 +19,9 @@ type ScheduleWidgetProps = {
   periodColumnStyle: PeriodColumnStyle;
   toolbarLayoutMode: ToolbarLayoutMode;
   authLabel: string;
+  authTitle: string;
   loggedIn: boolean;
+  syncStatus?: ToolbarSyncStatus;
   onPreviousWeek: () => void;
   onNextWeek: () => void;
   onToggleFloatingToolbar: () => void;
@@ -56,7 +58,9 @@ export function ScheduleWidget({
   periodColumnStyle,
   toolbarLayoutMode,
   authLabel,
+  authTitle,
   loggedIn,
+  syncStatus,
   onPreviousWeek,
   onNextWeek,
   onToggleFloatingToolbar,
@@ -86,7 +90,9 @@ export function ScheduleWidget({
             onNextWeek={onNextWeek}
             onToggleLayoutMode={onToggleLayoutMode}
             authLabel={authLabel}
+            authTitle={authTitle}
             loggedIn={loggedIn}
+            syncStatus={syncStatus}
             onOpenAuth={onOpenAuth}
             onToggleMenu={onToggleMenu}
             onDragStart={onDragStart}

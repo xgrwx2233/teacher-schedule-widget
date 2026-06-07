@@ -230,7 +230,7 @@ fn create_auth_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         .maximizable(false)
         .skip_taskbar(true)
         .visible(false)
-        .inner_size(360.0, 430.0)
+        .inner_size(380.0, 420.0)
         .build()
         .map_err(|error| error.to_string())?;
 

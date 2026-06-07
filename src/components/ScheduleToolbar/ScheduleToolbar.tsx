@@ -2,6 +2,8 @@ import type { PointerEvent, ReactNode, RefObject } from "react";
 import type { WidgetBackgroundMode } from "../../features/settings/settingsTypes";
 import type { ToolbarLayoutMode } from "../../features/settings/windowEvents";
 
+export type ToolbarSyncStatus = "local" | "pending" | "error";
+
 type ScheduleToolbarProps = {
   weekNumber: number;
   menuOpen: boolean;
@@ -10,7 +12,9 @@ type ScheduleToolbarProps = {
   variant?: "embedded" | "floating";
   menuButtonRef?: RefObject<HTMLButtonElement | null>;
   authLabel?: string;
+  authTitle?: string;
   loggedIn?: boolean;
+  syncStatus?: ToolbarSyncStatus;
   onPreviousWeek: () => void;
   onNextWeek: () => void;
   onToggleLayoutMode: () => void;
@@ -27,7 +31,9 @@ export function ScheduleToolbar({
   variant = "embedded",
   menuButtonRef,
   authLabel,
+  authTitle,
   loggedIn = false,
+  syncStatus,
   onPreviousWeek,
   onNextWeek,
   onToggleLayoutMode,
@@ -68,12 +74,14 @@ export function ScheduleToolbar({
           <button
             type="button"
             className={loggedIn ? "toolbar-account-button is-logged-in" : "toolbar-account-button"}
-            title={loggedIn ? "账号" : "登录 / 账号"}
-            aria-label={loggedIn ? "账号" : "登录 / 账号"}
+            title={authTitle ?? (loggedIn ? "账号" : "登录 / 账号")}
+            aria-label={authTitle ?? (loggedIn ? "账号" : "登录 / 账号")}
+            data-sync-status={loggedIn ? syncStatus : undefined}
             data-auth-button="true"
             onClick={onOpenAuth}
           >
             {loggedIn ? <span>{authLabel}</span> : <UserIcon />}
+            {loggedIn && syncStatus ? <i className="toolbar-account-sync-dot" aria-hidden="true" /> : null}
           </button>
         ) : null}
         <ToolbarIconButton

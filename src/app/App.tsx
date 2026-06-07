@@ -5,7 +5,8 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { CSSProperties, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScheduleWidget } from "../components/ScheduleWidget/ScheduleWidget";
-import { defaultLocalAccountState, type LocalAccountState, type StoredSchedulePayload } from "../features/account/types";
+import type { ToolbarSyncStatus } from "../components/ScheduleToolbar/ScheduleToolbar";
+import { defaultLocalAccountState, defaultLocalSyncStatus, type LocalAccountState, type LocalSyncStatus, type StoredSchedulePayload } from "../features/account/types";
 import { allScheduleDays, mockSchedule } from "../features/schedule/mockSchedule";
 import type {
   CardStyle,
@@ -141,13 +142,11 @@ export function App() {
 
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
-  const scaleFactorRef = useRef(1);
   const menuOpenRef = useRef(false);
   const menuClosedAtRef = useRef(0);
   const toolbarWindowOpenRef = useRef(false);
   const toolbarLayoutModeRef = useRef<ToolbarLayoutMode>("normal");
   const modeRef = useRef<WindowMode>("attached");
-  const lastForwardedCardClickRef = useRef<{ key: string; time: number } | null>(null);
 
   const [mode, setMode] = useState<WindowMode>("attached");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -156,6 +155,7 @@ export function App() {
   const [settings, setSettings] = useState<WidgetSettingsState>(defaultSettings);
   const [schedule, setSchedule] = useState<Schedule>(() => loadPersistedSchedule() ?? mockSchedule);
   const [accountState, setAccountState] = useState<LocalAccountState>(defaultLocalAccountState);
+  const [localSyncStatus, setLocalSyncStatus] = useState<LocalSyncStatus>(defaultLocalSyncStatus);
   const [schedulePersistenceReady, setSchedulePersistenceReady] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -212,7 +212,10 @@ export function App() {
   );
 
   useEffect(() => {
-    void invoke<WindowModeState>("get_window_mode").then((state) => setMode(state.mode));
+    void invoke<WindowModeState>("get_window_mode").then((state) => {
+      modeRef.current = state.mode;
+      setMode(state.mode);
+    });
     void invoke<{ activeSkinId: string }>("load_widget_settings").then((loadedSettings) => {
       setActiveSkinId(loadedSettings.activeSkinId);
     });
@@ -225,11 +228,7 @@ export function App() {
         setActiveSkinId(widget.skinId);
       }
     });
-
-    void appWindow.scaleFactor().then((factor) => {
-      scaleFactorRef.current = factor || 1;
-    });
-  }, [appWindow]);
+  }, []);
 
   const refreshWallpaperInfo = useCallback(async () => {
     const requestId = ++wallpaperRequestIdRef.current;
@@ -323,7 +322,14 @@ export function App() {
       return;
     }
 
-    void invoke("save_current_schedule", { schedule });
+    void (async () => {
+      try {
+        await invoke("save_current_schedule", { schedule });
+        const nextSyncStatus = await invoke<LocalSyncStatus>("load_local_sync_status");
+        setLocalSyncStatus(nextSyncStatus);
+      } catch {
+      }
+    })();
   }, [schedule, schedulePersistenceReady]);
 
   useEffect(() => {
@@ -364,6 +370,7 @@ export function App() {
     if (storedSchedule.schedule) {
       scheduleRef.current = storedSchedule.schedule;
       setSchedule(storedSchedule.schedule);
+      setLocalSyncStatus(await invoke<LocalSyncStatus>("load_local_sync_status"));
       setSchedulePersistenceReady(true);
       return;
     }
@@ -372,6 +379,7 @@ export function App() {
     scheduleRef.current = fallbackSchedule;
     setSchedule(fallbackSchedule);
     await invoke("save_current_schedule", { schedule: fallbackSchedule });
+    setLocalSyncStatus(await invoke<LocalSyncStatus>("load_local_sync_status"));
     setSchedulePersistenceReady(true);
   }, []);
 
@@ -767,61 +775,8 @@ export function App() {
         setHovered(false);
       }
 
-      if (payload.kind !== "click") {
-        return;
-      }
-
-      if (modeRef.current === "attached") {
-        return;
-      }
-
-      setHovered(true);
-      const hit = resolveForwardedClickHit(payload, scaleFactorRef.current);
-
-      if (hit.menuButton) {
-        void openWidgetMenu();
-        return;
-      }
-
-      if (hit.authButton) {
-        void openAuth();
-        return;
-      }
-
-      if (menuOpenRef.current && hit.menuAction === "settings") {
-        void openSettings();
-        return;
-      }
-
-      if (menuOpenRef.current && hit.menuAction === "mode") {
-        void switchMode();
-        return;
-      }
-
-      if (menuOpenRef.current && hit.menuAction === "close") {
-        void hideScheduleWidget();
-        return;
-      }
-
-      if (menuOpenRef.current) {
-        void closeWidgetMenu();
-        return;
-      }
-
-      if (hit.editableCard) {
-        const key = selectedCardKey(hit.editableCard);
-        const now = Date.now();
-        const previous = lastForwardedCardClickRef.current;
-        lastForwardedCardClickRef.current = { key, time: now };
-
-        if (hit.editableCard.type === "course") {
-          setActiveCellId(hit.editableCard.courseId);
-        }
-
-        if (previous?.key === key && now - previous.time <= 320) {
-          void openCardSettings(hit.editableCard);
-        }
-      }
+      // Click handling is intentionally split by mode:
+      // detached uses normal DOM click/double-click events, attached uses the interaction proxy.
     });
 
     return () => {
@@ -858,6 +813,10 @@ export function App() {
 
   useEffect(() => {
     window.__teacherScheduleProxyTrigger = (hit: ProxyWidgetHit) => {
+      if (modeRef.current !== "attached") {
+        return;
+      }
+
       handleProxyWidgetHit(
         hit,
         openFloatingToolbarWindow,
@@ -872,6 +831,10 @@ export function App() {
     };
 
     const unlistenPromise = listen<ProxyWidgetHit>(PROXY_TRIGGER_EVENT, (event) => {
+      if (modeRef.current !== "attached") {
+        return;
+      }
+
       const hit = event.payload;
       handleProxyWidgetHit(
         hit,
@@ -1032,7 +995,9 @@ export function App() {
         periodColumnStyle={normalizedAppearance.periodColumnStyle}
         toolbarLayoutMode={toolbarLayoutMode}
         authLabel={getAuthToolbarLabel(accountState)}
+        authTitle={getAuthToolbarTitle(accountState, localSyncStatus)}
         loggedIn={accountState.loggedIn}
+        syncStatus={getToolbarSyncStatus(accountState, localSyncStatus)}
         onPreviousWeek={() => void stepWeek(-1)}
         onNextWeek={() => void stepWeek(1)}
         onToggleFloatingToolbar={openFloatingToolbarWindow}
@@ -1519,10 +1484,6 @@ function isSameSelectedCard(left: SelectedCard, right: SelectedCard): boolean {
     case "period":
       return right.type === "period" && left.periodId === right.periodId;
   }
-}
-
-function selectedCardKey(card: SelectedCard): string {
-  return card.type === "course" ? `course:${card.courseId}` : `period:${card.periodId}`;
 }
 
 function handleProxyWidgetHit(
@@ -2947,145 +2908,6 @@ function findPeriod(schedule: Schedule, periodId: string): PeriodInfo | undefine
   return undefined;
 }
 
-type ForwardedClickHit = {
-  menuButton: boolean;
-  authButton: boolean;
-  headerToggle: boolean;
-  menuAction: "settings" | "mode" | "close" | null;
-  editableCard: SelectedCard | null;
-};
-
-function resolveForwardedClickHit(payload: DesktopInputEvent, scaleFactor: number): ForwardedClickHit {
-  /*
-    The Rust forwarder emits HWND-local physical pixels. Browser hit testing uses
-    CSS pixels. We try several conversions because WebView, Explorer reparenting
-    and DPI changes can report slightly different coordinate spaces.
-  */
-  const candidates = createForwardedPointCandidates(payload, scaleFactor);
-
-  for (const point of candidates) {
-    const element = document.elementFromPoint(point.x, point.y) as HTMLElement | null;
-    const hit = hitTestForwardedElement(element, point.x, point.y);
-    if (hit.menuButton || hit.authButton || hit.headerToggle || hit.menuAction || hit.editableCard) {
-      return hit;
-    }
-
-    const editableCard = findEditableCardByGeometry(point.x, point.y);
-    if (editableCard) {
-      return { menuButton: false, authButton: false, headerToggle: false, menuAction: null, editableCard };
-    }
-  }
-
-  return { menuButton: false, authButton: false, headerToggle: false, menuAction: null, editableCard: null };
-}
-
-function createForwardedPointCandidates(
-  payload: DesktopInputEvent,
-  scaleFactor: number,
-): Array<{ x: number; y: number }> {
-  const cssWidth = window.innerWidth || document.documentElement.clientWidth;
-  const cssHeight = window.innerHeight || document.documentElement.clientHeight;
-  const scale = Math.max(scaleFactor, 1);
-  const candidates = [
-    { x: payload.x / scale, y: payload.y / scale },
-    { x: payload.x, y: payload.y },
-  ];
-
-  if (payload.width > 0 && payload.height > 0 && cssWidth > 0 && cssHeight > 0) {
-    candidates.push({
-      x: (payload.x / payload.width) * cssWidth,
-      y: (payload.y / payload.height) * cssHeight,
-    });
-  }
-
-  return dedupePoints(candidates);
-}
-
-function dedupePoints(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
-  const seen = new Set<string>();
-  return points.filter((point) => {
-    const key = `${Math.round(point.x)}:${Math.round(point.y)}`;
-    if (seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-}
-
-function hitTestForwardedElement(element: HTMLElement | null, x?: number, y?: number): ForwardedClickHit {
-  const menuButton = Boolean(element?.closest("[data-menu-button]"));
-  const authButton = Boolean(element?.closest("[data-auth-button]"));
-  const headerToggle = Boolean(element?.closest("[data-header-toggle]"));
-  const menuActionElement = element?.closest<HTMLElement>("[data-menu-action]");
-  const editableElement = element?.closest<HTMLElement>("[data-course-id], [data-period-id]");
-
-  const menuAction = readMenuAction(menuActionElement);
-  const editableCard = readEditableCard(editableElement, x, y);
-
-  return { menuButton, authButton, headerToggle, menuAction, editableCard };
-}
-
-function readMenuAction(element: HTMLElement | null | undefined): ForwardedClickHit["menuAction"] {
-  const action = element?.dataset.menuAction;
-  return action === "settings" || action === "mode" || action === "close" ? action : null;
-}
-
-function readEditableCard(element: HTMLElement | null | undefined, x?: number, y?: number): SelectedCard | null {
-  const courseId = resolveCourseElementId(element, x, y);
-  if (courseId) {
-    return { type: "course", courseId };
-  }
-
-  const periodId = element?.dataset.periodId;
-  if (periodId) {
-    return { type: "period", periodId };
-  }
-
-  return null;
-}
-
-function findEditableCardByGeometry(x: number, y: number): SelectedCard | null {
-  const elements = document.querySelectorAll<HTMLElement>("[data-course-id], [data-period-id]");
-
-  for (const element of elements) {
-    const rect = element.getBoundingClientRect();
-    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-      continue;
-    }
-
-    const courseId = resolveCourseElementId(element, x, y);
-    if (courseId) {
-      return { type: "course", courseId };
-    }
-
-    return readEditableCard(element);
-  }
-
-  return null;
-}
-
-function resolveCourseElementId(element: HTMLElement | null | undefined, x?: number, y?: number): string | undefined {
-  const courseId = element?.dataset.courseId;
-  if (!courseId) {
-    return undefined;
-  }
-
-  const hitIds = parseCourseHitIds(element.dataset.courseHitIds, courseId);
-  if (hitIds.length <= 1 || (x === undefined && y === undefined)) {
-    return hitIds[0] ?? courseId;
-  }
-
-  const rect = element.getBoundingClientRect();
-  const axis = element.dataset.courseHitAxis === "vertical" ? "vertical" : "horizontal";
-  const ratio = axis === "vertical"
-    ? rect.height > 0 ? ((y ?? rect.top) - rect.top) / rect.height : 0
-    : rect.width > 0 ? ((x ?? rect.left) - rect.left) / rect.width : 0;
-  const index = Math.max(0, Math.min(hitIds.length - 1, Math.floor(ratio * hitIds.length)));
-  return hitIds[index] ?? courseId;
-}
-
 function loadPersistedSchedule(): Schedule | null {
   try {
     const raw = window.localStorage.getItem(SCHEDULE_STORAGE_KEY);
@@ -3109,4 +2931,32 @@ function getAuthToolbarLabel(accountState: LocalAccountState): string {
   }
 
   return accountState.user?.phone?.slice(-2) ?? "账";
+}
+
+function getToolbarSyncStatus(accountState: LocalAccountState, syncStatus: LocalSyncStatus): ToolbarSyncStatus | undefined {
+  if (!accountState.loggedIn) {
+    return undefined;
+  }
+
+  if (syncStatus.lastSyncError) {
+    return "error";
+  }
+
+  return syncStatus.hasPendingChanges ? "pending" : "local";
+}
+
+function getAuthToolbarTitle(accountState: LocalAccountState, syncStatus: LocalSyncStatus): string {
+  if (!accountState.loggedIn) {
+    return "登录 / 账号";
+  }
+
+  if (syncStatus.lastSyncError) {
+    return `账号，本地同步状态异常：${syncStatus.lastSyncError}`;
+  }
+
+  if (syncStatus.hasPendingChanges) {
+    return `账号，本地有 ${syncStatus.dirtyCount} 项待同步更改`;
+  }
+
+  return "账号，本地可用";
 }
