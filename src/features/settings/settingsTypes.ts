@@ -1,4 +1,12 @@
-import type { CardStyle, CourseCardDisplayMode, CourseCardFontWeight, CourseScheduleRule, CourseTemporaryChange, WorkdayMode } from "../schedule/types";
+import type {
+  CardStyle,
+  CourseCardDisplayMode,
+  CourseCardFontWeight,
+  CourseScheduleRule,
+  CourseTemporaryChange,
+  PeriodInfo,
+  WorkdayMode,
+} from "../schedule/types";
 
 export type TermSettings = {
   startDate: string;
@@ -39,7 +47,9 @@ export type WidgetSettingsState = {
   appearance: AppearanceSettings;
 };
 
-export type SettingsSection = "schedule" | "term" | "appearance";
+export type PeriodConfigItem = Pick<PeriodInfo, "id" | "label" | "time">;
+
+export type SettingsSection = "schedule" | "periods" | "term" | "appearance";
 
 export type SelectedCard =
   | { type: "course"; courseId: string }
@@ -76,7 +86,10 @@ export type TemporaryChangeDraft = CourseTemporaryChange & {
   title: string;
   subtitle: string;
   color: string;
-  style: Pick<CardStyle, "fontFamily" | "fontSize" | "fontWeight" | "displayMode">;
+  style: Pick<
+    CardStyle,
+    "fontFamily" | "fontSize" | "fontWeight" | "displayMode"
+  >;
   createdAt: string;
   updatedAt: string;
   replaceTitle: string;
@@ -105,7 +118,13 @@ export const defaultAppearanceSettings: AppearanceSettings = {
   periodColumnStyle: "transparent",
 };
 
-export const cardShadowStrengthLabels = ["无阴影", "极轻", "轻", "标准", "明显"] as const;
+export const cardShadowStrengthLabels = [
+  "无阴影",
+  "极轻",
+  "轻",
+  "标准",
+  "明显",
+] as const;
 
 export function normalizeCardRadius(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -123,30 +142,66 @@ export function normalizeCardShadowStrength(value: number | undefined): number {
   return Math.max(0, Math.min(4, Math.round(value)));
 }
 
-export function normalizeAppearanceSettings(appearance?: Partial<AppearanceSettings> | null): AppearanceSettings {
+export function normalizeAppearanceSettings(
+  appearance?: Partial<AppearanceSettings> | null,
+): AppearanceSettings {
   return {
     columnGap: appearance?.columnGap ?? defaultAppearanceSettings.columnGap,
-    rowDividerHeight: appearance?.rowDividerHeight ?? defaultAppearanceSettings.rowDividerHeight,
-    rowDividerStyle: appearance?.rowDividerStyle ?? defaultAppearanceSettings.rowDividerStyle,
-    rowDividerColor: appearance?.rowDividerColor ?? defaultAppearanceSettings.rowDividerColor,
-    rowDividerOpacity: appearance?.rowDividerOpacity ?? defaultAppearanceSettings.rowDividerOpacity,
-    rowDividerThickness: appearance?.rowDividerThickness ?? defaultAppearanceSettings.rowDividerThickness,
-    backgroundMode: appearance?.backgroundMode === "solid" ? "solid" : defaultAppearanceSettings.backgroundMode,
-    backgroundColor: appearance?.backgroundColor ?? defaultAppearanceSettings.backgroundColor,
-    backgroundOpacity: normalizePercent(appearance?.backgroundOpacity, defaultAppearanceSettings.backgroundOpacity),
-    blurIntensity: normalizeRange(appearance?.blurIntensity, defaultAppearanceSettings.blurIntensity, 0, 40),
+    rowDividerHeight:
+      appearance?.rowDividerHeight ??
+      defaultAppearanceSettings.rowDividerHeight,
+    rowDividerStyle:
+      appearance?.rowDividerStyle ?? defaultAppearanceSettings.rowDividerStyle,
+    rowDividerColor:
+      appearance?.rowDividerColor ?? defaultAppearanceSettings.rowDividerColor,
+    rowDividerOpacity:
+      appearance?.rowDividerOpacity ??
+      defaultAppearanceSettings.rowDividerOpacity,
+    rowDividerThickness:
+      appearance?.rowDividerThickness ??
+      defaultAppearanceSettings.rowDividerThickness,
+    backgroundMode:
+      appearance?.backgroundMode === "solid"
+        ? "solid"
+        : defaultAppearanceSettings.backgroundMode,
+    backgroundColor:
+      appearance?.backgroundColor ?? defaultAppearanceSettings.backgroundColor,
+    backgroundOpacity: normalizePercent(
+      appearance?.backgroundOpacity,
+      defaultAppearanceSettings.backgroundOpacity,
+    ),
+    blurIntensity: normalizeRange(
+      appearance?.blurIntensity,
+      defaultAppearanceSettings.blurIntensity,
+      0,
+      40,
+    ),
     cardRadius: normalizeCardRadius(appearance?.cardRadius),
-    cardShadowStrength: normalizeCardShadowStrength(appearance?.cardShadowStrength),
-    gridLineType: appearance?.gridLineType ?? defaultAppearanceSettings.gridLineType,
-    gridLineColor: appearance?.gridLineColor ?? defaultAppearanceSettings.gridLineColor,
-    gridLineWidth: typeof appearance?.gridLineWidth === "number" ? appearance.gridLineWidth : defaultAppearanceSettings.gridLineWidth,
-    gridLineOpacity: typeof appearance?.gridLineOpacity === "number" ? appearance.gridLineOpacity : defaultAppearanceSettings.gridLineOpacity,
+    cardShadowStrength: normalizeCardShadowStrength(
+      appearance?.cardShadowStrength,
+    ),
+    gridLineType:
+      appearance?.gridLineType ?? defaultAppearanceSettings.gridLineType,
+    gridLineColor:
+      appearance?.gridLineColor ?? defaultAppearanceSettings.gridLineColor,
+    gridLineWidth:
+      typeof appearance?.gridLineWidth === "number"
+        ? appearance.gridLineWidth
+        : defaultAppearanceSettings.gridLineWidth,
+    gridLineOpacity:
+      typeof appearance?.gridLineOpacity === "number"
+        ? appearance.gridLineOpacity
+        : defaultAppearanceSettings.gridLineOpacity,
     axisColorMode: normalizeAxisColorMode(appearance?.axisColorMode),
-    periodColumnStyle: normalizePeriodColumnStyle(appearance?.periodColumnStyle),
+    periodColumnStyle: normalizePeriodColumnStyle(
+      appearance?.periodColumnStyle,
+    ),
   };
 }
 
-function normalizeAxisColorMode(value: AxisColorMode | undefined): AxisColorMode {
+function normalizeAxisColorMode(
+  value: AxisColorMode | undefined,
+): AxisColorMode {
   if (value === "light" || value === "dark") {
     return value;
   }
@@ -154,7 +209,9 @@ function normalizeAxisColorMode(value: AxisColorMode | undefined): AxisColorMode
   return defaultAppearanceSettings.axisColorMode;
 }
 
-function normalizePeriodColumnStyle(value: PeriodColumnStyle | undefined): PeriodColumnStyle {
+function normalizePeriodColumnStyle(
+  value: PeriodColumnStyle | undefined,
+): PeriodColumnStyle {
   if (value === "soft" || value === "transparent" || value === "solid") {
     return value;
   }
@@ -166,7 +223,12 @@ function normalizePercent(value: number | undefined, fallback: number): number {
   return normalizeRange(value, fallback, 0, 100);
 }
 
-function normalizeRange(value: number | undefined, fallback: number, min: number, max: number): number {
+function normalizeRange(
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return fallback;
   }
@@ -177,9 +239,9 @@ function normalizeRange(value: number | undefined, fallback: number, min: number
 export const defaultCardDraft: CardDraft = {
   title: "",
   secondary: "",
-  backgroundColor: "#fff8e1",
-  color: "#b97916",
-  iconColor: "#b97916",
+  backgroundColor: "#FF3B30",
+  color: "#c22d24",
+  iconColor: "#c22d24",
   fontFamily: "Microsoft YaHei",
   fontSize: 14,
   fontWeight: "medium",
@@ -190,7 +252,9 @@ export const defaultCardDraft: CardDraft = {
   endDate: "2026-06-30",
 };
 
-export function createDefaultTemporaryChangeDraft(date: string): TemporaryChangeDraft {
+export function createDefaultTemporaryChangeDraft(
+  date: string,
+): TemporaryChangeDraft {
   const now = new Date().toISOString();
   return {
     id: `temporary-change-${date}-${Math.random().toString(16).slice(2, 8)}`,
@@ -198,7 +262,7 @@ export function createDefaultTemporaryChangeDraft(date: string): TemporaryChange
     dates: [date],
     title: "",
     subtitle: "",
-    color: "#4f46e5",
+    color: "#FF3B30",
     style: {
       fontFamily: "Microsoft YaHei",
       fontSize: 14,
@@ -209,7 +273,7 @@ export function createDefaultTemporaryChangeDraft(date: string): TemporaryChange
     updatedAt: now,
     replaceTitle: "",
     replaceSecondary: "",
-    replaceColor: "#4f46e5",
+    replaceColor: "#FF3B30",
   };
 }
 
@@ -234,17 +298,19 @@ export type ComputedCardPalette = {
 };
 
 export const courseCardPresetColors = [
-  { name: "日落橙", value: "#FF6B35" },
-  { name: "阳光黄", value: "#FFD166" },
-  { name: "薄荷绿", value: "#06D6A0" },
-  { name: "晴空蓝", value: "#118AB2" },
-  { name: "薰衣紫", value: "#9B5DE5" },
-  { name: "珊瑚粉", value: "#F15BB5" },
-  { name: "奶油白", value: "#F0E5CF" },
+  { name: "红色", value: "#FF3B30" },
+  { name: "橙色", value: "#FF9500" },
+  { name: "黄色", value: "#FFCC00" },
+  { name: "绿色", value: "#34C759" },
+  { name: "蓝色", value: "#007AFF" },
+  { name: "紫色", value: "#AF52DE" },
+  { name: "棕色", value: "#A2845E" },
 ] as const;
 
 export function isPresetCourseColor(value: string): boolean {
-  return courseCardPresetColors.some((color) => color.value.toLowerCase() === value.trim().toLowerCase());
+  return courseCardPresetColors.some(
+    (color) => color.value.toLowerCase() === value.trim().toLowerCase(),
+  );
 }
 
 export function computeCoursePalette(baseColor: string): ComputedCardPalette {
@@ -253,13 +319,21 @@ export function computeCoursePalette(baseColor: string): ComputedCardPalette {
   const saturation = (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
   const color = deriveReadableAccentColor(r, g, b);
   return {
-    backgroundColor: blendWithWhiteHex(r, g, b, luminance > 205 && saturation < 0.22 ? 0.9 : 0.84),
+    backgroundColor: blendWithWhiteHex(
+      r,
+      g,
+      b,
+      luminance > 205 && saturation < 0.22 ? 0.9 : 0.84,
+    ),
     color,
     iconColor: color,
   };
 }
 
-export function applyComputedCoursePalette(draft: CardDraft, baseColor: string): CardDraft {
+export function applyComputedCoursePalette(
+  draft: CardDraft,
+  baseColor: string,
+): CardDraft {
   const palette = computeCoursePalette(baseColor);
   return {
     ...draft,
@@ -271,7 +345,13 @@ export function applyComputedCoursePalette(draft: CardDraft, baseColor: string):
 
 function parseHexColor(value: string): { r: number; g: number; b: number } {
   const normalized = value.trim().replace(/^#/, "");
-  const expanded = normalized.length === 3 ? normalized.split("").map((item) => item + item).join("") : normalized;
+  const expanded =
+    normalized.length === 3
+      ? normalized
+          .split("")
+          .map((item) => item + item)
+          .join("")
+      : normalized;
   const match = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(expanded);
   if (!match) {
     return { r: 255, g: 255, b: 255 };
@@ -308,7 +388,12 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${[r, g, b].map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0")).join("")}`;
 }
 
-function blendWithWhiteHex(r: number, g: number, b: number, whiteWeight: number): string {
+function blendWithWhiteHex(
+  r: number,
+  g: number,
+  b: number,
+  whiteWeight: number,
+): string {
   const ratio = Math.max(0, Math.min(1, whiteWeight));
   return rgbToHex(
     Math.round(r * (1 - ratio) + 255 * ratio),

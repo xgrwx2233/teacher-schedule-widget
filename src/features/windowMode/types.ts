@@ -10,6 +10,17 @@ export type DesktopInputEvent = {
 
 export type WindowModeState = {
   mode: WindowMode;
+  attachDiagnostics?: DesktopAttachDiagnostics | null;
+};
+
+export type DesktopAttachDiagnostics = {
+  progmanFound: boolean;
+  shellViewHostFound: boolean;
+  workerWFound: boolean;
+  attached: boolean;
+  windowVisible: boolean;
+  parentIsWorkerW: boolean;
+  error?: string | null;
 };
 
 export type ProxyWidgetHit =
@@ -19,6 +30,7 @@ export type ProxyWidgetHit =
   | { kind: "layout-toggle"; id?: string }
   | { kind: "previous-week"; id?: string }
   | { kind: "next-week"; id?: string }
+  | { kind: "sync"; id?: string }
   | { kind: "course"; id: string }
   | { kind: "period"; id: string }
   | { kind: "placeholder"; id: string };

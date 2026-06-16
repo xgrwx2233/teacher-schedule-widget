@@ -34,7 +34,10 @@ export function CardSettingsWindowHost() {
   const currentWindow = useMemo(() => getCurrentWindow(), []);
   const [selectedCard, setSelectedCard] = useState<SelectedCard | null>(null);
   const [draft, setDraft] = useState<CardDraft>(defaultCardDraft);
-  const [term, setTerm] = useState<TermSettings>({ startDate: defaultCardDraft.startDate, endDate: defaultCardDraft.endDate });
+  const [term, setTerm] = useState<TermSettings>({
+    startDate: defaultCardDraft.startDate,
+    endDate: defaultCardDraft.endDate,
+  });
   const [mergeState, setMergeState] = useState<CourseCardMergeState>({
     canMergeUp: false,
     canMergeLeft: false,
@@ -42,10 +45,16 @@ export function CardSettingsWindowHost() {
     canMergeDown: false,
     canSplit: false,
   });
-  const [temporaryChanges, setTemporaryChanges] = useState<TemporaryChangeDraft[]>([]);
-  const [activeTemporaryChangeId, setActiveTemporaryChangeId] = useState<string | null>(null);
+  const [temporaryChanges, setTemporaryChanges] = useState<
+    TemporaryChangeDraft[]
+  >([]);
+  const [activeTemporaryChangeId, setActiveTemporaryChangeId] = useState<
+    string | null
+  >(null);
   const [activeTab, setActiveTab] = useState<CardSettingsTab>("course");
-  const [titleContext, setTitleContext] = useState<CardSettingsTitleContext | undefined>(undefined);
+  const [titleContext, setTitleContext] = useState<
+    CardSettingsTitleContext | undefined
+  >(undefined);
   const [temporaryDraftTitle, setTemporaryDraftTitle] = useState("");
   const isClosingRef = useRef(false);
   const openedAtRef = useRef(0);
@@ -60,32 +69,43 @@ export function CardSettingsWindowHost() {
   }, [selectedCard]);
 
   useEffect(() => {
-    const unlistenState = listen<CardSettingsWindowStatePayload>(CARD_SETTINGS_WINDOW_STATE_EVENT, (event) => {
-      const isCurrentCard = isSameSelectedCard(selectedCardRef.current, event.payload.selectedCard);
-      const shouldKeepLocalDraft = isCurrentCard && Date.now() < localDraftSyncGuardUntilRef.current;
+    const unlistenState = listen<CardSettingsWindowStatePayload>(
+      CARD_SETTINGS_WINDOW_STATE_EVENT,
+      (event) => {
+        const isCurrentCard = isSameSelectedCard(
+          selectedCardRef.current,
+          event.payload.selectedCard,
+        );
+        const shouldKeepLocalDraft =
+          isCurrentCard && Date.now() < localDraftSyncGuardUntilRef.current;
 
-      openedAtRef.current = Date.now();
-      hasFocusedSinceOpenRef.current = false;
-      setSelectedCard(event.payload.selectedCard);
-      if (!shouldKeepLocalDraft) {
-        setDraft(event.payload.draft);
-      }
-      setMergeState(event.payload.mergeState);
-      setTerm(event.payload.term);
-      setTitleContext(event.payload.titleContext);
-      setTemporaryChanges(event.payload.temporaryChanges ?? []);
-      setActiveTemporaryChangeId((currentActiveId) =>
-        event.payload.activeTemporaryChangeId ?? (isCurrentCard ? currentActiveId : event.payload.temporaryChanges?.[0]?.id ?? null),
-      );
-      if (!isCurrentCard) {
-        setActiveTab("course");
-        setTemporaryDraftTitle("");
-      }
+        openedAtRef.current = Date.now();
+        hasFocusedSinceOpenRef.current = false;
+        setSelectedCard(event.payload.selectedCard);
+        if (!shouldKeepLocalDraft) {
+          setDraft(event.payload.draft);
+        }
+        setMergeState(event.payload.mergeState);
+        setTerm(event.payload.term);
+        setTitleContext(event.payload.titleContext);
+        setTemporaryChanges(event.payload.temporaryChanges ?? []);
+        setActiveTemporaryChangeId(
+          (currentActiveId) =>
+            event.payload.activeTemporaryChangeId ??
+            (isCurrentCard
+              ? currentActiveId
+              : (event.payload.temporaryChanges?.[0]?.id ?? null)),
+        );
+        if (!isCurrentCard) {
+          setActiveTab("course");
+          setTemporaryDraftTitle("");
+        }
 
-      window.setTimeout(() => {
-        void currentWindow.setFocus();
-      }, 80);
-    });
+        window.setTimeout(() => {
+          void currentWindow.setFocus();
+        }, 80);
+      },
+    );
 
     void emitTo(WIDGET_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT, {
       windowLabel: currentWindow.label,
@@ -102,8 +122,26 @@ export function CardSettingsWindowHost() {
       return;
     }
 
-    void currentWindow.setTitle(buildCourseSettingsTitle(activeTab, titleContext, draft, temporaryChanges, activeTemporaryChangeId, temporaryDraftTitle));
-  }, [activeTab, activeTemporaryChangeId, currentWindow, draft, selectedCard, temporaryChanges, temporaryDraftTitle, titleContext]);
+    void currentWindow.setTitle(
+      buildCourseSettingsTitle(
+        activeTab,
+        titleContext,
+        draft,
+        temporaryChanges,
+        activeTemporaryChangeId,
+        temporaryDraftTitle,
+      ),
+    );
+  }, [
+    activeTab,
+    activeTemporaryChangeId,
+    currentWindow,
+    draft,
+    selectedCard,
+    temporaryChanges,
+    temporaryDraftTitle,
+    titleContext,
+  ]);
 
   const defaultTemporaryDate = useMemo(
     () => resolveTitleContextDate(titleContext, term),
@@ -116,48 +154,71 @@ export function CardSettingsWindowHost() {
     }
 
     setDraft(nextDraft);
-    localDraftSyncGuardUntilRef.current = Date.now() + LOCAL_DRAFT_SYNC_GUARD_MS;
-    void emitTo<CardSettingsWindowUpdatePayload>(WIDGET_WINDOW_LABEL, CARD_SETTINGS_WINDOW_UPDATE_EVENT, {
-      windowLabel: currentWindow.label,
-      selectedCard,
-      draft: nextDraft,
-    });
+    localDraftSyncGuardUntilRef.current =
+      Date.now() + LOCAL_DRAFT_SYNC_GUARD_MS;
+    void emitTo<CardSettingsWindowUpdatePayload>(
+      WIDGET_WINDOW_LABEL,
+      CARD_SETTINGS_WINDOW_UPDATE_EVENT,
+      {
+        windowLabel: currentWindow.label,
+        selectedCard,
+        draft: nextDraft,
+      },
+    );
   };
 
-  const emitTemporaryUpdate = (nextTemporaryChanges: TemporaryChangeDraft[], nextActiveId: string | null) => {
+  const emitTemporaryUpdate = (
+    nextTemporaryChanges: TemporaryChangeDraft[],
+    nextActiveId: string | null,
+  ) => {
     if (!selectedCard) {
       return;
     }
 
-    void emitTo<CardSettingsWindowUpdatePayload>(WIDGET_WINDOW_LABEL, CARD_SETTINGS_WINDOW_UPDATE_EVENT, {
-      windowLabel: currentWindow.label,
-      selectedCard,
-      draft,
-      temporaryChanges: nextTemporaryChanges,
-      activeTemporaryChangeId: nextActiveId,
-    });
+    void emitTo<CardSettingsWindowUpdatePayload>(
+      WIDGET_WINDOW_LABEL,
+      CARD_SETTINGS_WINDOW_UPDATE_EVENT,
+      {
+        windowLabel: currentWindow.label,
+        selectedCard,
+        draft,
+        temporaryChanges: nextTemporaryChanges,
+        activeTemporaryChangeId: nextActiveId,
+      },
+    );
   };
 
-  const emitAction = (action: CardSettingsWindowActionPayload["action"], includeDraft = false) => {
+  const emitAction = (
+    action: CardSettingsWindowActionPayload["action"],
+    includeDraft = false,
+  ) => {
     if (!selectedCard) {
       return;
     }
 
-    void emitTo<CardSettingsWindowActionPayload>(WIDGET_WINDOW_LABEL, CARD_SETTINGS_WINDOW_ACTION_EVENT, {
-      windowLabel: currentWindow.label,
-      selectedCard,
-      action,
-      draft: includeDraft ? draft : undefined,
-      temporaryChanges: includeDraft ? temporaryChanges : undefined,
-      activeTemporaryChangeId: includeDraft ? activeTemporaryChangeId : undefined,
-    });
+    void emitTo<CardSettingsWindowActionPayload>(
+      WIDGET_WINDOW_LABEL,
+      CARD_SETTINGS_WINDOW_ACTION_EVENT,
+      {
+        windowLabel: currentWindow.label,
+        selectedCard,
+        action,
+        draft: includeDraft ? draft : undefined,
+        temporaryChanges: includeDraft ? temporaryChanges : undefined,
+        activeTemporaryChangeId: includeDraft
+          ? activeTemporaryChangeId
+          : undefined,
+      },
+    );
   };
 
   const updateTemporaryChange = (nextChange: TemporaryChangeDraft) => {
     setTemporaryChanges((current) => {
       const exists = current.some((change) => change.id === nextChange.id);
       const nextChanges = exists
-        ? current.map((change) => (change.id === nextChange.id ? nextChange : change))
+        ? current.map((change) =>
+            change.id === nextChange.id ? nextChange : change,
+          )
         : [nextChange, ...current];
       const nextActiveId = nextChange.id;
       setActiveTemporaryChangeId(nextActiveId);
@@ -215,38 +276,40 @@ export function CardSettingsWindowHost() {
       clearFocusLossTimer();
     });
 
-    const unlistenFocusPromise = currentWindow.onFocusChanged(async ({ payload: focused }) => {
-      if (focused) {
-        hasFocusedSinceOpenRef.current = true;
+    const unlistenFocusPromise = currentWindow.onFocusChanged(
+      async ({ payload: focused }) => {
+        if (focused) {
+          hasFocusedSinceOpenRef.current = true;
+          clearFocusLossTimer();
+          return;
+        }
+
         clearFocusLossTimer();
-        return;
-      }
+        if (!hasFocusedSinceOpenRef.current) {
+          return;
+        }
 
-      clearFocusLossTimer();
-      if (!hasFocusedSinceOpenRef.current) {
-        return;
-      }
+        const elapsedSinceOpen = Date.now() - openedAtRef.current;
+        const focusLossDelay = Math.max(
+          FOCUS_LOSS_CHECK_MS,
+          OPEN_FOCUS_GUARD_MS - elapsedSinceOpen + FOCUS_LOSS_CHECK_MS,
+        );
+        focusLossTimerRef.current = window.setTimeout(() => {
+          focusLossTimerRef.current = null;
+          void (async () => {
+            if (Date.now() - lastMovedAtRef.current < MOVE_SUPPRESSION_MS) {
+              return;
+            }
 
-      const elapsedSinceOpen = Date.now() - openedAtRef.current;
-      const focusLossDelay = Math.max(
-        FOCUS_LOSS_CHECK_MS,
-        OPEN_FOCUS_GUARD_MS - elapsedSinceOpen + FOCUS_LOSS_CHECK_MS,
-      );
-      focusLossTimerRef.current = window.setTimeout(() => {
-        focusLossTimerRef.current = null;
-        void (async () => {
-          if (Date.now() - lastMovedAtRef.current < MOVE_SUPPRESSION_MS) {
-            return;
-          }
+            if (await currentWindow.isFocused()) {
+              return;
+            }
 
-          if (await currentWindow.isFocused()) {
-            return;
-          }
-
-          await closeWindow();
-        })();
-      }, focusLossDelay);
-    });
+            await closeWindow();
+          })();
+        }, focusLossDelay);
+      },
+    );
 
     return () => {
       clearFocusLossTimer();
@@ -276,7 +339,6 @@ export function CardSettingsWindowHost() {
         onMergeDown={() => emitAction("merge-down")}
         onSplit={() => emitAction("split")}
         onDeleteCourse={() => emitAction("delete")}
-        onAddCourse={() => emitAction("add", true)}
         onGlobalStyleApply={() => emitAction("apply-style", true)}
         onGlobalScheduleApply={() => emitAction("apply-schedule", true)}
         onTemporaryChangeSelect={setActiveTemporaryChangeId}
@@ -296,14 +358,21 @@ function buildCourseSettingsTitle(
   activeTemporaryChangeId: string | null,
   temporaryDraftTitle: string,
 ): string {
-  const courseTitle = activeTab === "temporary"
-    ? getTemporaryTitleForTitlebar(temporaryChanges, activeTemporaryChangeId, temporaryDraftTitle)
-    : draft.title.trim() || "未命名课程";
+  const courseTitle =
+    activeTab === "temporary"
+      ? getTemporaryTitleForTitlebar(
+          temporaryChanges,
+          activeTemporaryChangeId,
+          temporaryDraftTitle,
+        )
+      : draft.title.trim() || "未命名课程";
   const context = [
     titleContext?.weekdayLabel,
     titleContext?.periodLabel,
     courseTitle,
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return activeTab === "temporary"
     ? ["课程设置", "｜", "〔临〕", context || "临时改动"].join(" ")
@@ -363,14 +432,20 @@ function resolveTitleContextDate(
   const startYear = Number(term.startDate.slice(0, 4));
   const endYear = Number(term.endDate.slice(0, 4));
   const startMonth = Number(term.startDate.slice(5, 7));
-  const year = endYear !== startYear && month < startMonth ? endYear : startYear;
+  const year =
+    endYear !== startYear && month < startMonth ? endYear : startYear;
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-function isSameSelectedCard(left: SelectedCard | null, right: SelectedCard | null): boolean {
+function isSameSelectedCard(
+  left: SelectedCard | null,
+  right: SelectedCard | null,
+): boolean {
   if (!left || !right || left.type !== right.type) {
     return false;
   }
 
-  return left.type === "course" ? right.type === "course" && left.courseId === right.courseId : right.type === "period" && left.periodId === right.periodId;
+  return left.type === "course"
+    ? right.type === "course" && left.courseId === right.courseId
+    : right.type === "period" && left.periodId === right.periodId;
 }

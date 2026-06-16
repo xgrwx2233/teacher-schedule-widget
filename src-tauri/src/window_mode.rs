@@ -1,22 +1,24 @@
 use crate::{
     app_state::AppState,
-    desktop_layer, interaction_proxy,
+    desktop_layer::{self, DesktopAttachDiagnostics},
+    interaction_proxy,
     widget_manager::{self, WidgetRegistryStore, WidgetWindowMode},
 };
 use serde::Serialize;
 use tauri::{Manager, Runtime, State};
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WindowMode {
     Attached,
     Detached,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowModeState {
     pub mode: WindowMode,
+    pub attach_diagnostics: Option<DesktopAttachDiagnostics>,
 }
 
 #[tauri::command]
@@ -27,6 +29,7 @@ pub fn get_window_mode(state: State<'_, AppState>) -> WindowModeState {
         } else {
             WindowMode::Detached
         },
+        attach_diagnostics: None,
     }
 }
 
@@ -40,6 +43,7 @@ pub fn switch_to_attached(
     interaction_proxy::show_proxy_for_widget(&window.app_handle(), &window, &state)?;
     Ok(WindowModeState {
         mode: WindowMode::Attached,
+        attach_diagnostics: Some(desktop_layer::attach_diagnostics(&window)),
     })
 }
 
@@ -53,6 +57,7 @@ pub fn switch_to_detached(
     apply_detached_mode(&window, &state, &registry)?;
     Ok(WindowModeState {
         mode: WindowMode::Detached,
+        attach_diagnostics: None,
     })
 }
 
@@ -60,8 +65,20 @@ pub fn apply_initial_attached_mode<R: Runtime>(
     window: &tauri::WebviewWindow<R>,
     state: &AppState,
     registry: &WidgetRegistryStore,
-) -> Result<(), String> {
-    apply_attached_mode(window, state, registry)
+) -> Result<WindowModeState, String> {
+    match apply_attached_mode(window, state, registry) {
+        Ok(()) => Ok(WindowModeState {
+            mode: WindowMode::Attached,
+            attach_diagnostics: Some(desktop_layer::attach_diagnostics(window)),
+        }),
+        Err(_) => {
+            apply_initial_detached_fallback(window, state, registry)?;
+            Ok(WindowModeState {
+                mode: WindowMode::Detached,
+                attach_diagnostics: Some(desktop_layer::attach_diagnostics(window)),
+            })
+        }
+    }
 }
 
 fn apply_attached_mode<R: Runtime>(
@@ -74,7 +91,9 @@ fn apply_attached_mode<R: Runtime>(
     }
 
     widget_manager::apply_registry_geometry(window, registry)?;
-    window.set_resizable(false).map_err(|error| error.to_string())?;
+    window
+        .set_resizable(false)
+        .map_err(|error| error.to_string())?;
     window
         .set_skip_taskbar(true)
         .map_err(|error| error.to_string())?;
@@ -93,11 +112,31 @@ fn apply_detached_mode<R: Runtime>(
     state.set_attached(false);
     desktop_layer::detach_from_desktop_icon_layer(window).map_err(|error| error.to_string())?;
     widget_manager::apply_registry_geometry(window, registry)?;
-    window.set_resizable(true).map_err(|error| error.to_string())?;
+    window
+        .set_resizable(true)
+        .map_err(|error| error.to_string())?;
     window
         .set_skip_taskbar(false)
         .map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
+    widget_manager::set_active_widget_mode(registry, WidgetWindowMode::Detached)?;
+    Ok(())
+}
+
+fn apply_initial_detached_fallback<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    state: &AppState,
+    registry: &WidgetRegistryStore,
+) -> Result<(), String> {
+    state.set_attached(false);
+    let _ = desktop_layer::detach_from_desktop_icon_layer(window);
+    widget_manager::apply_registry_geometry(window, registry)?;
+    window
+        .set_resizable(true)
+        .map_err(|error| error.to_string())?;
+    window
+        .set_skip_taskbar(false)
+        .map_err(|error| error.to_string())?;
     widget_manager::set_active_widget_mode(registry, WidgetWindowMode::Detached)?;
     Ok(())
 }

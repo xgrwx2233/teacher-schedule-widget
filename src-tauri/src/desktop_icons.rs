@@ -1,5 +1,6 @@
 use std::mem::size_of;
 
+use windows::core::BOOL;
 use windows::{
     core::s,
     Win32::{
@@ -7,7 +8,9 @@ use windows::{
         Graphics::Gdi::MapWindowPoints,
         System::{
             Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory},
-            Memory::{VirtualAllocEx, VirtualFreeEx, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE},
+            Memory::{
+                VirtualAllocEx, VirtualFreeEx, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE,
+            },
             Threading::{OpenProcess, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE},
         },
         UI::{
@@ -19,7 +22,6 @@ use windows::{
         },
     },
 };
-use windows::core::BOOL;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -37,7 +39,11 @@ fn desktop_icon_hit_test(screen_x: i32, screen_y: i32) -> Result<bool> {
     unsafe {
         let mut rect = RECT::default();
         GetWindowRect(list_view, &mut rect)?;
-        if screen_x < rect.left || screen_x >= rect.right || screen_y < rect.top || screen_y >= rect.bottom {
+        if screen_x < rect.left
+            || screen_x >= rect.right
+            || screen_y < rect.top
+            || screen_y >= rect.bottom
+        {
             return Ok(false);
         }
 
@@ -80,7 +86,12 @@ fn desktop_icon_hit_test(screen_x: i32, screen_y: i32) -> Result<bool> {
             Some(&mut bytes_written),
         )?;
 
-        let result = SendMessageW(list_view, LVM_HITTEST, None, Some(LPARAM(remote_info as isize)));
+        let result = SendMessageW(
+            list_view,
+            LVM_HITTEST,
+            None,
+            Some(LPARAM(remote_info as isize)),
+        );
 
         let mut bytes_read = 0;
         ReadProcessMemory(

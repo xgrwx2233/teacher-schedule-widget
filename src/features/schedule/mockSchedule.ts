@@ -13,12 +13,12 @@ export const allScheduleDays: Schedule["days"] = [
 const weekdayIds = allScheduleDays.map((day) => day.id);
 
 const palettes = {
-  lavender: { baseColor: "#9b5de5", backgroundColor: "#eadbff", color: "#6f3fba", iconColor: "#6f3fba" },
-  mint: { baseColor: "#06d6a0", backgroundColor: "#d9fff1", color: "#008f6b", iconColor: "#008f6b" },
-  cream: { baseColor: "#ffd166", backgroundColor: "#fff6df", color: "#9a6a1b", iconColor: "#9a6a1b" },
-  coral: { baseColor: "#ff6b5f", backgroundColor: "#ffe2db", color: "#c73225", iconColor: "#c73225" },
-  peach: { baseColor: "#ff8a4c", backgroundColor: "#ffe7dc", color: "#a64724", iconColor: "#a64724" },
-  green: { baseColor: "#22c55e", backgroundColor: "#d7ffe1", color: "#10853c", iconColor: "#10853c" },
+  lavender: { baseColor: "#AF52DE", backgroundColor: "#f4eafa", color: "#692080", iconColor: "#692080" },
+  mint: { baseColor: "#34C759", backgroundColor: "#e1f8e6", color: "#1f7735", iconColor: "#1f7735" },
+  cream: { baseColor: "#FFCC00", backgroundColor: "#fff7d6", color: "#997a00", iconColor: "#997a00" },
+  coral: { baseColor: "#FF3B30", backgroundColor: "#ffe3e0", color: "#99231d", iconColor: "#99231d" },
+  peach: { baseColor: "#FF9500", backgroundColor: "#ffefd6", color: "#995900", iconColor: "#995900" },
+  green: { baseColor: "#34C759", backgroundColor: "#e1f8e6", color: "#1f7735", iconColor: "#1f7735" },
 } satisfies Record<string, CardStyle>;
 
 type PaletteName = keyof typeof palettes;

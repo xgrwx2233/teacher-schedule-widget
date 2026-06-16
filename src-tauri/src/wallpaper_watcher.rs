@@ -15,7 +15,10 @@ const SPI_SETDESKWALLPAPER: usize = 0x0014;
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 static ORIGINAL_WNDPROC: OnceLock<isize> = OnceLock::new();
 
-pub fn install_wallpaper_change_listener(window: &WebviewWindow, app: &AppHandle) -> Result<(), String> {
+pub fn install_wallpaper_change_listener(
+    window: &WebviewWindow,
+    app: &AppHandle,
+) -> Result<(), String> {
     if ORIGINAL_WNDPROC.get().is_some() {
         return Ok(());
     }
@@ -23,9 +26,8 @@ pub fn install_wallpaper_change_listener(window: &WebviewWindow, app: &AppHandle
     let hwnd = HWND(window.hwnd().map_err(|error| error.to_string())?.0);
     let _ = APP_HANDLE.set(app.clone());
 
-    let previous = unsafe {
-        SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wallpaper_wnd_proc as *const () as isize)
-    };
+    let previous =
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wallpaper_wnd_proc as *const () as isize) };
     ORIGINAL_WNDPROC
         .set(previous)
         .map_err(|_| "wallpaper watcher already installed".to_string())?;

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { WorkdayMode } from "../../features/schedule/types";
 import type {
   AxisColorMode,
+  PeriodConfigItem,
   PeriodColumnStyle,
   SettingsSection,
   WidgetSettingsState,
@@ -17,41 +18,56 @@ type SettingsWindowProps = {
   open: boolean;
   activeSection: SettingsSection;
   settings: WidgetSettingsState;
+  periods: PeriodConfigItem[];
   computedWeek: number;
   windowMode: WindowMode;
   onActiveSectionChange: (section: SettingsSection) => void;
   onSettingsChange: (settings: WidgetSettingsState) => void;
+  onPeriodsChange: (periods: PeriodConfigItem[]) => void;
 };
 
-type SettingsIconName = "calendar" | "book" | "palette";
+type SettingsIconName = "calendar" | "clock" | "book" | "palette";
 
-const sectionItems: Array<{ id: SettingsSection; label: string; icon: SettingsIconName }> = [
+const sectionItems: Array<{
+  id: SettingsSection;
+  label: string;
+  icon: SettingsIconName;
+}> = [
   { id: "schedule", label: "课程表", icon: "calendar" },
+  { id: "periods", label: "课次", icon: "clock" },
   { id: "term", label: "学期", icon: "book" },
   { id: "appearance", label: "外观", icon: "palette" },
 ];
 
-const workdayOptions: Array<{ id: WorkdayMode; label: string; count: number }> = [
-  { id: "mon-fri", label: "周一到周五", count: 5 },
-  { id: "mon-sat", label: "周一到周六", count: 6 },
-  { id: "mon-sun", label: "周一到周日", count: 7 },
-];
+const workdayOptions: Array<{ id: WorkdayMode; label: string; count: number }> =
+  [
+    { id: "mon-fri", label: "周一到周五", count: 5 },
+    { id: "mon-sat", label: "周一到周六", count: 6 },
+    { id: "mon-sun", label: "周一到周日", count: 7 },
+  ];
 
 export function SettingsWindow({
   open,
   activeSection,
   settings,
+  periods,
   computedWeek,
   windowMode,
   onActiveSectionChange,
   onSettingsChange,
+  onPeriodsChange,
 }: SettingsWindowProps) {
   if (!open) {
     return null;
   }
 
   return (
-    <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="设置">
+    <div
+      className="settings-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="设置"
+    >
       <section className="settings-window settings-window-wide">
         <div className="settings-body">
           <nav className="settings-sidebar" aria-label="设置导航">
@@ -67,9 +83,32 @@ export function SettingsWindow({
           </nav>
 
           <main className="settings-content">
-            {activeSection === "schedule" && <ScheduleTablePanel settings={settings} onSettingsChange={onSettingsChange} />}
-            {activeSection === "term" && <TermPanel settings={settings} computedWeek={computedWeek} onSettingsChange={onSettingsChange} />}
-            {activeSection === "appearance" && <AppearancePanel settings={settings} windowMode={windowMode} onSettingsChange={onSettingsChange} />}
+            {activeSection === "schedule" && (
+              <ScheduleTablePanel
+                settings={settings}
+                onSettingsChange={onSettingsChange}
+              />
+            )}
+            {activeSection === "periods" && (
+              <PeriodsPanel
+                periods={periods}
+                onPeriodsChange={onPeriodsChange}
+              />
+            )}
+            {activeSection === "term" && (
+              <TermPanel
+                settings={settings}
+                computedWeek={computedWeek}
+                onSettingsChange={onSettingsChange}
+              />
+            )}
+            {activeSection === "appearance" && (
+              <AppearancePanel
+                settings={settings}
+                windowMode={windowMode}
+                onSettingsChange={onSettingsChange}
+              />
+            )}
           </main>
         </div>
       </section>
@@ -84,14 +123,12 @@ function ScheduleTablePanel({
   settings: WidgetSettingsState;
   onSettingsChange: (settings: WidgetSettingsState) => void;
 }) {
-  const periodCount = clampPeriodCount(settings.periodCount);
-
   return (
     <section className="settings-panel-section schedule-table-section">
       <div className="schedule-page-head">
         <div className="schedule-page-copy">
           <h3>课程表</h3>
-          <p>设置工作日列数与每天节数，课程表网格将实时同步。</p>
+          <p>设置工作日列数，课程表日期栏将实时同步。</p>
         </div>
       </div>
 
@@ -104,53 +141,144 @@ function ScheduleTablePanel({
             </div>
           </header>
 
-          <div className="schedule-option-row" role="list" aria-label="工作日范围">
+          <div
+            className="schedule-option-row"
+            role="list"
+            aria-label="工作日范围"
+          >
             {workdayOptions.map((option) => (
               <button
                 key={option.id}
                 type="button"
-                className={settings.workdayMode === option.id ? "schedule-choice is-selected" : "schedule-choice"}
-                onClick={() => onSettingsChange({ ...settings, workdayMode: option.id })}
+                className={
+                  settings.workdayMode === option.id
+                    ? "schedule-choice is-selected"
+                    : "schedule-choice"
+                }
+                onClick={() =>
+                  onSettingsChange({ ...settings, workdayMode: option.id })
+                }
               >
                 <strong>{option.label}</strong>
               </button>
             ))}
           </div>
         </section>
+      </div>
+    </section>
+  );
+}
 
-        <section className="schedule-config-card">
-          <header>
-            <div>
-              <h4>节数</h4>
-              <p>控制一天有多少节课，即课程表行数。</p>
-            </div>
-          </header>
+function PeriodsPanel({
+  periods,
+  onPeriodsChange,
+}: {
+  periods: PeriodConfigItem[];
+  onPeriodsChange: (periods: PeriodConfigItem[]) => void;
+}) {
+  const normalizedPeriods = normalizePeriodItems(periods);
 
-          <div className="period-stepper" aria-label="节数控制器">
-            <button
-              type="button"
-              className="period-stepper-button"
-              aria-label="减少节数"
-              disabled={periodCount <= 4}
-              onClick={() => onSettingsChange({ ...settings, periodCount: clampPeriodCount(periodCount - 1) })}
-            >
-              <span aria-hidden="true">-</span>
-            </button>
-            <div className="period-stepper-value">
-              <strong>{periodCount}</strong>
-            </div>
-            <span className="period-stepper-unit">节 / 天</span>
-            <button
-              type="button"
-              className="period-stepper-button"
-              aria-label="增加节数"
-              disabled={periodCount >= 15}
-              onClick={() => onSettingsChange({ ...settings, periodCount: clampPeriodCount(periodCount + 1) })}
-            >
-              <span aria-hidden="true">+</span>
-            </button>
-          </div>
-        </section>
+  const updatePeriod = (
+    id: string,
+    patch: Partial<Pick<PeriodConfigItem, "label" | "time">>,
+  ) => {
+    onPeriodsChange(
+      normalizePeriodItems(
+        normalizedPeriods.map((period) =>
+          period.id === id ? { ...period, ...patch } : period,
+        ),
+      ),
+    );
+  };
+
+  const addPeriod = () => {
+    const nextOrder = nextPeriodOrder(normalizedPeriods);
+    const previous = normalizedPeriods[normalizedPeriods.length - 1];
+    const start = previous ? timeToMinutes(previous.time.split("-")[1]) : 480;
+    const end = start + 45;
+    onPeriodsChange([
+      ...normalizedPeriods,
+      {
+        id: `p${nextOrder}`,
+        label: `第${nextOrder}节`,
+        time: `${minutesToTime(start)}-${minutesToTime(end)}`,
+      },
+    ]);
+  };
+
+  const deletePeriod = (id: string) => {
+    if (normalizedPeriods.length <= 1) {
+      return;
+    }
+    onPeriodsChange(normalizedPeriods.filter((period) => period.id !== id));
+  };
+
+  return (
+    <section className="settings-panel-section periods-panel-section">
+      <header className="periods-page-header">
+        <div>
+          <h3>课次</h3>
+        </div>
+        <button type="button" className="period-add-button" onClick={addPeriod}>
+          <Icon name="plus" />
+          <span>在最下方添加课次</span>
+        </button>
+      </header>
+
+      <div className="period-config-list" aria-label="课次配置列表">
+        {normalizedPeriods.map((period) => {
+          const [startTime, endTime] = splitPeriodTime(period.time);
+          return (
+            <section className="period-config-row" key={period.id}>
+              <label className="period-name-field">
+                <span>课次名</span>
+                <input
+                  type="text"
+                  value={period.label}
+                  maxLength={12}
+                  onChange={(event) =>
+                    updatePeriod(period.id, {
+                      label: event.currentTarget.value,
+                    })
+                  }
+                />
+              </label>
+              <label className="period-time-field">
+                <span>开始</span>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(event) =>
+                    updatePeriod(period.id, {
+                      time: `${event.currentTarget.value || "00:00"}-${endTime}`,
+                    })
+                  }
+                />
+              </label>
+              <label className="period-time-field">
+                <span>结束</span>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(event) =>
+                    updatePeriod(period.id, {
+                      time: `${startTime}-${event.currentTarget.value || "00:00"}`,
+                    })
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="period-delete-button"
+                aria-label="删除课次"
+                disabled={normalizedPeriods.length <= 1}
+                onClick={() => deletePeriod(period.id)}
+              >
+                <Icon name="trash" />
+              </button>
+            </section>
+          );
+        })}
       </div>
     </section>
   );
@@ -178,7 +306,10 @@ function TermPanel({
             onChange={(event) =>
               onSettingsChange({
                 ...settings,
-                term: { ...settings.term, startDate: event.currentTarget.value },
+                term: {
+                  ...settings.term,
+                  startDate: event.currentTarget.value,
+                },
               })
             }
           />
@@ -220,7 +351,10 @@ function AppearancePanel({
   const appearance = normalizeAppearanceSettings(settings.appearance);
 
   const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections((current) => ({ ...current, [section]: !current[section] }));
+    setExpandedSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
   };
 
   const isBlurMode = appearance.backgroundMode === "blur";
@@ -241,10 +375,15 @@ function AppearancePanel({
           onToggle={() => toggleSection("background")}
         >
           <StaticSettingRow title="背景模式">
-            <div className="appearance-segmented appearance-segmented-pill" aria-label="背景模式">
+            <div
+              className="appearance-segmented appearance-segmented-pill"
+              aria-label="背景模式"
+            >
               <button
                 type="button"
-                className={appearance.backgroundMode === "solid" ? "is-active" : ""}
+                className={
+                  appearance.backgroundMode === "solid" ? "is-active" : ""
+                }
                 onClick={() =>
                   onSettingsChange({
                     ...settings,
@@ -308,7 +447,9 @@ function AppearancePanel({
                   }
                 />
               </StaticSettingRow>
-              <div className="appearance-card-hint">毛玻璃模式建议配合中高透明度使用，以保持文字清晰。</div>
+              <div className="appearance-card-hint">
+                毛玻璃模式建议配合中高透明度使用，以保持文字清晰。
+              </div>
             </div>
           )}
         </AppearanceAccordionCard>
@@ -327,7 +468,10 @@ function AppearancePanel({
               onChange={(event) =>
                 onSettingsChange({
                   ...settings,
-                  appearance: { ...appearance, gridLineType: event.currentTarget.value as GridLineType },
+                  appearance: {
+                    ...appearance,
+                    gridLineType: event.currentTarget.value as GridLineType,
+                  },
                 })
               }
             >
@@ -397,10 +541,12 @@ function AppearancePanel({
               suffix="px"
               min={0}
               max={24}
-              onChange={(cardRadius) => onSettingsChange({
-                ...settings,
-                appearance: { ...appearance, cardRadius },
-              })}
+              onChange={(cardRadius) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: { ...appearance, cardRadius },
+                })
+              }
             />
           </StaticSettingRow>
           <StaticSettingRow title="卡片阴影强度">
@@ -409,10 +555,12 @@ function AppearancePanel({
               suffix={` ${cardShadowStrengthLabels[appearance.cardShadowStrength]}`}
               min={0}
               max={4}
-              onChange={(cardShadowStrength) => onSettingsChange({
-                ...settings,
-                appearance: { ...appearance, cardShadowStrength },
-              })}
+              onChange={(cardShadowStrength) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: { ...appearance, cardShadowStrength },
+                })
+              }
             />
           </StaticSettingRow>
         </AppearanceAccordionCard>
@@ -432,31 +580,41 @@ function AppearancePanel({
               onChange={(event) =>
                 onSettingsChange({
                   ...settings,
-                  appearance: { ...appearance, axisColorMode: event.currentTarget.value as AxisColorMode },
+                  appearance: {
+                    ...appearance,
+                    axisColorMode: event.currentTarget.value as AxisColorMode,
+                  },
                 })
               }
             >
               {axisColorModeOptions.map((option) => (
-                <option
-                  key={option.value}
-                  value={option.value}
-                >
+                <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
           </StaticSettingRow>
           <StaticSettingRow title="卡片背景色">
-            <div className="appearance-segmented appearance-segmented-pill axis-period-options" aria-label="时间日期背景色">
+            <div
+              className="appearance-segmented appearance-segmented-pill axis-period-options"
+              aria-label="时间日期背景色"
+            >
               {periodColumnStyleOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
-                  className={appearance.periodColumnStyle === option.value ? "is-active" : ""}
+                  className={
+                    appearance.periodColumnStyle === option.value
+                      ? "is-active"
+                      : ""
+                  }
                   onClick={() =>
                     onSettingsChange({
                       ...settings,
-                      appearance: { ...appearance, periodColumnStyle: option.value },
+                      appearance: {
+                        ...appearance,
+                        periodColumnStyle: option.value,
+                      },
                     })
                   }
                 >
@@ -483,7 +641,10 @@ const axisColorModeLabels: Record<AxisColorMode, string> = {
   dark: "深色文字",
 };
 
-const periodColumnStyleOptions: Array<{ value: PeriodColumnStyle; label: string }> = [
+const periodColumnStyleOptions: Array<{
+  value: PeriodColumnStyle;
+  label: string;
+}> = [
   { value: "soft", label: "柔和底卡" },
   { value: "transparent", label: "透明" },
   { value: "solid", label: "实底" },
@@ -511,15 +672,32 @@ function AppearanceAccordionCard({
   children: ReactNode;
 }) {
   return (
-    <section className={expanded ? "appearance-settings-card is-expanded" : "appearance-settings-card"}>
-      <button type="button" className="appearance-accordion-trigger" aria-expanded={expanded} onClick={onToggle}>
+    <section
+      className={
+        expanded
+          ? "appearance-settings-card is-expanded"
+          : "appearance-settings-card"
+      }
+    >
+      <button
+        type="button"
+        className="appearance-accordion-trigger"
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
         <span className="appearance-card-title">
           <h4>{title}</h4>
-          <span className="appearance-info-icon" title={tooltip} aria-label={`${title}说明`}>
+          <span
+            className="appearance-info-icon"
+            title={tooltip}
+            aria-label={`${title}说明`}
+          >
             ⓘ
           </span>
         </span>
-        {!expanded && summary ? <span className="appearance-card-summary">{summary}</span> : null}
+        {!expanded && summary ? (
+          <span className="appearance-card-summary">{summary}</span>
+        ) : null}
         <span className="appearance-chevron" aria-hidden="true">
           ⌄
         </span>
@@ -561,15 +739,31 @@ function StaticColorPalette({
   return (
     <div className="appearance-color-palette" aria-label="颜色选择">
       {swatches.map((color) => (
-        <button key={color} type="button" className="appearance-color-dot" aria-label="预设颜色" style={{ backgroundColor: color }} onClick={() => onPick?.(color)} />
+        <button
+          key={color}
+          type="button"
+          className="appearance-color-dot"
+          aria-label="预设颜色"
+          style={{ backgroundColor: color }}
+          onClick={() => onPick?.(color)}
+        />
       ))}
       {onPick ? (
         <label className="appearance-color-preview" aria-label="自定义颜色">
           <span style={{ backgroundColor: previewColor }} />
-          <input type="color" value={previewColor} onChange={(event) => onPick(event.currentTarget.value)} />
+          <input
+            type="color"
+            value={previewColor}
+            onChange={(event) => onPick(event.currentTarget.value)}
+          />
         </label>
       ) : (
-        <button type="button" className="appearance-color-preview" aria-label="自定义颜色" style={{ backgroundColor: previewColor }} />
+        <button
+          type="button"
+          className="appearance-color-preview"
+          aria-label="自定义颜色"
+          style={{ backgroundColor: previewColor }}
+        />
       )}
     </div>
   );
@@ -592,7 +786,14 @@ function StaticSlider({
 }) {
   return (
     <div className="appearance-static-slider">
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange?.(Number(event.currentTarget.value))} />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange?.(Number(event.currentTarget.value))}
+      />
       <strong>
         {step % 1 === 0 ? value : value.toFixed(1)}
         {suffix}
@@ -613,7 +814,11 @@ function SidebarNavItem({
   onClick: () => void;
 }) {
   return (
-    <button type="button" className={active ? "settings-nav-item is-active" : "settings-nav-item"} onClick={onClick}>
+    <button
+      type="button"
+      className={active ? "settings-nav-item is-active" : "settings-nav-item"}
+      onClick={onClick}
+    >
       <span className="settings-nav-icon" aria-hidden="true">
         <Icon name={icon} />
       </span>
@@ -622,38 +827,183 @@ function SidebarNavItem({
   );
 }
 
-function clampPeriodCount(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 8;
-  }
-
-  return Math.max(4, Math.min(15, Math.round(value)));
+function normalizePeriodItems(periods: PeriodConfigItem[]): PeriodConfigItem[] {
+  return periods
+    .map((period, index) => {
+      const order = periodOrder(period.id) ?? index + 1;
+      const [start, end] = splitPeriodTime(period.time);
+      return {
+        id: period.id || `p${order}`,
+        label: period.label || `第${order}节`,
+        time: `${start}-${end}`,
+      };
+    })
+    .sort((left, right) => {
+      const leftStart = timeToMinutes(left.time.split("-")[0]);
+      const rightStart = timeToMinutes(right.time.split("-")[0]);
+      if (leftStart !== rightStart) {
+        return leftStart - rightStart;
+      }
+      return (periodOrder(left.id) ?? 0) - (periodOrder(right.id) ?? 0);
+    });
 }
 
-function Icon({ name }: { name: SettingsIconName }) {
+function nextPeriodOrder(periods: PeriodConfigItem[]): number {
+  const maxOrder = periods.reduce(
+    (max, period) => Math.max(max, periodOrder(period.id) ?? 0),
+    0,
+  );
+  return maxOrder + 1;
+}
+
+function periodOrder(id: string): number | null {
+  const match = /^p?(\d+)$/.exec(id.trim());
+  if (!match) {
+    return null;
+  }
+  return Number(match[1]);
+}
+
+function splitPeriodTime(value: string): [string, string] {
+  const [start, end] = value.split("-");
+  return [normalizeTimeInput(start), normalizeTimeInput(end)];
+}
+
+function normalizeTimeInput(value: string | undefined): string {
+  const match = /^(\d{1,2}):(\d{1,2})$/.exec((value ?? "").trim());
+  if (!match) {
+    return "00:00";
+  }
+  const hour = Math.max(0, Math.min(23, Number(match[1])));
+  const minute = Math.max(0, Math.min(59, Number(match[2])));
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function minutesToTime(totalMinutes: number): string {
+  const normalized = ((totalMinutes % 1440) + 1440) % 1440;
+  const hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = normalizeTimeInput(time).split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function Icon({ name }: { name: SettingsIconName | "plus" | "trash" }) {
   switch (name) {
     case "calendar":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-          <rect x="4" y="5.5" width="16" height="14" rx="3" stroke="currentColor" strokeWidth="1.9" />
-          <path d="M8 3.5v4M16 3.5v4M4 10h16" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M8 13h2M12 13h2M8 16h2M12 16h2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+          <rect
+            x="4"
+            y="5.5"
+            width="16"
+            height="14"
+            rx="3"
+            stroke="currentColor"
+            strokeWidth="1.9"
+          />
+          <path
+            d="M8 3.5v4M16 3.5v4M4 10h16"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M8 13h2M12 13h2M8 16h2M12 16h2"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+          />
+        </svg>
+      );
+    case "clock":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+          <circle
+            cx="12"
+            cy="12"
+            r="8.5"
+            stroke="currentColor"
+            strokeWidth="1.9"
+          />
+          <path
+            d="M12 7.5v5l3.2 2"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       );
     case "book":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-          <path d="M7 4.5h8.5a3 3 0 0 1 3 3V19H8.5a3 3 0 0 0-3 3V7.5a3 3 0 0 1 1.5-3Z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
-          <path d="M7 4.5a3 3 0 0 0-3 3V19a3 3 0 0 1 3-3h6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="M7 4.5h8.5a3 3 0 0 1 3 3V19H8.5a3 3 0 0 0-3 3V7.5a3 3 0 0 1 1.5-3Z"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M7 4.5a3 3 0 0 0-3 3V19a3 3 0 0 1 3-3h6"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       );
     case "palette":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-          <path d="M12 4.5a8 8 0 1 0 0 16h2.2a1.8 1.8 0 0 0 1.8-1.8 1.2 1.2 0 0 1 1.2-1.2H18a3.5 3.5 0 0 0 0-7h-1a1.8 1.8 0 0 1-1.8-1.8A4.2 4.2 0 0 0 12 4.5Z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
+          <path
+            d="M12 4.5a8 8 0 1 0 0 16h2.2a1.8 1.8 0 0 0 1.8-1.8 1.2 1.2 0 0 1 1.2-1.2H18a3.5 3.5 0 0 0 0-7h-1a1.8 1.8 0 0 1-1.8-1.8A4.2 4.2 0 0 0 12 4.5Z"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinejoin="round"
+          />
           <circle cx="8.2" cy="9" r="0.9" fill="currentColor" stroke="none" />
-          <circle cx="11.2" cy="7.4" r="0.9" fill="currentColor" stroke="none" />
+          <circle
+            cx="11.2"
+            cy="7.4"
+            r="0.9"
+            fill="currentColor"
+            stroke="none"
+          />
           <circle cx="15" cy="8.4" r="0.9" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "plus":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+          <path
+            d="M12 5v14M5 12h14"
+            stroke="currentColor"
+            strokeWidth="2.1"
+            strokeLinecap="round"
+          />
+        </svg>
+      );
+    case "trash":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+          <path
+            d="M8 8.5v9M12 8.5v9M16 8.5v9"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+          <path
+            d="M5 6.5h14M9 6.5l.8-2h4.4l.8 2M7 6.5l.7 14h8.6l.7-14"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       );
   }

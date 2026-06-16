@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
-import { ScheduleToolbar, type ToolbarSyncStatus } from "../ScheduleToolbar/ScheduleToolbar";
+import { ScheduleToolbar, type ToolbarSyncButtonState } from "../ScheduleToolbar/ScheduleToolbar";
 import type { CardStyle, CourseCell, PeriodInfo, Schedule, Weekday } from "../../features/schedule/types";
 import type { PeriodColumnStyle, SelectedCard, WidgetBackgroundMode } from "../../features/settings/settingsTypes";
 import type { WindowMode } from "../../features/windowMode/types";
@@ -21,12 +21,16 @@ type ScheduleWidgetProps = {
   authLabel: string;
   authTitle: string;
   loggedIn: boolean;
-  syncStatus?: ToolbarSyncStatus;
+  syncButtonState: ToolbarSyncButtonState;
+  syncTitle: string;
+  canPreviousWeek: boolean;
+  canNextWeek: boolean;
   onPreviousWeek: () => void;
   onNextWeek: () => void;
   onToggleFloatingToolbar: () => void;
   onToggleLayoutMode: () => void;
   onOpenAuth: () => void;
+  onSync: () => void;
   onToggleMenu: () => void;
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
@@ -60,12 +64,16 @@ export function ScheduleWidget({
   authLabel,
   authTitle,
   loggedIn,
-  syncStatus,
+  syncButtonState,
+  syncTitle,
+  canPreviousWeek,
+  canNextWeek,
   onPreviousWeek,
   onNextWeek,
   onToggleFloatingToolbar,
   onToggleLayoutMode,
   onOpenAuth,
+  onSync,
   onToggleMenu,
   onCourseClick,
   onCardEdit,
@@ -86,14 +94,18 @@ export function ScheduleWidget({
             menuOpen={menuOpen}
             toolbarLayoutMode={toolbarLayoutMode}
             menuButtonRef={menuButtonRef}
+            canPreviousWeek={canPreviousWeek}
+            canNextWeek={canNextWeek}
             onPreviousWeek={onPreviousWeek}
             onNextWeek={onNextWeek}
             onToggleLayoutMode={onToggleLayoutMode}
             authLabel={authLabel}
             authTitle={authTitle}
             loggedIn={loggedIn}
-            syncStatus={syncStatus}
+            syncButtonState={syncButtonState}
+            syncTitle={syncTitle}
             onOpenAuth={onOpenAuth}
+            onSync={onSync}
             onToggleMenu={onToggleMenu}
             onDragStart={onDragStart}
           />

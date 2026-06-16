@@ -75,7 +75,8 @@ fn refresh_schedule_toggle_menu(app: &AppHandle) -> Result<(), String> {
 
     let visible = app.state::<AppState>().is_widget_visible();
     let menu = build_tray_menu(app, visible)?;
-    tray.set_menu(Some(menu)).map_err(|error| error.to_string())?;
+    tray.set_menu(Some(menu))
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 

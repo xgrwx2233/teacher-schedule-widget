@@ -1,18 +1,88 @@
 use std::{
+    collections::{HashMap, HashSet},
     fs,
     path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
+    sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use rand::{distributions::Alphanumeric, Rng};
+use reqwest::blocking::{Client, Response};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
-use serde_json::Value;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const DEFAULT_USER_ID: &str = "default_local";
-const MOCK_CODE: &str = "1234";
+const CLOUD_API_BASE_URL: &str = "https://api.shiyuetech.com";
+const DEFAULT_TERM_START: &str = "2026-03-05";
+const DEFAULT_TERM_END: &str = "2026-06-30";
+const SYNC_SERVER_CHANGE_EVENT: &str = "sync-server-change";
+static REALTIME_SYNC_GENERATION: AtomicU64 = AtomicU64::new(0);
+const WEEKDAYS: [&str; 7] = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+];
+
+#[derive(Debug, Deserialize)]
+struct TokenResponse {
+    access_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SyncStatusResponse {
+    #[serde(alias = "userId")]
+    user_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncResponse {
+    #[serde(alias = "latestServerSeq")]
+    latest_server_seq: u32,
+    #[serde(alias = "acceptedBatchIds")]
+    accepted_batch_ids: Vec<String>,
+    server_changes: Vec<ServerChange>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChangesResponse {
+    #[serde(alias = "latestServerSeq")]
+    latest_server_seq: u32,
+    #[serde(default, alias = "serverChanges")]
+    server_changes: Vec<ServerChange>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotResponse {
+    #[serde(alias = "latestServerSeq")]
+    latest_server_seq: u32,
+    snapshot: ServerChange,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+struct ServerChange {
+    #[serde(alias = "serverSeq")]
+    server_seq: u32,
+    #[serde(alias = "batchId")]
+    batch_id: String,
+    #[serde(alias = "originClientId")]
+    origin_client_id: String,
+    #[serde(default, alias = "entityDiffs")]
+    entity_diffs: Vec<Value>,
+    #[serde(default)]
+    source_action: Option<String>,
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,8 +114,16 @@ pub struct LocalSyncStatus {
     pub owner_user_id: String,
     pub dirty_count: u32,
     pub local_revision: u32,
+    pub cloud_revision: Option<u32>,
+    pub last_synced_cloud_revision: Option<u32>,
+    pub last_synced_at: Option<String>,
+    pub last_checked_at: Option<String>,
     pub last_sync_error: Option<String>,
     pub has_pending_changes: bool,
+    pub has_remote_changes: bool,
+    pub syncing: bool,
+    pub online: bool,
+    pub conflict: bool,
 }
 
 #[tauri::command]
@@ -60,17 +138,7 @@ pub fn load_current_schedule(app: AppHandle) -> Result<StoredSchedulePayload, St
     let conn = open_db(&app)?;
     ensure_default_user(&conn)?;
     let owner_user_id = active_user_id(&conn)?;
-    let schedule_json: Option<String> = conn
-        .query_row(
-            "SELECT schedule_json FROM schedule_snapshots WHERE owner_user_id = ?1",
-            params![owner_user_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    let schedule = schedule_json
-        .map(|raw| serde_json::from_str::<Value>(&raw).map_err(|error| error.to_string()))
-        .transpose()?;
+    let schedule = load_schedule_from_entities(&conn, &owner_user_id)?;
 
     Ok(StoredSchedulePayload {
         owner_user_id,
@@ -79,11 +147,26 @@ pub fn load_current_schedule(app: AppHandle) -> Result<StoredSchedulePayload, St
 }
 
 #[tauri::command]
-pub fn save_current_schedule(app: AppHandle, schedule: Value) -> Result<(), String> {
+pub fn save_current_schedule(
+    app: AppHandle,
+    schedule: Value,
+    source_action: Option<String>,
+) -> Result<(), String> {
     let conn = open_db(&app)?;
     ensure_default_user(&conn)?;
     let owner_user_id = active_user_id(&conn)?;
-    save_schedule_for_user(&conn, &owner_user_id, &schedule)
+    save_schedule_for_user(
+        &conn,
+        &owner_user_id,
+        &schedule,
+        source_action.as_deref().unwrap_or("desktop.schedule.save"),
+    )?;
+    if owner_user_id != DEFAULT_USER_ID && pending_ops_count(&conn, &owner_user_id)? > 0 {
+        if let Ok(token) = session_token(&conn, &owner_user_id) {
+            let _ = sync_current_user_with_cloud(&conn, &owner_user_id, &token);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -95,18 +178,62 @@ pub fn load_local_sync_status(app: AppHandle) -> Result<LocalSyncStatus, String>
 }
 
 #[tauri::command]
+pub fn manual_sync_current_user(app: AppHandle) -> Result<LocalSyncStatus, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    if owner_user_id == DEFAULT_USER_ID {
+        return Err("sign in before syncing".to_string());
+    }
+
+    let token = session_token(&conn, &owner_user_id)?;
+    sync_current_user_with_cloud(&conn, &owner_user_id, &token)?;
+    let now = now_string();
+    upsert_sync_meta_synced(
+        &conn,
+        &owner_user_id,
+        &now,
+        load_sync_meta_revision(&conn, &owner_user_id, "last_synced_cloud_revision")?.unwrap_or(0),
+    )?;
+
+    load_sync_status_for_user(&conn, &owner_user_id)
+}
+
+#[tauri::command]
+pub fn start_realtime_sync(app: AppHandle) -> Result<(), String> {
+    let generation = REALTIME_SYNC_GENERATION.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    if owner_user_id == DEFAULT_USER_ID {
+        return Ok(());
+    }
+    let token = session_token(&conn, &owner_user_id)?;
+    let device_id = sync_client_id(&conn)?;
+    drop(conn);
+    tauri::async_runtime::spawn(async move {
+        run_realtime_sync_loop(app, owner_user_id, token, device_id, generation).await;
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_realtime_sync() -> Result<(), String> {
+    REALTIME_SYNC_GENERATION.fetch_add(1, AtomicOrdering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn register_local_account(
     app: AppHandle,
     phone: String,
     code: String,
     password: String,
 ) -> Result<LocalAccountState, String> {
-    if code.trim() != MOCK_CODE {
-        return Err("验证码不正确".to_string());
-    }
-
     let normalized_phone = normalize_phone(&phone)?;
     validate_password(&password)?;
+    let token = cloud_register(&normalized_phone, code.trim(), &password)?;
+    let cloud_user_id = fetch_cloud_user_id(&token)?;
     let conn = open_db(&app)?;
     ensure_default_user(&conn)?;
 
@@ -118,61 +245,39 @@ pub fn register_local_account(
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    if existing_id.is_some() {
-        return Err("该手机号已注册".to_string());
-    }
-
-    let user_id = format!("local_user_{}", random_token(16));
-    let salt = random_token(24);
-    let password_hash = hash_password(&password, &salt);
     let now = now_string();
-
-    conn.execute(
-        "INSERT INTO local_users (id, phone, password_hash, password_salt, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-        params![user_id, normalized_phone, password_hash, salt, now],
-    )
-    .map_err(|error| error.to_string())?;
-
-    copy_default_schedule_if_needed(&conn, &user_id)?;
-    activate_user(&conn, &user_id)?;
-    load_account_state_from_conn(&conn)
-}
-
-#[tauri::command]
-pub fn login_with_password(app: AppHandle, phone: String, password: String) -> Result<LocalAccountState, String> {
-    let normalized_phone = normalize_phone(&phone)?;
-    let conn = open_db(&app)?;
-    ensure_default_user(&conn)?;
-
-    let user: Option<(String, String, String)> = conn
-        .query_row(
-            "SELECT id, password_hash, password_salt FROM local_users WHERE phone = ?1 AND deleted_at IS NULL",
-            params![normalized_phone],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    let Some((user_id, password_hash, salt)) = user else {
-        return Err("手机号或密码不正确".to_string());
+    let user_id = if let Some(user_id) = existing_id {
+        update_local_user_cloud_auth(
+            &conn,
+            &user_id,
+            &normalized_phone,
+            &password,
+            &cloud_user_id,
+            &now,
+        )?;
+        user_id
+    } else {
+        insert_local_cloud_user(&conn, &normalized_phone, &password, &cloud_user_id, &now)?
     };
 
-    if hash_password(&password, &salt) != password_hash {
-        return Err("手机号或密码不正确".to_string());
+    save_session_token(&conn, &user_id, &token)?;
+    upsert_sync_meta_cloud_user(&conn, &user_id, &cloud_user_id)?;
+    if !sync_current_user_with_cloud(&conn, &user_id, &token)? {
+        copy_default_schedule_if_needed(&conn, &user_id)?;
     }
-
-    copy_default_schedule_if_needed(&conn, &user_id)?;
     activate_user(&conn, &user_id)?;
     load_account_state_from_conn(&conn)
 }
 
 #[tauri::command]
-pub fn login_with_code(app: AppHandle, phone: String, code: String) -> Result<LocalAccountState, String> {
-    if code.trim() != MOCK_CODE {
-        return Err("验证码不正确".to_string());
-    }
-
+pub fn login_with_password(
+    app: AppHandle,
+    phone: String,
+    password: String,
+) -> Result<LocalAccountState, String> {
     let normalized_phone = normalize_phone(&phone)?;
+    let token = cloud_login_password(&normalized_phone, &password)?;
+    let cloud_user_id = fetch_cloud_user_id(&token)?;
     let conn = open_db(&app)?;
     ensure_default_user(&conn)?;
 
@@ -184,11 +289,74 @@ pub fn login_with_code(app: AppHandle, phone: String, code: String) -> Result<Lo
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    let Some(user_id) = user_id else {
-        return Err("该手机号尚未注册".to_string());
+    let now = now_string();
+    let user_id = if let Some(user_id) = user_id {
+        update_local_user_cloud_auth(
+            &conn,
+            &user_id,
+            &normalized_phone,
+            &password,
+            &cloud_user_id,
+            &now,
+        )?;
+        user_id
+    } else {
+        insert_local_cloud_user(&conn, &normalized_phone, &password, &cloud_user_id, &now)?
     };
 
-    copy_default_schedule_if_needed(&conn, &user_id)?;
+    save_session_token(&conn, &user_id, &token)?;
+    upsert_sync_meta_cloud_user(&conn, &user_id, &cloud_user_id)?;
+    if !sync_current_user_with_cloud(&conn, &user_id, &token)? {
+        copy_default_schedule_if_needed(&conn, &user_id)?;
+    }
+    activate_user(&conn, &user_id)?;
+    load_account_state_from_conn(&conn)
+}
+
+#[tauri::command]
+pub fn login_with_code(
+    app: AppHandle,
+    phone: String,
+    code: String,
+) -> Result<LocalAccountState, String> {
+    let normalized_phone = normalize_phone(&phone)?;
+    let token = cloud_login_code(&normalized_phone, code.trim())?;
+    let cloud_user_id = fetch_cloud_user_id(&token)?;
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+
+    let user_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM local_users WHERE phone = ?1 AND deleted_at IS NULL",
+            params![normalized_phone],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let now = now_string();
+    let user_id = if let Some(user_id) = user_id {
+        conn.execute(
+            "UPDATE local_users SET cloud_user_id = ?2, updated_at = ?3 WHERE id = ?1",
+            params![user_id, cloud_user_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+        user_id
+    } else {
+        let user_id = format!("local_user_{}", random_token(16));
+        conn.execute(
+            "INSERT INTO local_users (id, phone, password_hash, password_salt, cloud_user_id, created_at, updated_at)
+             VALUES (?1, ?2, NULL, NULL, ?3, ?4, ?4)",
+            params![user_id, normalized_phone, cloud_user_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+        user_id
+    };
+
+    save_session_token(&conn, &user_id, &token)?;
+    upsert_sync_meta_cloud_user(&conn, &user_id, &cloud_user_id)?;
+    if !sync_current_user_with_cloud(&conn, &user_id, &token)? {
+        copy_default_schedule_if_needed(&conn, &user_id)?;
+    }
     activate_user(&conn, &user_id)?;
     load_account_state_from_conn(&conn)
 }
@@ -197,8 +365,141 @@ pub fn login_with_code(app: AppHandle, phone: String, code: String) -> Result<Lo
 pub fn logout_local_account(app: AppHandle) -> Result<LocalAccountState, String> {
     let conn = open_db(&app)?;
     ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    if owner_user_id != DEFAULT_USER_ID {
+        clear_session_token(&conn, &owner_user_id)?;
+    }
     activate_user(&conn, DEFAULT_USER_ID)?;
     load_account_state_from_conn(&conn)
+}
+
+fn cloud_register(phone: &str, code: &str, password: &str) -> Result<String, String> {
+    post_cloud_token(
+        "/auth/register",
+        json!({
+            "phone": phone,
+            "code": code,
+            "password": password,
+            "password_confirm": password,
+        }),
+    )
+}
+
+fn cloud_login_password(phone: &str, password: &str) -> Result<String, String> {
+    post_cloud_token(
+        "/auth/login_password",
+        json!({
+            "phone": phone,
+            "password": password,
+        }),
+    )
+}
+
+fn cloud_login_code(phone: &str, code: &str) -> Result<String, String> {
+    post_cloud_token(
+        "/auth/login_code",
+        json!({
+            "phone": phone,
+            "code": code,
+        }),
+    )
+}
+
+fn fetch_cloud_user_id(token: &str) -> Result<String, String> {
+    Ok(fetch_cloud_status(token)?.user_id.to_string())
+}
+
+fn fetch_cloud_status(token: &str) -> Result<SyncStatusResponse, String> {
+    let client = cloud_client()?;
+    let response = client
+        .get(cloud_url("/sync/status"))
+        .bearer_auth(token)
+        .send()
+        .map_err(|error| format!("cloud request failed: {error}"))?;
+    read_cloud_json(response)
+}
+
+fn post_cloud_token(path: &str, body: Value) -> Result<String, String> {
+    let client = cloud_client()?;
+    let response = client
+        .post(cloud_url(path))
+        .json(&body)
+        .send()
+        .map_err(|error| format!("cloud request failed: {error}"))?;
+    let token: TokenResponse = read_cloud_json(response)?;
+    Ok(token.access_token)
+}
+
+fn cloud_post_json(path: &str, token: &str, body: Value) -> Result<Value, String> {
+    let client = cloud_client()?;
+    let response = client
+        .post(cloud_url(path))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .map_err(|error| format!("cloud request failed: {error}"))?;
+    read_cloud_json(response)
+}
+
+fn cloud_get_json(path: &str, token: &str) -> Result<Value, String> {
+    let client = cloud_client()?;
+    let response = client
+        .get(cloud_url(path))
+        .bearer_auth(token)
+        .send()
+        .map_err(|error| format!("cloud request failed: {error}"))?;
+    read_cloud_json(response)
+}
+
+fn cloud_client() -> Result<Client, String> {
+    Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| format!("cloud client failed: {error}"))
+}
+
+fn cloud_url(path: &str) -> String {
+    format!("{CLOUD_API_BASE_URL}{path}")
+}
+
+fn read_cloud_json<T: DeserializeOwned>(response: Response) -> Result<T, String> {
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        let message = parse_cloud_error(&body).unwrap_or_else(|| {
+            if body.trim().is_empty() {
+                format!("cloud request failed: HTTP {status}")
+            } else {
+                format!("cloud request failed: {}", body.trim())
+            }
+        });
+        return Err(message);
+    }
+
+    response
+        .json::<T>()
+        .map_err(|error| format!("cloud client failed: {error}"))
+}
+
+fn parse_cloud_error(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(body).ok()?;
+    let detail = value.get("detail")?;
+    match detail {
+        Value::String(message) => Some(message.clone()),
+        Value::Array(items) => Some(
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.get("msg")
+                        .and_then(Value::as_str)
+                        .or_else(|| item.get("message").and_then(Value::as_str))
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+        .filter(|message| !message.is_empty()),
+        _ => Some(detail.to_string()),
+    }
 }
 
 fn open_db(app: &AppHandle) -> Result<Connection, String> {
@@ -213,7 +514,10 @@ fn open_db(app: &AppHandle) -> Result<Connection, String> {
 }
 
 fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
     Ok(dir.join("teacher_schedule_widget.sqlite"))
 }
 
@@ -243,7 +547,7 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
           refresh_token TEXT
         );
         CREATE TABLE IF NOT EXISTS timetable_settings (
-          id TEXT PRIMARY KEY,
+          id TEXT NOT NULL,
           owner_user_id TEXT NOT NULL,
           term_start_date TEXT NOT NULL,
           term_end_date TEXT NOT NULL,
@@ -251,10 +555,11 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
           period_count INTEGER NOT NULL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          deleted_at TEXT
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
         );
         CREATE TABLE IF NOT EXISTS period_cards (
-          id TEXT PRIMARY KEY,
+          id TEXT NOT NULL,
           owner_user_id TEXT NOT NULL,
           order_index INTEGER NOT NULL,
           label TEXT NOT NULL,
@@ -263,16 +568,16 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
           style_json TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          deleted_at TEXT
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
         );
         CREATE TABLE IF NOT EXISTS course_cells (
-          id TEXT PRIMARY KEY,
+          id TEXT NOT NULL,
           owner_user_id TEXT NOT NULL,
           period_id TEXT NOT NULL,
           weekday TEXT NOT NULL,
           title TEXT NOT NULL,
           secondary TEXT,
-          note TEXT,
           hidden INTEGER NOT NULL DEFAULT 0,
           schedule_rule_json TEXT,
           base_color TEXT,
@@ -283,10 +588,11 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
           merge_direction TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          deleted_at TEXT
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
         );
         CREATE TABLE IF NOT EXISTS temporary_changes (
-          id TEXT PRIMARY KEY,
+          id TEXT NOT NULL,
           owner_user_id TEXT NOT NULL,
           course_cell_id TEXT NOT NULL,
           type TEXT NOT NULL,
@@ -297,7 +603,19 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
           style_json TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          deleted_at TEXT
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
+        );
+        CREATE TABLE IF NOT EXISTS color_profiles (
+          id TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          color_name TEXT NOT NULL,
+          color_value TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_preset INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL,
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
         );
         CREATE TABLE IF NOT EXISTS device_preferences (
           device_id TEXT NOT NULL,
@@ -317,20 +635,40 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
           appearance_json TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS sync_state (
-          owner_user_id TEXT NOT NULL,
-          entity_type TEXT NOT NULL,
-          entity_id TEXT NOT NULL,
-          dirty INTEGER NOT NULL DEFAULT 0,
-          last_synced_at TEXT,
-          last_sync_error TEXT,
-          local_revision INTEGER NOT NULL DEFAULT 0,
-          PRIMARY KEY (owner_user_id, entity_type, entity_id)
-        );
-        CREATE TABLE IF NOT EXISTS schedule_snapshots (
+        CREATE TABLE IF NOT EXISTS sync_meta (
           owner_user_id TEXT PRIMARY KEY,
-          schedule_json TEXT NOT NULL,
-          updated_at TEXT NOT NULL
+          cloud_user_id TEXT,
+          device_id TEXT,
+          last_synced_at TEXT,
+          last_checked_at TEXT,
+          last_synced_cloud_revision INTEGER,
+          last_known_cloud_revision INTEGER,
+          last_sync_error TEXT,
+          sync_schema_version INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS pending_sync_batches (
+          batch_id TEXT PRIMARY KEY,
+          owner_user_id TEXT NOT NULL,
+          client_id TEXT NOT NULL,
+          entity_diffs_json TEXT NOT NULL,
+          source_action TEXT,
+          client_created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_field_sequences (
+          owner_user_id TEXT NOT NULL,
+          entity TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          field_name TEXT NOT NULL,
+          server_seq INTEGER NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (owner_user_id, entity, entity_id, field_name)
+        );
+        CREATE TABLE IF NOT EXISTS processed_server_changes (
+          owner_user_id TEXT NOT NULL,
+          client_id TEXT NOT NULL,
+          server_seq INTEGER NOT NULL,
+          processed_at TEXT NOT NULL,
+          PRIMARY KEY (owner_user_id, client_id, server_seq)
         );
         INSERT OR IGNORE INTO app_meta (key, value) VALUES ('dataSchemaVersion', '1');
         INSERT OR IGNORE INTO app_meta (key, value) VALUES ('syncProtocolVersion', '1');
@@ -338,6 +676,271 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|error| error.to_string())?;
     ensure_device_id(conn)?;
+    migrate_desktop_entity_sync(conn)?;
+    Ok(())
+}
+
+fn migrate_desktop_entity_sync(conn: &Connection) -> Result<(), String> {
+    let current_version = get_meta(conn, "desktopEntitySyncVersion")?;
+    if current_version.as_deref() == Some("6") {
+        return Ok(());
+    }
+
+    conn.execute("DROP TABLE IF EXISTS pending_sync_ops", [])
+        .map_err(|error| error.to_string())?;
+    conn.execute("DROP TABLE IF EXISTS schedule_snapshots", [])
+        .map_err(|error| error.to_string())?;
+    conn.execute("DROP TABLE IF EXISTS sync_state", [])
+        .map_err(|error| error.to_string())?;
+    migrate_account_scoped_desktop_tables(conn)?;
+    migrate_desktop_color_profiles_primary_key(conn)?;
+    set_meta(conn, "desktopEntitySyncVersion", "6")
+}
+
+fn migrate_account_scoped_desktop_tables(conn: &Connection) -> Result<(), String> {
+    migrate_timetable_settings_primary_key(conn)?;
+    migrate_period_cards_primary_key(conn)?;
+    migrate_course_cells_primary_key(conn)?;
+    migrate_temporary_changes_primary_key(conn)
+}
+
+fn table_has_owner_scoped_primary_key(conn: &Connection, table_name: &str) -> Result<bool, String> {
+    let current_sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table_name],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(current_sql
+        .as_deref()
+        .is_some_and(|sql| sql.contains("PRIMARY KEY (id, owner_user_id)")))
+}
+
+fn migrate_timetable_settings_primary_key(conn: &Connection) -> Result<(), String> {
+    if table_has_owner_scoped_primary_key(conn, "timetable_settings")? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS timetable_settings_next (
+          id TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          term_start_date TEXT NOT NULL,
+          term_end_date TEXT NOT NULL,
+          workday_mode TEXT NOT NULL,
+          period_count INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
+        );
+        ",
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO timetable_settings_next (
+           id, owner_user_id, term_start_date, term_end_date, workday_mode,
+           period_count, created_at, updated_at, deleted_at
+         )
+         SELECT id, owner_user_id, term_start_date, term_end_date, workday_mode,
+                period_count, created_at, updated_at, deleted_at
+         FROM timetable_settings",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute("DROP TABLE timetable_settings", [])
+        .map_err(|error| error.to_string())?;
+    conn.execute(
+        "ALTER TABLE timetable_settings_next RENAME TO timetable_settings",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn migrate_period_cards_primary_key(conn: &Connection) -> Result<(), String> {
+    if table_has_owner_scoped_primary_key(conn, "period_cards")? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS period_cards_next (
+          id TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          order_index INTEGER NOT NULL,
+          label TEXT NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT NOT NULL,
+          style_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
+        );
+        ",
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO period_cards_next (
+           id, owner_user_id, order_index, label, start_time, end_time,
+           style_json, created_at, updated_at, deleted_at
+         )
+         SELECT id, owner_user_id, order_index, label, start_time, end_time,
+                style_json, created_at, updated_at, deleted_at
+         FROM period_cards",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute("DROP TABLE period_cards", [])
+        .map_err(|error| error.to_string())?;
+    conn.execute("ALTER TABLE period_cards_next RENAME TO period_cards", [])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn migrate_course_cells_primary_key(conn: &Connection) -> Result<(), String> {
+    if table_has_owner_scoped_primary_key(conn, "course_cells")? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS course_cells_next (
+          id TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          period_id TEXT NOT NULL,
+          weekday TEXT NOT NULL,
+          title TEXT NOT NULL,
+          secondary TEXT,
+          hidden INTEGER NOT NULL DEFAULT 0,
+          schedule_rule_json TEXT,
+          base_color TEXT,
+          style_json TEXT,
+          col_span INTEGER,
+          row_span INTEGER,
+          merged_into TEXT,
+          merge_direction TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
+        );
+        ",
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO course_cells_next (
+           id, owner_user_id, period_id, weekday, title, secondary, hidden,
+           schedule_rule_json, base_color, style_json, col_span, row_span,
+           merged_into, merge_direction, created_at, updated_at, deleted_at
+         )
+         SELECT id, owner_user_id, period_id, weekday, title, secondary, hidden,
+                schedule_rule_json, base_color, style_json, col_span, row_span,
+                merged_into, merge_direction, created_at, updated_at, deleted_at
+         FROM course_cells",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute("DROP TABLE course_cells", [])
+        .map_err(|error| error.to_string())?;
+    conn.execute("ALTER TABLE course_cells_next RENAME TO course_cells", [])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn migrate_temporary_changes_primary_key(conn: &Connection) -> Result<(), String> {
+    if table_has_owner_scoped_primary_key(conn, "temporary_changes")? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS temporary_changes_next (
+          id TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          course_cell_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          dates_json TEXT NOT NULL,
+          title TEXT,
+          secondary TEXT,
+          base_color TEXT,
+          style_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
+        );
+        ",
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO temporary_changes_next (
+           id, owner_user_id, course_cell_id, type, dates_json, title,
+           secondary, base_color, style_json, created_at, updated_at, deleted_at
+         )
+         SELECT id, owner_user_id, course_cell_id, type, dates_json, title,
+                secondary, base_color, style_json, created_at, updated_at, deleted_at
+         FROM temporary_changes",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute("DROP TABLE temporary_changes", [])
+        .map_err(|error| error.to_string())?;
+    conn.execute(
+        "ALTER TABLE temporary_changes_next RENAME TO temporary_changes",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn migrate_desktop_color_profiles_primary_key(conn: &Connection) -> Result<(), String> {
+    if table_has_owner_scoped_primary_key(conn, "color_profiles")? {
+        return Ok(());
+    }
+
+    let now = now_string();
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS color_profiles_next (
+          id TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          color_name TEXT NOT NULL,
+          color_value TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_preset INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL,
+          deleted_at TEXT,
+          PRIMARY KEY (id, owner_user_id)
+        );
+        ",
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO color_profiles_next (
+           id, owner_user_id, color_name, color_value, sort_order, is_preset, updated_at, deleted_at
+         )
+         SELECT id, owner_user_id, color_name, color_value, sort_order, is_preset, updated_at, deleted_at
+         FROM color_profiles",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute("DROP TABLE color_profiles", [])
+        .map_err(|error| error.to_string())?;
+    conn.execute(
+        "ALTER TABLE color_profiles_next RENAME TO color_profiles",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "UPDATE color_profiles SET updated_at = ?1 WHERE updated_at IS NULL OR updated_at = ''",
+        params![now],
+    )
+    .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -415,105 +1018,2317 @@ fn update_last_used(conn: &Connection, user_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn insert_local_cloud_user(
+    conn: &Connection,
+    phone: &str,
+    password: &str,
+    cloud_user_id: &str,
+    now: &str,
+) -> Result<String, String> {
+    let user_id = format!("local_user_{}", random_token(16));
+    let (password_hash, password_salt) = password_hash_pair(password);
+    conn.execute(
+        "INSERT INTO local_users (id, phone, password_hash, password_salt, cloud_user_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+        params![
+            user_id,
+            phone,
+            password_hash,
+            password_salt,
+            cloud_user_id,
+            now
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(user_id)
+}
+
+fn update_local_user_cloud_auth(
+    conn: &Connection,
+    user_id: &str,
+    phone: &str,
+    password: &str,
+    cloud_user_id: &str,
+    now: &str,
+) -> Result<(), String> {
+    let (password_hash, password_salt) = password_hash_pair(password);
+    conn.execute(
+        "UPDATE local_users
+         SET phone = ?2,
+             password_hash = ?3,
+             password_salt = ?4,
+             cloud_user_id = ?5,
+             updated_at = ?6
+         WHERE id = ?1",
+        params![
+            user_id,
+            phone,
+            password_hash,
+            password_salt,
+            cloud_user_id,
+            now
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn password_hash_pair(password: &str) -> (Option<String>, Option<String>) {
+    if password.is_empty() {
+        return (None, None);
+    }
+
+    let salt = random_token(24);
+    let hash = hash_password(password, &salt);
+    (Some(hash), Some(salt))
+}
+
+fn save_session_token(conn: &Connection, user_id: &str, token: &str) -> Result<(), String> {
+    let now = now_string();
+    let session_id = format!("session_{}", user_id);
+    conn.execute(
+        "INSERT INTO local_sessions (id, user_id, created_at, last_used_at, refresh_token)
+         VALUES (?1, ?2, ?3, ?3, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+           user_id = excluded.user_id,
+           last_used_at = excluded.last_used_at,
+           refresh_token = excluded.refresh_token",
+        params![session_id, user_id, now, token],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn clear_session_token(conn: &Connection, user_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE local_sessions SET refresh_token = NULL, last_used_at = ?2 WHERE user_id = ?1",
+        params![user_id, now_string()],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn upsert_sync_meta_cloud_user(
+    conn: &Connection,
+    owner_user_id: &str,
+    cloud_user_id: &str,
+) -> Result<(), String> {
+    ensure_device_id(conn)?;
+    let device_id = get_meta(conn, "deviceId")?.unwrap_or_else(|| {
+        let fallback = format!("device_{}", random_token(20));
+        let _ = set_meta(conn, "deviceId", &fallback);
+        fallback
+    });
+    conn.execute(
+        "INSERT INTO sync_meta (owner_user_id, cloud_user_id, device_id, sync_schema_version)
+         VALUES (?1, ?2, ?3, 1)
+         ON CONFLICT(owner_user_id) DO UPDATE SET
+           cloud_user_id = excluded.cloud_user_id,
+           device_id = COALESCE(device_id, excluded.device_id),
+           sync_schema_version = 1",
+        params![owner_user_id, cloud_user_id, device_id],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn copy_default_schedule_if_needed(conn: &Connection, user_id: &str) -> Result<(), String> {
     if user_id == DEFAULT_USER_ID {
         return Ok(());
     }
 
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT schedule_json FROM schedule_snapshots WHERE owner_user_id = ?1",
-            params![user_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    if existing.is_some() {
+    if user_has_schedule_entities(conn, user_id)? {
         return Ok(());
     }
 
-    let default_schedule: Option<String> = conn
-        .query_row(
-            "SELECT schedule_json FROM schedule_snapshots WHERE owner_user_id = ?1",
-            params![DEFAULT_USER_ID],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    if let Some(schedule_json) = default_schedule {
-        conn.execute(
-            "INSERT INTO schedule_snapshots (owner_user_id, schedule_json, updated_at) VALUES (?1, ?2, ?3)",
-            params![user_id, schedule_json, now_string()],
-        )
-        .map_err(|error| error.to_string())?;
-        mark_schedule_snapshot_dirty(conn, user_id)?;
+    if let Some(default_schedule) = load_schedule_from_entities(conn, DEFAULT_USER_ID)? {
+        save_schedule_entities_without_pending(conn, user_id, &default_schedule)?;
+        enqueue_schedule_bootstrap_ops(conn, user_id)?;
     }
 
     Ok(())
 }
 
-fn save_schedule_for_user(conn: &Connection, owner_user_id: &str, schedule: &Value) -> Result<(), String> {
-    let raw = serde_json::to_string(schedule).map_err(|error| error.to_string())?;
-    let now = now_string();
-    conn.execute(
-        "INSERT INTO schedule_snapshots (owner_user_id, schedule_json, updated_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(owner_user_id) DO UPDATE SET schedule_json = excluded.schedule_json, updated_at = excluded.updated_at",
-        params![owner_user_id, raw, now],
-    )
-    .map_err(|error| error.to_string())?;
-    mark_schedule_snapshot_dirty(conn, owner_user_id)?;
-    Ok(())
+fn save_schedule_for_user(
+    conn: &Connection,
+    owner_user_id: &str,
+    schedule: &Value,
+    source_action: &str,
+) -> Result<(), String> {
+    let previous = load_schedule_from_entities(conn, owner_user_id)?;
+    if owner_user_id != DEFAULT_USER_ID {
+        enqueue_schedule_entity_diff_ops(
+            conn,
+            owner_user_id,
+            previous.as_ref(),
+            schedule,
+            source_action,
+        )?;
+    }
+    save_schedule_entities_without_pending(conn, owner_user_id, schedule)
 }
 
-fn mark_schedule_snapshot_dirty(conn: &Connection, owner_user_id: &str) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO sync_state (owner_user_id, entity_type, entity_id, dirty, local_revision)
-         VALUES (?1, 'schedule_snapshot', ?1, 1, 1)
-         ON CONFLICT(owner_user_id, entity_type, entity_id)
-         DO UPDATE SET dirty = 1, local_revision = local_revision + 1, last_sync_error = NULL",
-        params![owner_user_id],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-fn load_sync_status_for_user(conn: &Connection, owner_user_id: &str) -> Result<LocalSyncStatus, String> {
-    let (dirty_count, local_revision): (i64, i64) = conn
+fn load_sync_status_for_user(
+    conn: &Connection,
+    owner_user_id: &str,
+) -> Result<LocalSyncStatus, String> {
+    let pending_count = pending_ops_count(conn, owner_user_id)? as i64;
+    let local_revision = pending_count;
+    let last_sync_error: Option<String> = None;
+    let sync_meta: Option<(
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<i64>,
+        Option<String>,
+    )> = conn
         .query_row(
-            "SELECT COUNT(*), COALESCE(MAX(local_revision), 0)
-             FROM sync_state
-             WHERE owner_user_id = ?1 AND dirty = 1",
+            "SELECT last_synced_at,
+                    last_checked_at,
+                    last_synced_cloud_revision,
+                    last_known_cloud_revision,
+                    last_sync_error
+             FROM sync_meta
+             WHERE owner_user_id = ?1",
             params![owner_user_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
+        .optional()
         .map_err(|error| error.to_string())?;
-    let last_sync_error = conn
+
+    let (
+        last_synced_at,
+        last_checked_at,
+        last_synced_cloud_revision,
+        last_known_cloud_revision,
+        meta_sync_error,
+    ) = sync_meta.unwrap_or((None, None, None, None, None));
+    let cloud_revision = last_known_cloud_revision.map(|value| value.max(0) as u32);
+    let last_synced_cloud_revision_u32 =
+        last_synced_cloud_revision.map(|value| value.max(0) as u32);
+    let has_remote_changes = false;
+    let last_sync_error = last_sync_error.or(meta_sync_error);
+    let has_pending_changes = pending_count > 0;
+
+    Ok(LocalSyncStatus {
+        owner_user_id: owner_user_id.to_string(),
+        dirty_count: pending_count.max(0) as u32,
+        local_revision: local_revision.max(0) as u32,
+        cloud_revision,
+        last_synced_cloud_revision: last_synced_cloud_revision_u32,
+        last_synced_at,
+        last_checked_at,
+        last_sync_error,
+        has_pending_changes,
+        has_remote_changes,
+        syncing: false,
+        online: true,
+        conflict: has_pending_changes && has_remote_changes,
+    })
+}
+
+fn session_token(conn: &Connection, owner_user_id: &str) -> Result<String, String> {
+    let token: Option<String> = conn
         .query_row(
-            "SELECT last_sync_error
-             FROM sync_state
-             WHERE owner_user_id = ?1 AND last_sync_error IS NOT NULL
-             ORDER BY local_revision DESC
+            "SELECT refresh_token
+             FROM local_sessions
+             WHERE user_id = ?1 AND refresh_token IS NOT NULL
+             ORDER BY last_used_at DESC
              LIMIT 1",
             params![owner_user_id],
             |row| row.get(0),
         )
         .optional()
         .map_err(|error| error.to_string())?;
+    token.ok_or_else(|| "login expired, please sign in again".to_string())
+}
 
-    Ok(LocalSyncStatus {
-        owner_user_id: owner_user_id.to_string(),
-        dirty_count: dirty_count.max(0) as u32,
-        local_revision: local_revision.max(0) as u32,
-        last_sync_error,
-        has_pending_changes: dirty_count > 0,
+fn sync_current_user_with_cloud(
+    conn: &Connection,
+    owner_user_id: &str,
+    token: &str,
+) -> Result<bool, String> {
+    let device_id = sync_client_id(conn)?;
+    let pending_ops = load_pending_ops(conn, owner_user_id)?;
+    let last_revision =
+        load_sync_meta_revision(conn, owner_user_id, "last_synced_cloud_revision")?.unwrap_or(0);
+    let mut accepted = Vec::<String>::new();
+    let mut changes = Vec::<ServerChange>::new();
+    let mut latest_server_seq = last_revision;
+
+    for batch in &pending_ops {
+        let response = cloud_post_json("/sync/batch", token, batch.clone())?;
+        let sync_response: SyncResponse = serde_json::from_value(response)
+            .map_err(|error| format!("cloud request failed: {error}"))?;
+        accepted.extend(sync_response.accepted_batch_ids);
+        latest_server_seq = latest_server_seq.max(sync_response.latest_server_seq);
+        changes.extend(sync_response.server_changes);
+    }
+    remove_accepted_ops(conn, owner_user_id, &accepted)?;
+
+    let has_local_pending = pending_ops_count(conn, owner_user_id)? > 0;
+    if last_revision == 0 && pending_ops.is_empty() {
+        let snapshot = cloud_get_json("/sync/snapshot", token)?;
+        let snapshot: SnapshotResponse = serde_json::from_value(snapshot)
+            .map_err(|error| format!("cloud request failed: {error}"))?;
+        latest_server_seq = latest_server_seq.max(snapshot.latest_server_seq);
+        let has_remote_data = server_change_has_remote_data(&snapshot.snapshot);
+        if has_remote_data {
+            apply_server_changes_to_schedule(conn, owner_user_id, &[snapshot.snapshot])?;
+        } else {
+            enqueue_schedule_bootstrap_ops(conn, owner_user_id)?;
+            if pending_ops_count(conn, owner_user_id)? > 0 {
+                return sync_current_user_with_cloud(conn, owner_user_id, token);
+            }
+        }
+    }
+
+    let pulled = cloud_get_json(
+        &format!(
+            "/sync/changes?clientId={}&afterSeq={}",
+            urlencoding::encode(&device_id),
+            last_revision
+        ),
+        token,
+    )?;
+    let pulled: ChangesResponse =
+        serde_json::from_value(pulled).map_err(|error| format!("cloud request failed: {error}"))?;
+    latest_server_seq = latest_server_seq.max(pulled.latest_server_seq);
+    changes.extend(pulled.server_changes);
+
+    let applied = apply_server_changes_to_schedule(conn, owner_user_id, &changes)?;
+    if !applied.is_empty() {
+        ack_server_changes(conn, owner_user_id, token, &device_id, &applied)?;
+    }
+    let now = now_string();
+    upsert_sync_meta_synced(conn, owner_user_id, &now, latest_server_seq)?;
+    Ok(!changes.is_empty() || !has_local_pending)
+}
+
+fn sync_client_id(conn: &Connection) -> Result<String, String> {
+    ensure_device_id(conn)?;
+    get_meta(conn, "deviceId")?.ok_or_else(|| "missing device id".to_string())
+}
+
+fn pending_ops_count(conn: &Connection, owner_user_id: &str) -> Result<u32, String> {
+    let value: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pending_sync_batches WHERE owner_user_id = ?1",
+            params![owner_user_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(value.max(0) as u32)
+}
+
+fn load_pending_ops(conn: &Connection, owner_user_id: &str) -> Result<Vec<Value>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT batch_id,
+                    client_id,
+                    entity_diffs_json,
+                    source_action,
+                    client_created_at
+             FROM pending_sync_batches
+             WHERE owner_user_id = ?1
+             ORDER BY client_created_at ASC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map(params![owner_user_id], |row| {
+            let payload_raw: String = row.get(2)?;
+            let payload = serde_json::from_str::<Value>(&payload_raw).unwrap_or(Value::Null);
+            Ok(json!({
+                "batchId": row.get::<_, String>(0)?,
+                "clientId": row.get::<_, String>(1)?,
+                "entityDiffs": payload,
+                "sourceAction": row.get::<_, Option<String>>(3)?,
+            }))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut ops = Vec::<Value>::new();
+    let current_client_id = sync_client_id(conn)?;
+    for row in rows {
+        let mut op = row.map_err(|error| error.to_string())?;
+        op["clientId"] = json!(current_client_id);
+        ops.push(op);
+    }
+    Ok(ops)
+}
+
+async fn run_realtime_sync_loop(
+    app: AppHandle,
+    owner_user_id: String,
+    token: String,
+    device_id: String,
+    generation: u64,
+) {
+    use futures_util::StreamExt;
+    use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+    let mut attempt = 0usize;
+    loop {
+        if REALTIME_SYNC_GENERATION.load(AtomicOrdering::SeqCst) != generation {
+            return;
+        }
+
+        let url = format!(
+            "{}/ws/sync?token={}&clientId={}",
+            CLOUD_API_BASE_URL
+                .replace("https://", "wss://")
+                .replace("http://", "ws://"),
+            urlencoding::encode(&token),
+            urlencoding::encode(&device_id)
+        );
+
+        match connect_async(&url).await {
+            Ok((mut stream, response)) => {
+                println!(
+                    "sync websocket connected owner_user_id={owner_user_id} client_id={device_id} status={}",
+                    response.status()
+                );
+                attempt = 0;
+                run_blocking_sync(
+                    app.clone(),
+                    owner_user_id.clone(),
+                    token.clone(),
+                    "websocket-connect",
+                )
+                .await;
+                while let Some(message) = stream.next().await {
+                    if REALTIME_SYNC_GENERATION.load(AtomicOrdering::SeqCst) != generation {
+                        return;
+                    }
+                    let Ok(message) = message else {
+                        break;
+                    };
+                    match message {
+                        Message::Text(text) => {
+                            let Ok(value) = serde_json::from_str::<Value>(&text) else {
+                                continue;
+                            };
+                            if value.get("type").and_then(Value::as_str) != Some("serverChange") {
+                                continue;
+                            }
+                            let Some(change_value) = value.get("change").cloned() else {
+                                continue;
+                            };
+                            if let Ok(change) = serde_json::from_value::<ServerChange>(change_value)
+                            {
+                                println!(
+                                    "sync websocket received serverSeq={} client_id={device_id}",
+                                    change.server_seq
+                                );
+                                run_blocking_apply_pushed_change(
+                                    app.clone(),
+                                    owner_user_id.clone(),
+                                    token.clone(),
+                                    device_id.clone(),
+                                    change,
+                                )
+                                .await;
+                            }
+                        }
+                        Message::Close(frame) => {
+                            println!("sync websocket close frame={frame:?}");
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                println!("sync websocket disconnected owner_user_id={owner_user_id}");
+                run_blocking_sync(
+                    app.clone(),
+                    owner_user_id.clone(),
+                    token.clone(),
+                    "websocket-disconnect",
+                )
+                .await;
+            }
+            Err(error) => {
+                println!("sync websocket connect failed: {error}");
+            }
+        }
+
+        let delay = realtime_retry_delay(attempt);
+        attempt = attempt.saturating_add(1);
+        tokio::time::sleep(delay).await;
+    }
+}
+
+async fn run_blocking_sync(
+    app: AppHandle,
+    owner_user_id: String,
+    token: String,
+    reason: &'static str,
+) {
+    match tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db(&app)?;
+        sync_current_user_with_cloud(&conn, &owner_user_id, &token)
+    })
+    .await
+    {
+        Ok(Ok(changed)) => {
+            println!("sync blocking pull completed reason={reason} changed={changed}");
+        }
+        Ok(Err(error)) => {
+            println!("sync blocking pull failed reason={reason} error={error}");
+        }
+        Err(error) => {
+            println!("sync blocking pull task failed reason={reason} error={error}");
+        }
+    }
+}
+
+async fn run_blocking_apply_pushed_change(
+    app: AppHandle,
+    owner_user_id: String,
+    token: String,
+    device_id: String,
+    change: ServerChange,
+) {
+    let server_seq = change.server_seq;
+    match tauri::async_runtime::spawn_blocking(move || {
+        apply_pushed_server_change(&app, &owner_user_id, &token, &device_id, change)
+    })
+    .await
+    {
+        Ok(Ok(())) => {
+            println!("sync pushed change applied serverSeq={server_seq}");
+        }
+        Ok(Err(error)) => {
+            println!("sync pushed change failed serverSeq={server_seq} error={error}");
+        }
+        Err(error) => {
+            println!("sync pushed change task failed serverSeq={server_seq} error={error}");
+        }
+    }
+}
+
+fn realtime_retry_delay(attempt: usize) -> Duration {
+    match attempt {
+        0 => Duration::from_secs(5),
+        1 => Duration::from_secs(15),
+        2 => Duration::from_secs(30),
+        3 => Duration::from_secs(60),
+        _ => Duration::from_secs(300),
+    }
+}
+
+fn apply_pushed_server_change(
+    app: &AppHandle,
+    owner_user_id: &str,
+    token: &str,
+    device_id: &str,
+    change: ServerChange,
+) -> Result<(), String> {
+    let conn = open_db(app)?;
+    let last_revision =
+        load_sync_meta_revision(&conn, owner_user_id, "last_synced_cloud_revision")?.unwrap_or(0);
+    if change.server_seq <= last_revision {
+        return Ok(());
+    }
+    let server_seq = change.server_seq;
+    let applied = apply_server_changes_to_schedule(&conn, owner_user_id, &[change])?;
+    ack_server_changes(&conn, owner_user_id, token, device_id, &applied)?;
+    let now = now_string();
+    upsert_sync_meta_synced(&conn, owner_user_id, &now, server_seq)?;
+    let payload = json!({ "serverSeq": server_seq });
+    if let Some(window) = app.get_webview_window("widget") {
+        let _ = window.emit(SYNC_SERVER_CHANGE_EVENT, payload.clone());
+    }
+    let _ = app.emit(SYNC_SERVER_CHANGE_EVENT, payload);
+    println!("sync websocket applied serverSeq={server_seq}");
+    Ok(())
+}
+
+fn server_change_has_remote_data(change: &ServerChange) -> bool {
+    change.entity_diffs.iter().any(|diff| {
+        let entity = diff.get("entity").and_then(Value::as_str).unwrap_or("");
+        if !matches!(
+            entity,
+            "courseCard" | "periodCard" | "termSettings" | "temporaryChange" | "reminder"
+        ) {
+            return false;
+        }
+        let values = diff.get("values").unwrap_or(&Value::Null);
+        if values
+            .get("deleted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        if entity == "periodCard" {
+            let has_name = get_str_multi(values, &["periodName", "name"])
+                .is_some_and(|value| !value.trim().is_empty());
+            let has_start = get_i64_any(values, "startMinutes", "start_minutes").unwrap_or(0) > 0;
+            let has_end = get_i64_any(values, "endMinutes", "end_minutes").unwrap_or(0) > 0;
+            return has_name || has_start || has_end;
+        }
+        true
     })
 }
 
-fn get_meta(conn: &Connection, key: &str) -> Result<Option<String>, String> {
-    conn.query_row("SELECT value FROM app_meta WHERE key = ?1", params![key], |row| row.get(0))
+fn remove_accepted_ops(
+    conn: &Connection,
+    owner_user_id: &str,
+    accepted: &[String],
+) -> Result<(), String> {
+    for batch_id in accepted {
+        conn.execute(
+            "DELETE FROM pending_sync_batches WHERE owner_user_id = ?1 AND batch_id = ?2",
+            params![owner_user_id, batch_id],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct ScheduleSyncEntities {
+    schedule: Option<Value>,
+    periods: HashMap<String, Value>,
+    colors: HashMap<String, Value>,
+    courses: HashMap<String, Value>,
+    layout_preserved_course_ids: HashSet<String>,
+    temporary_changes: HashMap<String, Value>,
+}
+
+fn enqueue_schedule_bootstrap_ops(conn: &Connection, owner_user_id: &str) -> Result<(), String> {
+    let Some(schedule) = load_schedule_from_entities(conn, owner_user_id)? else {
+        return Ok(());
+    };
+    let previous = ScheduleSyncEntities::default();
+    let next = extract_schedule_sync_entities(&schedule);
+    enqueue_schedule_entity_ops(conn, owner_user_id, &previous, &next, "desktop.bootstrap")
+}
+
+fn enqueue_schedule_entity_diff_ops(
+    conn: &Connection,
+    owner_user_id: &str,
+    previous_schedule: Option<&Value>,
+    next_schedule: &Value,
+    source_action: &str,
+) -> Result<(), String> {
+    let previous = previous_schedule
+        .map(extract_schedule_sync_entities)
+        .unwrap_or_default();
+    let next = extract_schedule_sync_entities(next_schedule);
+    enqueue_schedule_entity_ops(conn, owner_user_id, &previous, &next, source_action)
+}
+
+fn enqueue_schedule_entity_ops(
+    conn: &Connection,
+    owner_user_id: &str,
+    previous: &ScheduleSyncEntities,
+    next: &ScheduleSyncEntities,
+    source_action: &str,
+) -> Result<(), String> {
+    let device_id = sync_client_id(conn)?;
+    let mut diffs = Vec::<Value>::new();
+
+    if previous.schedule != next.schedule {
+        if let Some(payload) = &next.schedule {
+            diffs.push(entity_diff("termSettings", "default", payload.clone()));
+        }
+    }
+
+    enqueue_entity_map_diff(
+        &mut diffs,
+        "periodCard",
+        &previous.periods,
+        &next.periods,
+        |entity_id| {
+            let period_id = entity_id.parse::<i64>().unwrap_or(0);
+            json!({
+                "periodId": period_id,
+                "deleted": true,
+            })
+        },
+        |_| false,
+    )?;
+    enqueue_entity_map_diff(
+        &mut diffs,
+        "colorProfile",
+        &previous.colors,
+        &next.colors,
+        |entity_id| json!({ "colorId": entity_id, "deleted": true }),
+        |_| false,
+    )?;
+    enqueue_entity_map_diff(
+        &mut diffs,
+        "courseCard",
+        &previous.courses,
+        &next.courses,
+        |entity_id| empty_course_cloud_payload(entity_id),
+        |entity_id| next.layout_preserved_course_ids.contains(entity_id),
+    )?;
+    enqueue_entity_map_diff(
+        &mut diffs,
+        "temporaryChange",
+        &previous.temporary_changes,
+        &next.temporary_changes,
+        |entity_id| json!({ "temporaryChangeId": entity_id, "deleted": true }),
+        |_| false,
+    )?;
+
+    if !diffs.is_empty() {
+        enqueue_batch(conn, owner_user_id, &device_id, diffs, source_action)?;
+    }
+
+    Ok(())
+}
+
+fn enqueue_entity_map_diff<F, S>(
+    diffs: &mut Vec<Value>,
+    entity: &str,
+    previous: &HashMap<String, Value>,
+    next: &HashMap<String, Value>,
+    delete_payload: F,
+    skip_delete: S,
+) -> Result<(), String>
+where
+    F: Fn(&str) -> Value,
+    S: Fn(&str) -> bool,
+{
+    for (entity_id, payload) in next {
+        if previous.get(entity_id) != Some(payload) {
+            diffs.push(entity_diff(entity, entity_id, payload.clone()));
+        }
+    }
+
+    for entity_id in previous.keys() {
+        if !next.contains_key(entity_id) && !skip_delete(entity_id) {
+            diffs.push(entity_diff(entity, entity_id, delete_payload(entity_id)));
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_schedule_sync_entities(schedule: &Value) -> ScheduleSyncEntities {
+    let (term_start, term_end) = infer_term_range(schedule);
+    let visible_days = schedule
+        .get("days")
+        .and_then(Value::as_array)
+        .map(|items| items.len().clamp(1, 7))
+        .unwrap_or(5);
+    let mut entities = ScheduleSyncEntities {
+        schedule: Some(json!({
+            "termStartDate": term_start.clone(),
+            "termEndDate": term_end.clone(),
+            "visibleDays": visible_days,
+            "workdayMode": workday_mode_from_visible_days(visible_days),
+            "termUserDefined": true,
+            "schemaVersion": 1,
+        })),
+        ..ScheduleSyncEntities::default()
+    };
+
+    for (row_index, row) in schedule_rows(schedule).iter().enumerate() {
+        let period_id = period_id_from_row(row, row_index);
+        let period = row.get("period").unwrap_or(&Value::Null);
+        let (start_minutes, end_minutes) =
+            parse_time_range(period.get("time").and_then(Value::as_str).unwrap_or(""));
+        entities.periods.insert(
+            period_id.to_string(),
+            json!({
+                "periodId": period_id,
+                "periodName": period.get("label").and_then(Value::as_str).unwrap_or(""),
+                "startMinutes": start_minutes,
+                "endMinutes": end_minutes,
+                "sortOrder": period_id,
+            }),
+        );
+
+        let Some(courses) = row.get("courses").and_then(Value::as_object) else {
+            continue;
+        };
+        for (weekday, course) in courses {
+            let Some(week_day) = weekday_to_number(weekday) else {
+                continue;
+            };
+            let course_id = course_card_id(week_day, period_id);
+            if course.get("mergedInto").and_then(Value::as_str).is_some() {
+                entities
+                    .layout_preserved_course_ids
+                    .insert(course_id.clone());
+                continue;
+            }
+            if !is_syncable_course(course) {
+                continue;
+            }
+            entities.courses.insert(
+                course_id.clone(),
+                course_to_cloud_payload(
+                    course,
+                    &course_id,
+                    week_day,
+                    period_id,
+                    &term_start,
+                    &term_end,
+                ),
+            );
+            if let Some(color) = course
+                .get("style")
+                .and_then(|style| style.get("baseColor"))
+                .and_then(Value::as_str)
+            {
+                insert_color_profile_entity(&mut entities.colors, color);
+            }
+
+            for change in course
+                .get("temporaryChanges")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                for payload in
+                    temporary_change_to_cloud_payloads(change, &course_id, week_day, period_id)
+                {
+                    if let Some(entity_id) = payload.get("id").and_then(Value::as_str) {
+                        if let Some(color) = get_str_any(
+                            &payload,
+                            "replacementColorValue",
+                            "replacement_color_value",
+                        ) {
+                            insert_argb_color_profile_entity(&mut entities.colors, color);
+                        }
+                        entities
+                            .temporary_changes
+                            .insert(entity_id.to_string(), payload);
+                    }
+                }
+            }
+        }
+    }
+
+    entities
+}
+
+fn period_id_from_row(row: &Value, row_index: usize) -> i64 {
+    row.get("id")
+        .and_then(Value::as_str)
+        .and_then(|id| id.trim_start_matches('p').parse::<i64>().ok())
+        .unwrap_or((row_index + 1) as i64)
+}
+
+fn course_card_id(week_day: i64, period_id: i64) -> String {
+    format!("courseCard_{week_day}_{period_id}")
+}
+
+fn parse_course_card_id(entity_id: &str) -> Option<(i64, i64)> {
+    let mut parts = entity_id.split('_');
+    if parts.next()? != "courseCard" {
+        return None;
+    }
+    let week_day = parts.next()?.parse::<i64>().ok()?;
+    let period_id = parts.next()?.parse::<i64>().ok()?;
+    Some((week_day, period_id))
+}
+
+fn insert_color_profile_entity(colors: &mut HashMap<String, Value>, hex_color: &str) {
+    let color_value = hex_color_to_argb(hex_color);
+    insert_argb_color_profile_entity(colors, &color_value);
+}
+
+fn insert_argb_color_profile_entity(colors: &mut HashMap<String, Value>, color_value: &str) {
+    let normalized = hex_color_to_argb(color_value);
+    if preset_color_id_from_argb(&normalized).is_some() {
+        return;
+    }
+    let id = format!("custom_{normalized}");
+    colors.entry(id.clone()).or_insert_with(|| {
+        json!({
+            "id": id,
+            "colorName": format!("Custom {normalized}"),
+            "colorValue": normalized,
+            "sortOrder": 0,
+            "isPreset": false,
+        })
+    });
+}
+
+fn entity_diff(entity: &str, entity_id: &str, values: Value) -> Value {
+    json!({
+        "entity": entity,
+        "id": entity_id,
+        "values": values,
+    })
+}
+
+fn empty_course_cloud_payload(entity_id: &str) -> Value {
+    let (week_day, period_id) = parse_course_card_id(entity_id).unwrap_or((1, 1));
+    json!({
+        "courseCardId": entity_id,
+        "courseName": "",
+        "auxiliaryInfo": "",
+        "weekDay": week_day,
+        "periodId": period_id,
+        "colorId": "red",
+        "colorValue": "FFFF3B30",
+        "weekParity": "all",
+        "startDate": Value::Null,
+        "endDate": Value::Null,
+    })
+}
+
+fn enqueue_batch(
+    conn: &Connection,
+    owner_user_id: &str,
+    device_id: &str,
+    entity_diffs: Vec<Value>,
+    source_action: &str,
+) -> Result<(), String> {
+    let now = now_string();
+    let batch_id = make_batch_id(device_id);
+    conn.execute(
+        "INSERT OR IGNORE INTO pending_sync_batches (
+           batch_id,
+           owner_user_id,
+           client_id,
+           entity_diffs_json,
+           source_action,
+           client_created_at
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            batch_id,
+            owner_user_id,
+            device_id,
+            serde_json::to_string(&entity_diffs).map_err(|error| error.to_string())?,
+            source_action,
+            now
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn make_batch_id(device_id: &str) -> String {
+    format!("{device_id}_batch_{}_{}", now_string(), random_token(12))
+}
+
+fn user_has_schedule_entities(conn: &Connection, owner_user_id: &str) -> Result<bool, String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT
+               (SELECT COUNT(*) FROM timetable_settings WHERE owner_user_id = ?1 AND deleted_at IS NULL) +
+               (SELECT COUNT(*) FROM period_cards WHERE owner_user_id = ?1 AND deleted_at IS NULL) +
+               (SELECT COUNT(*) FROM course_cells WHERE owner_user_id = ?1 AND deleted_at IS NULL)",
+            params![owner_user_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(count > 0)
+}
+
+fn save_schedule_entities_without_pending(
+    conn: &Connection,
+    owner_user_id: &str,
+    schedule: &Value,
+) -> Result<(), String> {
+    let now = now_string();
+    conn.execute(
+        "DELETE FROM temporary_changes WHERE owner_user_id = ?1",
+        params![owner_user_id],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "DELETE FROM course_cells WHERE owner_user_id = ?1",
+        params![owner_user_id],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "DELETE FROM period_cards WHERE owner_user_id = ?1",
+        params![owner_user_id],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "DELETE FROM timetable_settings WHERE owner_user_id = ?1",
+        params![owner_user_id],
+    )
+    .map_err(|error| error.to_string())?;
+
+    let (term_start, term_end) = infer_term_range(schedule);
+    let visible_days = schedule
+        .get("days")
+        .and_then(Value::as_array)
+        .map(|items| items.len().clamp(1, 7))
+        .unwrap_or(5);
+    conn.execute(
+        "INSERT INTO timetable_settings (
+           id, owner_user_id, term_start_date, term_end_date, workday_mode,
+           period_count, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+        params![
+            "schedule",
+            owner_user_id,
+            term_start,
+            term_end,
+            workday_mode_from_visible_days(visible_days),
+            schedule_rows(schedule).len() as i64,
+            now
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+
+    for (row_index, row) in schedule_rows(schedule).iter().enumerate() {
+        let period_id = period_id_from_row(row, row_index);
+        let period = row.get("period").unwrap_or(&Value::Null);
+        let (start_minutes, end_minutes) =
+            parse_time_range(period.get("time").and_then(Value::as_str).unwrap_or(""));
+        conn.execute(
+            "INSERT INTO period_cards (
+               id, owner_user_id, order_index, label, start_time, end_time,
+               style_json, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            params![
+                format!("p{period_id}"),
+                owner_user_id,
+                period_id,
+                period.get("label").and_then(Value::as_str).unwrap_or(""),
+                format_time_minutes(start_minutes),
+                format_time_minutes(end_minutes),
+                serde_json::to_string(period.get("style").unwrap_or(&Value::Null))
+                    .map_err(|error| error.to_string())?,
+                now
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+        let Some(courses) = row.get("courses").and_then(Value::as_object) else {
+            continue;
+        };
+        for (weekday, course) in courses {
+            let course_id = course
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    course_card_id(weekday_to_number(weekday).unwrap_or(1), period_id)
+                });
+            let style = course.get("style").unwrap_or(&Value::Null);
+            conn.execute(
+                "INSERT INTO course_cells (
+                   id, owner_user_id, period_id, weekday, title, secondary,
+                   hidden, schedule_rule_json, base_color, style_json,
+                   col_span, row_span, merged_into, merge_direction,
+                   created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
+                params![
+                    course_id,
+                    owner_user_id,
+                    format!("p{period_id}"),
+                    weekday,
+                    course.get("title").and_then(Value::as_str).unwrap_or(""),
+                    course.get("room").and_then(Value::as_str).unwrap_or(""),
+                    if course
+                        .get("hidden")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        1
+                    } else {
+                        0
+                    },
+                    serde_json::to_string(course.get("scheduleRule").unwrap_or(&Value::Null))
+                        .map_err(|error| error.to_string())?,
+                    style.get("baseColor").and_then(Value::as_str).unwrap_or(""),
+                    serde_json::to_string(style).map_err(|error| error.to_string())?,
+                    course.get("colSpan").and_then(Value::as_i64).unwrap_or(1),
+                    course.get("rowSpan").and_then(Value::as_i64).unwrap_or(1),
+                    course.get("mergedInto").and_then(Value::as_str),
+                    course.get("mergeDirection").and_then(Value::as_str),
+                    now
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+
+            for change in course
+                .get("temporaryChanges")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let change_id = change.get("id").and_then(Value::as_str).unwrap_or("");
+                if change_id.is_empty() {
+                    continue;
+                }
+                conn.execute(
+                    "INSERT INTO temporary_changes (
+                       id, owner_user_id, course_cell_id, type, dates_json,
+                       title, secondary, base_color, style_json, created_at, updated_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                    params![
+                        change_id,
+                        owner_user_id,
+                        course.get("id").and_then(Value::as_str).unwrap_or(""),
+                        change
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .unwrap_or("cancel"),
+                        serde_json::to_string(change.get("dates").unwrap_or(&Value::Array(vec![])))
+                            .map_err(|error| error.to_string())?,
+                        change
+                            .get("replaceTitle")
+                            .or_else(|| change.get("title"))
+                            .and_then(Value::as_str)
+                            .unwrap_or(""),
+                        change
+                            .get("replaceSecondary")
+                            .or_else(|| change.get("subtitle"))
+                            .and_then(Value::as_str)
+                            .unwrap_or(""),
+                        change
+                            .get("replaceColor")
+                            .or_else(|| change.get("color"))
+                            .and_then(Value::as_str)
+                            .unwrap_or(""),
+                        serde_json::to_string(change.get("style").unwrap_or(&Value::Null))
+                            .map_err(|error| error.to_string())?,
+                        now
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn load_schedule_from_entities(
+    conn: &Connection,
+    owner_user_id: &str,
+) -> Result<Option<Value>, String> {
+    let settings: Option<(String, String, String)> = conn
+        .query_row(
+            "SELECT term_start_date, term_end_date, workday_mode
+             FROM timetable_settings
+             WHERE owner_user_id = ?1 AND deleted_at IS NULL
+             ORDER BY updated_at DESC
+             LIMIT 1",
+            params![owner_user_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
         .optional()
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let (term_start, term_end, workday_mode) = settings.unwrap_or_else(|| {
+        (
+            DEFAULT_TERM_START.to_string(),
+            DEFAULT_TERM_END.to_string(),
+            "MON_FRI".to_string(),
+        )
+    });
+    let visible_days = visible_days_from_workday_mode(&workday_mode);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, order_index, label, start_time, end_time, style_json
+             FROM period_cards
+             WHERE owner_user_id = ?1 AND deleted_at IS NULL
+             ORDER BY start_time ASC, order_index ASC",
+        )
+        .map_err(|error| error.to_string())?;
+    let period_rows = stmt
+        .query_map(params![owner_user_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+
+    let mut rows = Vec::<Value>::new();
+    for row in period_rows {
+        let (period_pk, order_index, label, start_time, end_time, style_raw) =
+            row.map_err(|error| error.to_string())?;
+        let period_id = period_pk
+            .trim_start_matches('p')
+            .parse::<i64>()
+            .unwrap_or(order_index);
+        let style = style_raw
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .unwrap_or_else(|| cloud_style_from_color_id(None, &HashMap::new()));
+        rows.push(json!({
+            "id": period_pk,
+            "period": {
+                "id": format!("p{period_id}"),
+                "label": label,
+                "time": format!("{start_time}-{end_time}"),
+                "style": style,
+            },
+            "courses": default_course_map(period_id),
+        }));
+    }
+
+    if rows.is_empty() && !user_has_schedule_entities(conn, owner_user_id)? {
+        return Ok(None);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, period_id, weekday, title, secondary, hidden,
+                    schedule_rule_json, style_json, col_span, row_span,
+                    merged_into, merge_direction
+             FROM course_cells
+             WHERE owner_user_id = ?1 AND deleted_at IS NULL",
+        )
+        .map_err(|error| error.to_string())?;
+    let courses = stmt
+        .query_map(params![owner_user_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<i64>>(8)?,
+                row.get::<_, Option<i64>>(9)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, Option<String>>(11)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+
+    let mut changes = load_desktop_temporary_changes(conn, owner_user_id)?;
+    for course in courses {
+        let (
+            id,
+            period_id,
+            weekday,
+            title,
+            secondary,
+            hidden,
+            rule_raw,
+            style_raw,
+            col_span,
+            row_span,
+            merged_into,
+            merge_direction,
+        ) = course.map_err(|error| error.to_string())?;
+        let Some(row) = rows
+            .iter_mut()
+            .find(|item| item.get("id").and_then(Value::as_str) == Some(period_id.as_str()))
+        else {
+            continue;
+        };
+        let rule = rule_raw
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .unwrap_or_else(|| {
+                json!({
+                    "weekPattern": "all",
+                    "applyWholeTerm": true,
+                    "startDate": term_start,
+                    "endDate": term_end,
+                })
+            });
+        let style = style_raw
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .unwrap_or_else(|| cloud_style_from_color_id(None, &HashMap::new()));
+        let course_changes = changes.remove(&id).unwrap_or_default();
+        row["courses"][weekday] = json!({
+            "id": id,
+            "title": title,
+            "room": secondary.unwrap_or_default(),
+            "hidden": hidden != 0,
+            "colSpan": col_span.unwrap_or(1),
+            "rowSpan": row_span.unwrap_or(1),
+            "mergedInto": merged_into,
+            "mergeDirection": merge_direction,
+            "scheduleRule": rule,
+            "style": style,
+            "temporaryChanges": course_changes,
+        });
+    }
+
+    Ok(Some(json!({
+        "id": "desktop-entity-schedule",
+        "teacherName": "",
+        "weekNumber": 1,
+        "termLabel": format!("{term_start} - {term_end}"),
+        "activeWeekday": "monday",
+        "days": default_desktop_days(visible_days),
+        "rows": rows,
+        "syncMeta": {
+            "termStart": term_start,
+            "termEnd": term_end,
+            "visibleDays": visible_days,
+        },
+    })))
+}
+
+fn load_desktop_temporary_changes(
+    conn: &Connection,
+    owner_user_id: &str,
+) -> Result<HashMap<String, Vec<Value>>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, course_cell_id, type, dates_json, title, secondary, base_color, style_json, created_at, updated_at
+             FROM temporary_changes
+             WHERE owner_user_id = ?1 AND deleted_at IS NULL",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map(params![owner_user_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, String>(9)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut result = HashMap::<String, Vec<Value>>::new();
+    for row in rows {
+        let (
+            id,
+            course_id,
+            change_type,
+            dates_raw,
+            title,
+            secondary,
+            color,
+            style_raw,
+            created_at,
+            updated_at,
+        ) = row.map_err(|error| error.to_string())?;
+        let dates = serde_json::from_str::<Value>(&dates_raw).unwrap_or_else(|_| json!([]));
+        let style = style_raw
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .unwrap_or(Value::Null);
+        let color = color.unwrap_or_else(|| "#ff3b30".to_string());
+        result.entry(course_id).or_default().push(json!({
+            "id": id,
+            "type": if change_type == "swap" { "replace" } else { change_type.as_str() },
+            "dates": dates,
+            "replaceTitle": title.unwrap_or_default(),
+            "replaceSecondary": secondary.unwrap_or_default(),
+            "replaceColor": color,
+            "color": color,
+            "style": style,
+            "createdAt": created_at,
+            "updatedAt": updated_at,
+        }));
+    }
+    Ok(result)
+}
+
+fn apply_server_changes_to_schedule(
+    conn: &Connection,
+    owner_user_id: &str,
+    changes: &[ServerChange],
+) -> Result<Vec<u32>, String> {
+    let mut processed = Vec::<u32>::new();
+    for change in changes {
+        if change.server_seq == 0 {
+            continue;
+        }
+        for diff in &change.entity_diffs {
+            let entity = diff.get("entity").and_then(Value::as_str).unwrap_or("");
+            let entity_id = diff.get("id").and_then(Value::as_str).unwrap_or("");
+            let values = diff.get("values").cloned().unwrap_or(Value::Null);
+            let accepted = filter_values_by_field_seq(
+                conn,
+                owner_user_id,
+                entity,
+                entity_id,
+                &values,
+                change.server_seq,
+            )?;
+            if accepted.as_object().is_none_or(|item| item.is_empty()) {
+                continue;
+            }
+            match entity {
+                "termSettings" => apply_cloud_term_settings(conn, owner_user_id, &accepted)?,
+                "periodCard" => apply_cloud_period_card(conn, owner_user_id, entity_id, &accepted)?,
+                "courseCard" => apply_cloud_course_card(conn, owner_user_id, entity_id, &accepted)?,
+                "temporaryChange" => {
+                    apply_cloud_temporary_change_entity(conn, owner_user_id, entity_id, &accepted)?
+                }
+                "colorProfile" => {
+                    apply_cloud_color_profile(conn, owner_user_id, entity_id, &accepted)?
+                }
+                "reminder" => {}
+                _ => {}
+            }
+        }
+        processed.push(change.server_seq);
+    }
+    Ok(processed)
+}
+
+fn filter_values_by_field_seq(
+    conn: &Connection,
+    owner_user_id: &str,
+    entity: &str,
+    entity_id: &str,
+    values: &Value,
+    server_seq: u32,
+) -> Result<Value, String> {
+    let Some(object) = values.as_object() else {
+        return Ok(Value::Null);
+    };
+    let now = now_string();
+    let mut accepted = serde_json::Map::new();
+    for (field_name, value) in object {
+        let current: Option<i64> = conn
+            .query_row(
+                "SELECT server_seq
+                 FROM sync_field_sequences
+                 WHERE owner_user_id = ?1 AND entity = ?2 AND entity_id = ?3 AND field_name = ?4",
+                params![owner_user_id, entity, entity_id, field_name],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if server_seq as i64 <= current.unwrap_or(0) {
+            continue;
+        }
+        conn.execute(
+            "INSERT INTO sync_field_sequences (
+               owner_user_id, entity, entity_id, field_name, server_seq, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(owner_user_id, entity, entity_id, field_name) DO UPDATE SET
+               server_seq = excluded.server_seq,
+               updated_at = excluded.updated_at",
+            params![
+                owner_user_id,
+                entity,
+                entity_id,
+                field_name,
+                server_seq as i64,
+                now
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        accepted.insert(field_name.clone(), value.clone());
+    }
+    Ok(Value::Object(accepted))
+}
+
+fn apply_cloud_term_settings(
+    conn: &Connection,
+    owner_user_id: &str,
+    values: &Value,
+) -> Result<(), String> {
+    let current = load_schedule_from_entities(conn, owner_user_id)?;
+    let (current_start, current_end) = current
+        .as_ref()
+        .map(infer_term_range)
+        .unwrap_or_else(|| (DEFAULT_TERM_START.to_string(), DEFAULT_TERM_END.to_string()));
+    let term_start = get_str_any(values, "termStartDate", "term_start")
+        .unwrap_or(&current_start)
+        .to_string();
+    let term_end = get_str_any(values, "termEndDate", "term_end")
+        .unwrap_or(&current_end)
+        .to_string();
+    let visible_days = get_any(values, "visibleDays", "visible_days")
+        .and_then(Value::as_i64)
+        .map(|value| value.clamp(1, 7) as usize)
+        .unwrap_or_else(|| {
+            values
+                .get("workdayMode")
+                .and_then(Value::as_str)
+                .map(visible_days_from_workday_mode)
+                .unwrap_or(5)
+        });
+    let now = now_string();
+    conn.execute(
+        "INSERT INTO timetable_settings (
+           id, owner_user_id, term_start_date, term_end_date, workday_mode,
+           period_count, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE((SELECT period_count FROM timetable_settings WHERE id = ?1 AND owner_user_id = ?2), 8), ?6, ?6)
+         ON CONFLICT(id, owner_user_id) DO UPDATE SET
+           term_start_date = excluded.term_start_date,
+           term_end_date = excluded.term_end_date,
+           workday_mode = excluded.workday_mode,
+           updated_at = excluded.updated_at,
+           deleted_at = NULL",
+        params![
+            "schedule",
+            owner_user_id,
+            term_start,
+            term_end,
+            workday_mode_from_visible_days(visible_days),
+            now,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn apply_cloud_period_card(
+    conn: &Connection,
+    owner_user_id: &str,
+    entity_id: &str,
+    values: &Value,
+) -> Result<(), String> {
+    let period_id = get_i64_any(values, "periodId", "period_id")
+        .or_else(|| parse_period_card_id(entity_id))
+        .unwrap_or(1);
+    let row_id = format!("p{period_id}");
+    if values
+        .get("deleted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let now = now_string();
+        conn.execute(
+            "INSERT INTO period_cards (
+               id, owner_user_id, order_index, label, start_time, end_time,
+               style_json, created_at, updated_at, deleted_at
+             ) VALUES (?1, ?2, ?3, '', '00:00', '00:00', ?4, ?5, ?5, ?5)
+             ON CONFLICT(id, owner_user_id) DO UPDATE SET
+               updated_at = excluded.updated_at,
+               deleted_at = excluded.deleted_at",
+            params![
+                row_id,
+                owner_user_id,
+                period_id,
+                serde_json::to_string(&cloud_style_from_color_id(None, &HashMap::new()))
+                    .map_err(|error| error.to_string())?,
+                now
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        conn.execute(
+            "UPDATE course_cells SET deleted_at = ?3, updated_at = ?3
+             WHERE period_id = ?1 AND owner_user_id = ?2",
+            params![format!("p{period_id}"), owner_user_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    let start_minutes = get_i64_any(values, "startMinutes", "start_minutes").unwrap_or(0);
+    let end_minutes = get_i64_any(values, "endMinutes", "end_minutes").unwrap_or(0);
+    let now = now_string();
+    conn.execute(
+        "INSERT INTO period_cards (
+           id, owner_user_id, order_index, label, start_time, end_time,
+           style_json, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+           COALESCE((SELECT style_json FROM period_cards WHERE id = ?1 AND owner_user_id = ?2), ?7),
+           ?8, ?8)
+         ON CONFLICT(id, owner_user_id) DO UPDATE SET
+           order_index = excluded.order_index,
+           label = excluded.label,
+           start_time = excluded.start_time,
+           end_time = excluded.end_time,
+           updated_at = excluded.updated_at,
+           deleted_at = NULL",
+        params![
+            row_id,
+            owner_user_id,
+            get_i64_any(values, "sortOrder", "sort_order").unwrap_or(period_id),
+            get_str_multi(values, &["periodName", "name"]).unwrap_or(""),
+            format_time_minutes(start_minutes),
+            format_time_minutes(end_minutes),
+            serde_json::to_string(&cloud_style_from_color_id(None, &HashMap::new()))
+                .map_err(|error| error.to_string())?,
+            now,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn apply_cloud_course_card(
+    conn: &Connection,
+    owner_user_id: &str,
+    entity_id: &str,
+    values: &Value,
+) -> Result<(), String> {
+    let (fallback_week_day, fallback_period_id) = parse_course_card_id(entity_id).unwrap_or((1, 1));
+    let week_day = get_i64_any(values, "weekDay", "week_day").unwrap_or(fallback_week_day);
+    let period_id = get_i64_any(values, "periodId", "period_id").unwrap_or(fallback_period_id);
+    let weekday = weekday_from_number(week_day);
+    let row_id = format!("p{period_id}");
+    let course_id = course_card_id(week_day, period_id);
+    let title = get_str_multi(values, &["courseName", "name"]).unwrap_or("");
+    let secondary = get_str_any(values, "auxiliaryInfo", "auxiliary_info").unwrap_or("");
+    let hidden = title.trim().is_empty();
+    ensure_local_period_row(conn, owner_user_id, period_id)?;
+    let start_date = get_str_any(values, "startDate", "start_date").unwrap_or(DEFAULT_TERM_START);
+    let end_date = get_str_any(values, "endDate", "end_date").unwrap_or(DEFAULT_TERM_END);
+    let rule = json!({
+        "weekPattern": get_str_any(values, "weekParity", "week_parity").unwrap_or("all"),
+        "applyWholeTerm": start_date == DEFAULT_TERM_START && end_date == DEFAULT_TERM_END,
+        "startDate": start_date,
+        "endDate": end_date,
+    });
+    let color_value = get_str_any(values, "colorValue", "color_value")
+        .map(argb_to_hex_color)
+        .unwrap_or_else(|| {
+            cloud_color_id_to_hex(get_str_any(values, "colorId", "color_id"), &HashMap::new())
+        });
+    let style = cloud_style_from_color_id(
+        Some(&argb_color_to_cloud_id(&hex_color_to_argb(&color_value))),
+        &HashMap::new(),
+    );
+    let now = now_string();
+    conn.execute(
+        "INSERT INTO course_cells (
+           id, owner_user_id, period_id, weekday, title, secondary, hidden,
+           schedule_rule_json, base_color, style_json,
+           col_span, row_span, merged_into, merge_direction,
+           created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+           1, 1, NULL, NULL, ?11, ?11)
+         ON CONFLICT(id, owner_user_id) DO UPDATE SET
+           period_id = excluded.period_id,
+           weekday = excluded.weekday,
+           title = excluded.title,
+           secondary = excluded.secondary,
+           hidden = excluded.hidden,
+           schedule_rule_json = excluded.schedule_rule_json,
+           base_color = excluded.base_color,
+           style_json = excluded.style_json,
+           updated_at = excluded.updated_at,
+           deleted_at = NULL",
+        params![
+            course_id,
+            owner_user_id,
+            row_id,
+            weekday,
+            title,
+            secondary,
+            if hidden { 1 } else { 0 },
+            serde_json::to_string(&rule).map_err(|error| error.to_string())?,
+            color_value,
+            serde_json::to_string(&style).map_err(|error| error.to_string())?,
+            now,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn apply_cloud_temporary_change_entity(
+    conn: &Connection,
+    owner_user_id: &str,
+    entity_id: &str,
+    values: &Value,
+) -> Result<(), String> {
+    let deleted = values
+        .get("deleted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let now = now_string();
+    if deleted {
+        conn.execute(
+            "UPDATE temporary_changes SET deleted_at = ?3, updated_at = ?3
+             WHERE owner_user_id = ?1 AND id = ?2",
+            params![owner_user_id, entity_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    let date = values.get("date").and_then(Value::as_str).unwrap_or("");
+    let course_id = get_str_multi(values, &["sourceCourseId", "courseId"]).unwrap_or("");
+    conn.execute(
+        "INSERT INTO temporary_changes (
+           id, owner_user_id, course_cell_id, type, dates_json,
+           title, secondary, base_color, style_json, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?9)
+         ON CONFLICT(id, owner_user_id) DO UPDATE SET
+           course_cell_id = excluded.course_cell_id,
+           type = excluded.type,
+           dates_json = excluded.dates_json,
+           title = excluded.title,
+           secondary = excluded.secondary,
+           base_color = excluded.base_color,
+           updated_at = excluded.updated_at,
+           deleted_at = NULL",
+        params![
+            entity_id,
+            owner_user_id,
+            course_id,
+            match values
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("cancel")
+            {
+                "swap" | "replace" => "replace",
+                _ => "cancel",
+            },
+            serde_json::to_string(&json!([date])).map_err(|error| error.to_string())?,
+            get_str_any(values, "replacementName", "replacement_name").unwrap_or(""),
+            get_str_any(
+                values,
+                "replacementAuxiliaryInfo",
+                "replacement_auxiliary_info"
+            )
+            .unwrap_or(""),
+            get_str_any(values, "replacementColorValue", "replacement_color_value")
+                .map(argb_to_hex_color)
+                .unwrap_or_else(|| "#FF3B30".to_string()),
+            now,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn apply_cloud_color_profile(
+    conn: &Connection,
+    owner_user_id: &str,
+    entity_id: &str,
+    values: &Value,
+) -> Result<(), String> {
+    let deleted = values
+        .get("deleted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let now = now_string();
+    if deleted {
+        conn.execute(
+            "UPDATE color_profiles SET deleted_at = ?3, updated_at = ?3
+             WHERE owner_user_id = ?1 AND id = ?2",
+            params![owner_user_id, entity_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    let color_value = get_str_any(values, "colorValue", "color_value")
+        .or_else(|| get_str_any(values, "color", "color"))
+        .unwrap_or("FFFF3B30");
+    conn.execute(
+        "INSERT INTO color_profiles (
+           id, owner_user_id, color_name, color_value, sort_order, is_preset, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(id, owner_user_id) DO UPDATE SET
+           color_name = excluded.color_name,
+           color_value = excluded.color_value,
+           sort_order = excluded.sort_order,
+           is_preset = excluded.is_preset,
+           updated_at = excluded.updated_at,
+           deleted_at = NULL",
+        params![
+            entity_id,
+            owner_user_id,
+            get_str_any(values, "colorName", "name").unwrap_or(""),
+            hex_color_to_argb(color_value),
+            get_i64_any(values, "sortOrder", "sort_order").unwrap_or(0),
+            if values
+                .get("isPreset")
+                .or_else(|| values.get("is_preset"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                1
+            } else {
+                0
+            },
+            now,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn ensure_local_period_row(
+    conn: &Connection,
+    owner_user_id: &str,
+    period_id: i64,
+) -> Result<(), String> {
+    let existing_deleted_at: Option<Option<String>> = conn
+        .query_row(
+            "SELECT deleted_at FROM period_cards WHERE owner_user_id = ?1 AND id = ?2",
+            params![owner_user_id, format!("p{period_id}")],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if existing_deleted_at.is_some() {
+        return Ok(());
+    }
+    let now = now_string();
+    conn.execute(
+        "INSERT INTO period_cards (
+           id, owner_user_id, order_index, label, start_time, end_time,
+           style_json, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, '00:00', '00:00', ?5, ?6, ?6)
+         ON CONFLICT(id, owner_user_id) DO NOTHING",
+        params![
+            format!("p{period_id}"),
+            owner_user_id,
+            period_id,
+            format!("Period {period_id}"),
+            serde_json::to_string(&cloud_style_from_color_id(None, &HashMap::new()))
+                .map_err(|error| error.to_string())?,
+            now,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn parse_period_card_id(entity_id: &str) -> Option<i64> {
+    if let Some(value) = entity_id.strip_prefix("periodCard_") {
+        return value.parse::<i64>().ok();
+    }
+    if let Some(value) = entity_id.strip_prefix("period_") {
+        return value.parse::<i64>().ok();
+    }
+    if let Some(value) = entity_id.strip_prefix('p') {
+        return value.parse::<i64>().ok();
+    }
+    entity_id.parse::<i64>().ok()
+}
+
+fn ack_server_changes(
+    conn: &Connection,
+    owner_user_id: &str,
+    token: &str,
+    client_id: &str,
+    server_seqs: &[u32],
+) -> Result<(), String> {
+    if server_seqs.is_empty() {
+        return Ok(());
+    }
+    let unique = server_seqs.iter().copied().collect::<HashSet<_>>();
+    let now = now_string();
+    for seq in &unique {
+        conn.execute(
+            "INSERT OR IGNORE INTO processed_server_changes (
+               owner_user_id, client_id, server_seq, processed_at
+             ) VALUES (?1, ?2, ?3, ?4)",
+            params![owner_user_id, client_id, *seq as i64, now],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    let mut processed = unique.into_iter().collect::<Vec<_>>();
+    processed.sort_unstable();
+    cloud_post_json(
+        "/sync/ack",
+        token,
+        json!({
+            "clientId": client_id,
+            "processedSeqs": processed,
+        }),
+    )?;
+    Ok(())
+}
+
+fn schedule_rows(schedule: &Value) -> Vec<&Value> {
+    schedule
+        .get("rows")
+        .and_then(Value::as_array)
+        .map(|rows| rows.iter().collect())
+        .unwrap_or_default()
+}
+
+fn infer_term_range(schedule: &Value) -> (String, String) {
+    let mut start: Option<String> = None;
+    let mut end: Option<String> = None;
+    for row in schedule_rows(schedule) {
+        let Some(courses) = row.get("courses").and_then(Value::as_object) else {
+            continue;
+        };
+        for course in courses.values() {
+            let Some(rule) = course.get("scheduleRule") else {
+                continue;
+            };
+            if let Some(value) = rule.get("startDate").and_then(Value::as_str) {
+                if start.as_deref().is_none_or(|current| value < current) {
+                    start = Some(value.to_string());
+                }
+            }
+            if let Some(value) = rule.get("endDate").and_then(Value::as_str) {
+                if end.as_deref().is_none_or(|current| value > current) {
+                    end = Some(value.to_string());
+                }
+            }
+        }
+    }
+
+    (
+        start.unwrap_or_else(|| DEFAULT_TERM_START.to_string()),
+        end.unwrap_or_else(|| DEFAULT_TERM_END.to_string()),
+    )
+}
+
+fn is_syncable_course(course: &Value) -> bool {
+    if course.get("mergedInto").and_then(Value::as_str).is_some() {
+        return false;
+    }
+    let is_hidden = course
+        .get("hidden")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let has_title = course
+        .get("title")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    let has_room = course
+        .get("room")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    let has_temporary_changes = course
+        .get("temporaryChanges")
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty());
+    if is_hidden && !has_title && !has_room && !has_temporary_changes {
+        return false;
+    }
+    true
+}
+
+fn weekday_to_number(weekday: &str) -> Option<i64> {
+    WEEKDAYS
+        .iter()
+        .position(|item| *item == weekday)
+        .map(|index| (index + 1) as i64)
+}
+
+fn weekday_from_number(week_day: i64) -> &'static str {
+    WEEKDAYS
+        .get((week_day - 1).max(0) as usize)
+        .copied()
+        .unwrap_or("monday")
+}
+
+fn course_to_cloud_payload(
+    course: &Value,
+    course_id: &str,
+    week_day: i64,
+    period_id: i64,
+    term_start: &str,
+    term_end: &str,
+) -> Value {
+    let rule = course.get("scheduleRule").unwrap_or(&Value::Null);
+    let color_value = course
+        .get("style")
+        .and_then(|style| style.get("baseColor"))
+        .and_then(Value::as_str)
+        .map(hex_color_to_argb)
+        .unwrap_or_else(|| "FFFF3B30".to_string());
+    json!({
+        "id": course_id,
+        "courseName": course.get("title").and_then(Value::as_str).unwrap_or(""),
+        "auxiliaryInfo": course.get("room").and_then(Value::as_str).unwrap_or(""),
+        "weekDay": week_day,
+        "periodId": period_id,
+        "startDate": rule.get("startDate").and_then(Value::as_str).unwrap_or(term_start),
+        "endDate": rule.get("endDate").and_then(Value::as_str).unwrap_or(term_end),
+        "weekParity": rule.get("weekPattern").and_then(Value::as_str).unwrap_or("all"),
+        "colorId": argb_color_to_cloud_id(&color_value),
+        "colorValue": color_value,
+    })
+}
+
+fn temporary_change_to_cloud_payloads(
+    change: &Value,
+    course_id: &str,
+    week_day: i64,
+    period_id: i64,
+) -> Vec<Value> {
+    let change_id = change.get("id").and_then(Value::as_str).unwrap_or("change");
+    let change_type = match change
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("cancel")
+    {
+        "swap" | "replace" => "replace",
+        value => value,
+    };
+    let replacement_color = change
+        .get("replaceColor")
+        .or_else(|| change.get("color"))
+        .and_then(Value::as_str)
+        .unwrap_or("#ff3b30");
+    let dates = change
+        .get("dates")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    let date_count = dates.len();
+
+    dates
+        .into_iter()
+        .map(|date| {
+            let id = temporary_change_cloud_id(change_id, date, date_count);
+            json!({
+                "id": id,
+                "sourceCourseId": course_id,
+                "date": date,
+                "weekDay": week_day,
+                "periodId": period_id,
+                "type": change_type,
+                "replacementName": change.get("replaceTitle").or_else(|| change.get("title")).and_then(Value::as_str).unwrap_or(""),
+                "replacementAuxiliaryInfo": change.get("replaceSecondary").or_else(|| change.get("subtitle")).and_then(Value::as_str).unwrap_or(""),
+                "replacementColorId": hex_color_to_cloud_id(replacement_color),
+                "replacementColorValue": hex_color_to_argb(replacement_color),
+                "updatedAt": change.get("updatedAt").cloned().unwrap_or(Value::Null),
+                "deletedAt": Value::Null,
+            })
+        })
+        .collect()
+}
+
+fn temporary_change_cloud_id(change_id: &str, date: &str, date_count: usize) -> String {
+    let base = strip_repeated_date_suffix(change_id, date);
+    if date_count <= 1 {
+        return base;
+    }
+    format!("{base}-{date}")
+}
+
+fn strip_repeated_date_suffix(change_id: &str, date: &str) -> String {
+    let suffix = format!("-{date}");
+    let mut value = change_id.to_string();
+    while value.ends_with(&suffix) {
+        let next_len = value.len().saturating_sub(suffix.len());
+        value.truncate(next_len);
+    }
+    if value.is_empty() {
+        change_id.to_string()
+    } else {
+        value
+    }
+}
+
+fn default_desktop_days(visible_days: usize) -> Vec<Value> {
+    let labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    WEEKDAYS
+        .iter()
+        .zip(labels.iter())
+        .take(visible_days)
+        .map(|(id, label)| json!({ "id": id, "label": label, "dateLabel": "" }))
+        .collect()
+}
+
+fn default_course_map(period_id: i64) -> Value {
+    let mut map = serde_json::Map::new();
+    for weekday in WEEKDAYS {
+        map.insert(
+            weekday.to_string(),
+            default_empty_course(period_id, weekday),
+        );
+    }
+    Value::Object(map)
+}
+
+fn default_empty_course(period_id: i64, weekday: &str) -> Value {
+    json!({
+        "id": course_card_id(weekday_to_number(weekday).unwrap_or(1), period_id),
+        "title": "",
+        "room": "",
+        "hidden": true,
+        "colSpan": 1,
+        "rowSpan": 1,
+        "scheduleRule": {
+            "weekPattern": "all",
+            "applyWholeTerm": true,
+        },
+        "style": cloud_style_from_color_id(None, &HashMap::new()),
+        "temporaryChanges": [],
+    })
+}
+
+fn get_any<'a>(item: &'a Value, primary: &str, fallback: &str) -> Option<&'a Value> {
+    item.get(primary).or_else(|| item.get(fallback))
+}
+
+fn get_str_any<'a>(item: &'a Value, primary: &str, fallback: &str) -> Option<&'a str> {
+    get_any(item, primary, fallback).and_then(Value::as_str)
+}
+
+fn get_str_multi<'a>(item: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| item.get(*key).and_then(Value::as_str))
+}
+
+fn get_i64_any(item: &Value, primary: &str, fallback: &str) -> Option<i64> {
+    get_any(item, primary, fallback).and_then(Value::as_i64)
+}
+
+fn cloud_style_from_color_id(color_id: Option<&str>, colors: &HashMap<String, String>) -> Value {
+    let base = cloud_color_id_to_hex(color_id, colors);
+    let (background, foreground) = compute_desktop_course_palette(&base);
+    json!({
+        "baseColor": base,
+        "backgroundColor": background,
+        "color": foreground,
+        "iconColor": foreground,
+        "fontFamily": "Microsoft YaHei",
+        "fontWeight": "medium",
+        "displayMode": "auto",
+    })
+}
+
+fn cloud_color_id_to_hex(color_id: Option<&str>, colors: &HashMap<String, String>) -> String {
+    let Some(id) = color_id else {
+        return "#FF3B30".to_string();
+    };
+    colors.get(id).cloned().unwrap_or_else(|| match id {
+        "red" | "red_01" => "#FF3B30".to_string(),
+        "orange" | "orange_01" => "#FF9500".to_string(),
+        "yellow" | "yellow_01" => "#FFCC00".to_string(),
+        "green" | "green_01" => "#34C759".to_string(),
+        "blue" | "blue_01" => "#007AFF".to_string(),
+        "purple" | "purple_01" => "#AF52DE".to_string(),
+        "brown" | "brown_01" => "#A2845E".to_string(),
+        _ => "#FF3B30".to_string(),
+    })
+}
+
+fn compute_desktop_course_palette(base_color: &str) -> (String, String) {
+    let (r, g, b) = parse_hex_rgb(base_color).unwrap_or((255, 255, 255));
+    let luminance = 0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64;
+    let max_channel = r.max(g).max(b) as f64;
+    let min_channel = r.min(g).min(b) as f64;
+    let saturation = (max_channel - min_channel) / 255.0;
+    let foreground = derive_readable_accent_color(r, g, b, luminance, saturation);
+    let background = blend_with_white_hex(
+        r,
+        g,
+        b,
+        if luminance > 205.0 && saturation < 0.22 {
+            0.9
+        } else {
+            0.84
+        },
+    );
+    (background, foreground)
+}
+
+fn derive_readable_accent_color(r: u8, g: u8, b: u8, luminance: f64, saturation: f64) -> String {
+    if luminance > 205.0 && saturation < 0.22 {
+        return rgb_to_hex(
+            (r as f64 * 0.45).round() as u8,
+            (g as f64 * 0.42).round() as u8,
+            (b as f64 * 0.38).round() as u8,
+        );
+    }
+
+    let mix_with_black = if luminance > 185.0 {
+        0.48
+    } else if luminance > 145.0 {
+        0.38
+    } else {
+        0.24
+    };
+    rgb_to_hex(
+        (r as f64 * (1.0 - mix_with_black)).round() as u8,
+        (g as f64 * (1.0 - mix_with_black)).round() as u8,
+        (b as f64 * (1.0 - mix_with_black)).round() as u8,
+    )
+}
+
+fn blend_with_white_hex(r: u8, g: u8, b: u8, white_weight: f64) -> String {
+    let ratio = white_weight.clamp(0.0, 1.0);
+    rgb_to_hex(
+        (r as f64 * (1.0 - ratio) + 255.0 * ratio).round() as u8,
+        (g as f64 * (1.0 - ratio) + 255.0 * ratio).round() as u8,
+        (b as f64 * (1.0 - ratio) + 255.0 * ratio).round() as u8,
+    )
+}
+
+fn parse_hex_rgb(value: &str) -> Option<(u8, u8, u8)> {
+    let normalized = value.trim().trim_start_matches('#');
+    let rgb = if normalized.len() == 8 {
+        &normalized[2..]
+    } else {
+        normalized
+    };
+    if rgb.len() != 6 {
+        return None;
+    }
+    Some((
+        u8::from_str_radix(&rgb[0..2], 16).ok()?,
+        u8::from_str_radix(&rgb[2..4], 16).ok()?,
+        u8::from_str_radix(&rgb[4..6], 16).ok()?,
+    ))
+}
+
+fn rgb_to_hex(r: u8, g: u8, b: u8) -> String {
+    format!("#{r:02x}{g:02x}{b:02x}")
+}
+
+fn workday_mode_from_visible_days(value: usize) -> &'static str {
+    match value {
+        7 => "MON_SUN",
+        6 => "MON_SAT",
+        _ => "MON_FRI",
+    }
+}
+
+fn visible_days_from_workday_mode(value: &str) -> usize {
+    match value {
+        "MON_SUN" => 7,
+        "MON_SAT" => 6,
+        _ => 5,
+    }
+}
+
+fn hex_color_to_cloud_id(color: &str) -> String {
+    argb_color_to_cloud_id(&hex_color_to_argb(color))
+}
+
+fn argb_color_to_cloud_id(color: &str) -> String {
+    let normalized = hex_color_to_argb(color);
+    preset_color_id_from_argb(&normalized)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("custom_{normalized}"))
+}
+
+fn preset_color_id_from_argb(color: &str) -> Option<&'static str> {
+    match hex_color_to_argb(color).as_str() {
+        "FFFF3B30" => Some("red"),
+        "FFFF9500" => Some("orange"),
+        "FFFFCC00" => Some("yellow"),
+        "FF34C759" => Some("green"),
+        "FF007AFF" => Some("blue"),
+        "FFAF52DE" => Some("purple"),
+        "FFA2845E" => Some("brown"),
+        // Legacy desktop preset colors mapped to the closest mobile preset.
+        "FFFF6B35" | "FFFF6B5F" => Some("orange"),
+        "FFFFD166" => Some("yellow"),
+        "FF06D6A0" | "FF22C55E" => Some("green"),
+        "FF118AB2" => Some("blue"),
+        "FF9B5DE5" | "FFF15BB5" => Some("purple"),
+        "FFF0E5CF" => Some("brown"),
+        _ => None,
+    }
+}
+
+fn hex_color_to_argb(color: &str) -> String {
+    let normalized = color.trim().trim_start_matches('#');
+    if normalized.len() == 8 {
+        normalized.to_uppercase()
+    } else if normalized.len() == 6 {
+        format!("FF{}", normalized.to_uppercase())
+    } else {
+        "FFFF3B30".to_string()
+    }
+}
+
+fn argb_to_hex_color(color: &str) -> String {
+    let normalized = color
+        .trim()
+        .trim_start_matches('#')
+        .trim_start_matches("0x");
+    let rgb = if normalized.len() == 8 {
+        &normalized[2..]
+    } else {
+        normalized
+    };
+    format!("#{}", rgb.to_uppercase())
+}
+
+fn parse_time_range(value: &str) -> (i64, i64) {
+    let mut parts = value.split('-');
+    (
+        parse_time_minutes(parts.next().unwrap_or("")),
+        parse_time_minutes(parts.next().unwrap_or("")),
+    )
+}
+
+fn parse_time_minutes(value: &str) -> i64 {
+    let mut parts = value.trim().split(':');
+    let hour = parts
+        .next()
+        .and_then(|part| part.parse::<i64>().ok())
+        .unwrap_or(0);
+    let minute = parts
+        .next()
+        .and_then(|part| part.parse::<i64>().ok())
+        .unwrap_or(0);
+    hour * 60 + minute
+}
+
+fn format_time_minutes(value: i64) -> String {
+    let hour = (value / 60).clamp(0, 23);
+    let minute = (value % 60).clamp(0, 59);
+    format!("{hour:02}:{minute:02}")
+}
+
+fn load_sync_meta_revision(
+    conn: &Connection,
+    owner_user_id: &str,
+    column: &str,
+) -> Result<Option<u32>, String> {
+    let sql = match column {
+        "last_known_cloud_revision" => {
+            "SELECT last_known_cloud_revision FROM sync_meta WHERE owner_user_id = ?1"
+        }
+        "last_synced_cloud_revision" => {
+            "SELECT last_synced_cloud_revision FROM sync_meta WHERE owner_user_id = ?1"
+        }
+        _ => return Err("unsupported sync meta revision column".to_string()),
+    };
+    conn.query_row(sql, params![owner_user_id], |row| {
+        row.get::<_, Option<i64>>(0)
+    })
+    .optional()
+    .map(|value| value.flatten().map(|item| item.max(0) as u32))
+    .map_err(|error| error.to_string())
+}
+
+fn upsert_sync_meta_synced(
+    conn: &Connection,
+    owner_user_id: &str,
+    synced_at: &str,
+    cloud_revision: u32,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO sync_meta (
+           owner_user_id,
+           last_synced_at,
+           last_checked_at,
+           last_synced_cloud_revision,
+           last_known_cloud_revision,
+           last_sync_error,
+           sync_schema_version
+         )
+         VALUES (?1, ?2, ?2, ?3, ?3, NULL, 1)
+         ON CONFLICT(owner_user_id) DO UPDATE SET
+           last_synced_at = excluded.last_synced_at,
+           last_checked_at = excluded.last_checked_at,
+           last_synced_cloud_revision = excluded.last_synced_cloud_revision,
+           last_known_cloud_revision = excluded.last_known_cloud_revision,
+           last_sync_error = NULL",
+        params![owner_user_id, synced_at, cloud_revision],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn get_meta(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT value FROM app_meta WHERE key = ?1",
+        params![key],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|error| error.to_string())
 }
 
 fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
@@ -529,7 +3344,7 @@ fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
 fn normalize_phone(phone: &str) -> Result<String, String> {
     let normalized: String = phone.chars().filter(|ch| ch.is_ascii_digit()).collect();
     if normalized.len() != 11 {
-        return Err("请输入 11 位手机号".to_string());
+        return Err("sign in before syncing".to_string());
     }
 
     Ok(normalized)
@@ -537,7 +3352,7 @@ fn normalize_phone(phone: &str) -> Result<String, String> {
 
 fn validate_password(password: &str) -> Result<(), String> {
     if password.chars().count() < 6 {
-        return Err("密码至少需要 6 位".to_string());
+        return Err("sign in before syncing".to_string());
     }
 
     Ok(())

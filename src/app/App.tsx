@@ -1,13 +1,26 @@
 ﻿import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
+import {
+  getCurrentWindow,
+  PhysicalPosition,
+  PhysicalSize,
+} from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { CSSProperties, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScheduleWidget } from "../components/ScheduleWidget/ScheduleWidget";
-import type { ToolbarSyncStatus } from "../components/ScheduleToolbar/ScheduleToolbar";
-import { defaultLocalAccountState, defaultLocalSyncStatus, type LocalAccountState, type LocalSyncStatus, type StoredSchedulePayload } from "../features/account/types";
-import { allScheduleDays, mockSchedule } from "../features/schedule/mockSchedule";
+import type { ToolbarSyncButtonState } from "../components/ScheduleToolbar/ScheduleToolbar";
+import {
+  defaultLocalAccountState,
+  defaultLocalSyncStatus,
+  type LocalAccountState,
+  type LocalSyncStatus,
+  type StoredSchedulePayload,
+} from "../features/account/types";
+import {
+  allScheduleDays,
+  mockSchedule,
+} from "../features/schedule/mockSchedule";
 import type {
   CardStyle,
   CourseCell,
@@ -29,6 +42,7 @@ import {
   type AxisColorMode,
   type CardDraft,
   type CourseCardMergeState,
+  type PeriodConfigItem,
   type SelectedCard,
   type SettingsSection,
   type TemporaryChangeDraft,
@@ -80,7 +94,11 @@ import {
   PROXY_HITBOXES_EVENT,
   PROXY_TRIGGER_EVENT,
 } from "../features/windowMode/proxyEvents";
-import type { DesktopInputEvent, WindowMode, WindowModeState } from "../features/windowMode/types";
+import type {
+  DesktopInputEvent,
+  WindowMode,
+  WindowModeState,
+} from "../features/windowMode/types";
 import type { ProxyWidgetHit } from "../features/windowMode/types";
 
 type DesktopWallpaperInfo = {
@@ -133,8 +151,8 @@ const defaultSettings: WidgetSettingsState = {
 };
 
 const DEFAULT_COURSE_ROW_HEIGHT = 66;
-const SCHEDULE_STORAGE_KEY = "teacher-schedule-widget:schedule";
 const DESKTOP_WALLPAPER_CHANGED_EVENT = "desktop-wallpaper-changed";
+const SYNC_SERVER_CHANGE_EVENT = "sync-server-change";
 const WALLPAPER_SIGNATURE_CHECK_MS = 5_000;
 
 export function App() {
@@ -150,13 +168,27 @@ export function App() {
 
   const [mode, setMode] = useState<WindowMode>("attached");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [toolbarLayoutMode, setToolbarLayoutMode] = useState<ToolbarLayoutMode>("normal");
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("schedule");
-  const [settings, setSettings] = useState<WidgetSettingsState>(defaultSettings);
-  const [schedule, setSchedule] = useState<Schedule>(() => loadPersistedSchedule() ?? mockSchedule);
-  const [accountState, setAccountState] = useState<LocalAccountState>(defaultLocalAccountState);
-  const [localSyncStatus, setLocalSyncStatus] = useState<LocalSyncStatus>(defaultLocalSyncStatus);
-  const [schedulePersistenceReady, setSchedulePersistenceReady] = useState(false);
+  const [toolbarLayoutMode, setToolbarLayoutMode] =
+    useState<ToolbarLayoutMode>("normal");
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection>("schedule");
+  const [settings, setSettings] =
+    useState<WidgetSettingsState>(defaultSettings);
+  const [schedule, setSchedule] = useState<Schedule>(() => mockSchedule);
+  const [accountState, setAccountState] = useState<LocalAccountState>(
+    defaultLocalAccountState,
+  );
+  const [localSyncStatus, setLocalSyncStatus] = useState<LocalSyncStatus>(
+    defaultLocalSyncStatus,
+  );
+  const [manualSyncRunning, setManualSyncRunning] = useState(false);
+  const [syncTip, setSyncTip] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
+  const [schedulePersistenceReady, setSchedulePersistenceReady] =
+    useState(false);
+  const [scheduleRenderVersion, setScheduleRenderVersion] = useState(0);
   const [hovered, setHovered] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
@@ -164,32 +196,62 @@ export function App() {
   const [cardDraft, setCardDraft] = useState<CardDraft>(defaultCardDraft);
   const [activeSkinId, setActiveSkinId] = useState("midnight-coral");
   const [widgetRegistry, setWidgetRegistry] = useState(defaultWidgetRegistry);
-  const [wallpaperInfo, setWallpaperInfo] = useState<DesktopWallpaperInfo | null>(null);
+  const [wallpaperInfo, setWallpaperInfo] =
+    useState<DesktopWallpaperInfo | null>(null);
   const [wallpaperVersion, setWallpaperVersion] = useState(0);
   const settingsWindowOpenRef = useRef(false);
   const cardSettingsWindowOpenRef = useRef(false);
   const settingsRef = useRef(settings);
   const scheduleRef = useRef(schedule);
   const accountStateRef = useRef(accountState);
+  const localSyncStatusRef = useRef(localSyncStatus);
+  const manualSyncRunningRef = useRef(false);
+  const syncTipTimerRef = useRef<number | null>(null);
+  const suppressNextSchedulePersistenceRef = useRef(false);
+  const cardSettingsHasPendingSaveRef = useRef(false);
+  const settingsWindowHasPendingScheduleSaveRef = useRef(false);
   const courseRowHeightRef = useRef<number | null>(null);
   const settingsSectionRef = useRef(settingsSection);
   const selectedCardRef = useRef<SelectedCard | null>(selectedCard);
   const cardDraftRef = useRef(cardDraft);
-  const cardTitleContextRef = useRef<CardSettingsTitleContext | undefined>(undefined);
+  const cardTitleContextRef = useRef<CardSettingsTitleContext | undefined>(
+    undefined,
+  );
   const wallpaperRequestIdRef = useRef(0);
   const wallpaperSignatureRef = useRef<DesktopWallpaperSignature | null>(null);
 
-  const activeWidget = widgetRegistry.widgets.find((widget) => widget.id === widgetRegistry.activeWidgetId);
-  const activeSkin = skinThemes.find((theme) => theme.id === activeSkinId) ?? skinThemes[0];
+  const activeWidget = widgetRegistry.widgets.find(
+    (widget) => widget.id === widgetRegistry.activeWidgetId,
+  );
+  const activeSkin =
+    skinThemes.find((theme) => theme.id === activeSkinId) ?? skinThemes[0];
+  const termWeekInfo = useMemo(
+    () =>
+      getTermWeekInfo(
+        settings.term.startDate,
+        settings.term.endDate,
+        getBeijingToday(),
+      ),
+    [settings.term.endDate, settings.term.startDate],
+  );
   const computedWeek = useMemo(
-    () => Math.max(1, calculateWeekNumber(settings.term.startDate, getBeijingToday()) + weekOffset),
-    [settings.term.startDate, weekOffset],
+    () =>
+      clampWeek(termWeekInfo.baseWeek + weekOffset, termWeekInfo.totalWeeks),
+    [termWeekInfo.baseWeek, termWeekInfo.totalWeeks, weekOffset],
   );
   const visibleDays = useMemo(
-    () => getVisibleDays(settings.workdayMode, weekOffset),
-    [settings.workdayMode, weekOffset],
+    () =>
+      getVisibleDays(
+        settings.workdayMode,
+        settings.term.startDate,
+        computedWeek,
+      ),
+    [computedWeek, settings.term.startDate, settings.workdayMode],
   );
-  const activeWeekday = useMemo(() => getActiveWeekdayForVisibleDays(visibleDays, getBeijingToday()), [visibleDays]);
+  const activeWeekday = useMemo(
+    () => getActiveWeekdayForVisibleDays(visibleDays, getBeijingToday()),
+    [visibleDays],
+  );
 
   const visibleSchedule = useMemo(
     () =>
@@ -199,13 +261,16 @@ export function App() {
           weekNumber: computedWeek,
           activeWeekday,
           days: visibleDays,
-          rows: limitScheduleRows(schedule.rows, settings.periodCount),
+          rows: schedule.rows.map((row) => ensureRowCourses(row)),
         },
         computedWeek,
       ),
-    [activeWeekday, computedWeek, schedule, settings.periodCount, visibleDays],
+    [activeWeekday, computedWeek, schedule, visibleDays],
   );
-  const normalizedAppearance = useMemo(() => normalizeAppearanceSettings(settings.appearance), [settings.appearance]);
+  const normalizedAppearance = useMemo(
+    () => normalizeAppearanceSettings(settings.appearance),
+    [settings.appearance],
+  );
   const widgetStyle = useMemo(
     () => buildWidgetStyle(settings.appearance, visibleSchedule, wallpaperInfo),
     [settings.appearance, visibleSchedule, wallpaperInfo],
@@ -216,18 +281,24 @@ export function App() {
       modeRef.current = state.mode;
       setMode(state.mode);
     });
-    void invoke<{ activeSkinId: string }>("load_widget_settings").then((loadedSettings) => {
-      setActiveSkinId(loadedSettings.activeSkinId);
-    });
-    void invoke<WidgetRegistryState>("load_widget_registry").then((registry) => {
-      setWidgetRegistry(registry);
-      const widget = registry.widgets.find((item) => item.id === registry.activeWidgetId);
-      if (widget) {
-        modeRef.current = widget.mode;
-        setMode(widget.mode);
-        setActiveSkinId(widget.skinId);
-      }
-    });
+    void invoke<{ activeSkinId: string }>("load_widget_settings").then(
+      (loadedSettings) => {
+        setActiveSkinId(loadedSettings.activeSkinId);
+      },
+    );
+    void invoke<WidgetRegistryState>("load_widget_registry").then(
+      (registry) => {
+        setWidgetRegistry(registry);
+        const widget = registry.widgets.find(
+          (item) => item.id === registry.activeWidgetId,
+        );
+        if (widget) {
+          modeRef.current = widget.mode;
+          setMode(widget.mode);
+          setActiveSkinId(widget.skinId);
+        }
+      },
+    );
   }, []);
 
   const refreshWallpaperInfo = useCallback(async () => {
@@ -286,7 +357,9 @@ export function App() {
 
     const checkWallpaperSignature = async () => {
       try {
-        const nextSignature = await invoke<DesktopWallpaperSignature>("get_desktop_wallpaper_signature");
+        const nextSignature = await invoke<DesktopWallpaperSignature>(
+          "get_desktop_wallpaper_signature",
+        );
         const previousSignature = wallpaperSignatureRef.current;
         if (!previousSignature) {
           wallpaperSignatureRef.current = nextSignature;
@@ -297,8 +370,7 @@ export function App() {
           wallpaperSignatureRef.current = nextSignature;
           void refreshWallpaperInfo();
         }
-      } catch {
-      }
+      } catch {}
     };
 
     const signatureTimer = window.setInterval(() => {
@@ -317,7 +389,10 @@ export function App() {
   }, [schedule]);
 
   useEffect(() => {
-    savePersistedSchedule(schedule);
+    if (suppressNextSchedulePersistenceRef.current) {
+      suppressNextSchedulePersistenceRef.current = false;
+      return;
+    }
     if (!schedulePersistenceReady) {
       return;
     }
@@ -325,16 +400,34 @@ export function App() {
     void (async () => {
       try {
         await invoke("save_current_schedule", { schedule });
-        const nextSyncStatus = await invoke<LocalSyncStatus>("load_local_sync_status");
+        const nextSyncStatus = await invoke<LocalSyncStatus>(
+          "load_local_sync_status",
+        );
+        localSyncStatusRef.current = nextSyncStatus;
         setLocalSyncStatus(nextSyncStatus);
-      } catch {
-      }
+      } catch {}
     })();
   }, [schedule, schedulePersistenceReady]);
 
   useEffect(() => {
     accountStateRef.current = accountState;
   }, [accountState]);
+
+  useEffect(() => {
+    localSyncStatusRef.current = localSyncStatus;
+  }, [localSyncStatus]);
+
+  useEffect(() => {
+    manualSyncRunningRef.current = manualSyncRunning;
+  }, [manualSyncRunning]);
+
+  useEffect(() => {
+    return () => {
+      if (syncTipTimerRef.current) {
+        window.clearTimeout(syncTipTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -360,26 +453,51 @@ export function App() {
     cardDraftRef.current = cardDraft;
   }, [cardDraft]);
 
-  const refreshAccountAndSchedule = useCallback(async () => {
+  const refreshAccountAndSchedule = useCallback(async (forceRender = false) => {
     setSchedulePersistenceReady(false);
-    const nextAccountState = await invoke<LocalAccountState>("load_local_account_state");
-    const storedSchedule = await invoke<StoredSchedulePayload<Schedule>>("load_current_schedule");
+    const nextAccountState = await invoke<LocalAccountState>(
+      "load_local_account_state",
+    );
+    const storedSchedule = await invoke<StoredSchedulePayload<Schedule>>(
+      "load_current_schedule",
+    );
     accountStateRef.current = nextAccountState;
     setAccountState(nextAccountState);
 
     if (storedSchedule.schedule) {
+      const nextSettings = deriveSettingsFromSyncedSchedule(
+        settingsRef.current,
+        storedSchedule.schedule,
+      );
+      settingsRef.current = nextSettings;
+      setSettings(nextSettings);
       scheduleRef.current = storedSchedule.schedule;
+      suppressNextSchedulePersistenceRef.current = true;
       setSchedule(storedSchedule.schedule);
-      setLocalSyncStatus(await invoke<LocalSyncStatus>("load_local_sync_status"));
+      if (forceRender) {
+        setScheduleRenderVersion((current) => current + 1);
+      }
+      const nextSyncStatus = await invoke<LocalSyncStatus>(
+        "load_local_sync_status",
+      );
+      localSyncStatusRef.current = nextSyncStatus;
+      setLocalSyncStatus(nextSyncStatus);
       setSchedulePersistenceReady(true);
       return;
     }
 
-    const fallbackSchedule = loadPersistedSchedule() ?? scheduleRef.current ?? mockSchedule;
+    const fallbackSchedule = scheduleRef.current ?? mockSchedule;
     scheduleRef.current = fallbackSchedule;
     setSchedule(fallbackSchedule);
+    if (forceRender) {
+      setScheduleRenderVersion((current) => current + 1);
+    }
     await invoke("save_current_schedule", { schedule: fallbackSchedule });
-    setLocalSyncStatus(await invoke<LocalSyncStatus>("load_local_sync_status"));
+    const nextSyncStatus = await invoke<LocalSyncStatus>(
+      "load_local_sync_status",
+    );
+    localSyncStatusRef.current = nextSyncStatus;
+    setLocalSyncStatus(nextSyncStatus);
     setSchedulePersistenceReady(true);
   }, []);
 
@@ -388,7 +506,10 @@ export function App() {
   }, [refreshAccountAndSchedule]);
 
   const switchMode = useCallback(async () => {
-    const command = modeRef.current === "attached" ? "switch_to_detached" : "switch_to_attached";
+    const command =
+      modeRef.current === "attached"
+        ? "switch_to_detached"
+        : "switch_to_attached";
     const state = await invoke<WindowModeState>(command);
     modeRef.current = state.mode;
     menuOpenRef.current = false;
@@ -397,7 +518,10 @@ export function App() {
     setMenuOpen(false);
     setHovered(false);
 
-    if (state.mode === "detached" && settingsRef.current.appearance.backgroundMode === "blur") {
+    if (
+      state.mode === "detached" &&
+      settingsRef.current.appearance.backgroundMode === "blur"
+    ) {
       const nextSettings = {
         ...settingsRef.current,
         appearance: {
@@ -423,13 +547,36 @@ export function App() {
       return;
     }
 
-    await emitTo<FloatingToolbarStatePayload>(FLOATING_TOOLBAR_WINDOW_LABEL, FLOATING_TOOLBAR_STATE_EVENT, {
-      weekNumber: computedWeek,
-      menuOpen: menuOpenRef.current,
-      toolbarLayoutMode: toolbarLayoutModeRef.current,
-      backgroundMode: normalizedAppearance.backgroundMode,
-    });
-  }, [computedWeek, normalizedAppearance.backgroundMode]);
+    await emitTo<FloatingToolbarStatePayload>(
+      FLOATING_TOOLBAR_WINDOW_LABEL,
+      FLOATING_TOOLBAR_STATE_EVENT,
+      {
+        weekNumber: computedWeek,
+        menuOpen: menuOpenRef.current,
+        toolbarLayoutMode: toolbarLayoutModeRef.current,
+        backgroundMode: normalizedAppearance.backgroundMode,
+        canPreviousWeek: computedWeek > 1,
+        canNextWeek: computedWeek < termWeekInfo.totalWeeks,
+        authLabel: getAuthToolbarLabel(accountStateRef.current),
+        authTitle: getAuthToolbarTitle(accountStateRef.current),
+        loggedIn: accountStateRef.current.loggedIn,
+        syncButtonState: getToolbarSyncButtonState(
+          accountStateRef.current,
+          localSyncStatusRef.current,
+          manualSyncRunningRef.current,
+        ),
+        syncTitle: getToolbarSyncTitle(
+          accountStateRef.current,
+          localSyncStatusRef.current,
+          manualSyncRunningRef.current,
+        ),
+      },
+    );
+  }, [
+    computedWeek,
+    normalizedAppearance.backgroundMode,
+    termWeekInfo.totalWeeks,
+  ]);
 
   const openFloatingToolbarWindow = useCallback(async () => {
     if (toolbarWindowOpenRef.current) {
@@ -453,13 +600,17 @@ export function App() {
     try {
       await invoke("open_settings_window");
       settingsWindowOpenRef.current = true;
-      await emitTo<SettingsWindowStatePayload>(SETTINGS_WINDOW_LABEL, SETTINGS_WINDOW_STATE_EVENT, {
-        settings: currentSettings,
-        activeSection: currentSection,
-        windowMode: modeRef.current,
-      });
-    } catch {
-    }
+      await emitTo<SettingsWindowStatePayload>(
+        SETTINGS_WINDOW_LABEL,
+        SETTINGS_WINDOW_STATE_EVENT,
+        {
+          settings: currentSettings,
+          activeSection: currentSection,
+          periods: schedulePeriodsForSettings(scheduleRef.current),
+          windowMode: modeRef.current,
+        },
+      );
+    } catch {}
   }, []);
 
   const openAuth = useCallback(async () => {
@@ -468,9 +619,81 @@ export function App() {
 
     try {
       await invoke("toggle_auth_window");
-    } catch {
-    }
+    } catch {}
   }, []);
+
+  const showSyncFailureTip = useCallback((message: string) => {
+    if (syncTipTimerRef.current) {
+      window.clearTimeout(syncTipTimerRef.current);
+    }
+
+    setSyncTip({
+      title: "同步失败",
+      message,
+    });
+    syncTipTimerRef.current = window.setTimeout(() => {
+      setSyncTip(null);
+      syncTipTimerRef.current = null;
+    }, 2800);
+  }, []);
+
+  const applyLocalSyncStatus = useCallback((nextStatus: LocalSyncStatus) => {
+    localSyncStatusRef.current = nextStatus;
+    setLocalSyncStatus(nextStatus);
+  }, []);
+
+  const loadLocalSyncStatus = useCallback(async () => {
+    const nextStatus = await invoke<LocalSyncStatus>("load_local_sync_status");
+    applyLocalSyncStatus(nextStatus);
+    return nextStatus;
+  }, [applyLocalSyncStatus]);
+
+  const runManualSync = useCallback(async () => {
+    if (!accountStateRef.current.loggedIn || manualSyncRunningRef.current) {
+      return;
+    }
+
+    manualSyncRunningRef.current = true;
+    setManualSyncRunning(true);
+
+    try {
+      const nextStatus = await invoke<LocalSyncStatus>(
+        "manual_sync_current_user",
+      );
+      applyLocalSyncStatus(nextStatus);
+      await refreshAccountAndSchedule();
+      if (nextStatus.lastSyncError) {
+        showSyncFailureTip(nextStatus.lastSyncError);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showSyncFailureTip(message);
+      try {
+        await loadLocalSyncStatus();
+      } catch {}
+    } finally {
+      manualSyncRunningRef.current = false;
+      setManualSyncRunning(false);
+    }
+  }, [
+    applyLocalSyncStatus,
+    loadLocalSyncStatus,
+    refreshAccountAndSchedule,
+    showSyncFailureTip,
+  ]);
+
+  const persistCurrentSchedule = useCallback(
+    async (sourceAction?: string) => {
+      await invoke(
+        "save_current_schedule",
+        sourceAction
+          ? { schedule: scheduleRef.current, sourceAction }
+          : { schedule: scheduleRef.current },
+      );
+      await loadLocalSyncStatus();
+    },
+    [loadLocalSyncStatus],
+  );
 
   const closeWidgetMenu = useCallback(async () => {
     menuClosedAtRef.current = Date.now();
@@ -480,28 +703,34 @@ export function App() {
     await hideWindowByLabel(WIDGET_MENU_WINDOW_LABEL);
   }, []);
 
-  const openWidgetMenu = useCallback(async (sourceWindowLabel?: string, anchor?: { x: number; y: number; width: number; height: number }) => {
-    if (menuOpenRef.current) {
-      await closeWidgetMenu();
-      return;
-    }
+  const openWidgetMenu = useCallback(
+    async (
+      sourceWindowLabel?: string,
+      anchor?: { x: number; y: number; width: number; height: number },
+    ) => {
+      if (menuOpenRef.current) {
+        await closeWidgetMenu();
+        return;
+      }
 
-    if (Date.now() - menuClosedAtRef.current < 300) {
-      return;
-    }
+      if (Date.now() - menuClosedAtRef.current < 300) {
+        return;
+      }
 
-    try {
-      await invoke("open_widget_menu_window");
-      await positionWidgetMenuWindow(sourceWindowLabel, anchor);
-      await emitWidgetMenuState(modeRef.current);
-      menuOpenRef.current = true;
-      setMenuOpen(true);
-    } catch {
-    }
-  }, [closeWidgetMenu]);
+      try {
+        await invoke("open_widget_menu_window");
+        await positionWidgetMenuWindow(sourceWindowLabel, anchor);
+        await emitWidgetMenuState(modeRef.current);
+        menuOpenRef.current = true;
+        setMenuOpen(true);
+      } catch {}
+    },
+    [closeWidgetMenu],
+  );
 
   const toggleToolbarLayoutMode = useCallback(async () => {
-    const nextMode: ToolbarLayoutMode = toolbarLayoutModeRef.current === "normal" ? "minimalist" : "normal";
+    const nextMode: ToolbarLayoutMode =
+      toolbarLayoutModeRef.current === "normal" ? "minimalist" : "normal";
     toolbarLayoutModeRef.current = nextMode;
     setToolbarLayoutMode(nextMode);
 
@@ -515,6 +744,12 @@ export function App() {
   }, [closeWidgetMenu]);
 
   const closeCardSettings = useCallback(async () => {
+    if (cardSettingsHasPendingSaveRef.current) {
+      try {
+        await persistCurrentSchedule("desktop.courseCard.close");
+      } catch {}
+      cardSettingsHasPendingSaveRef.current = false;
+    }
     cardSettingsWindowOpenRef.current = false;
     selectedCardRef.current = null;
     cardTitleContextRef.current = undefined;
@@ -522,115 +757,237 @@ export function App() {
     setActiveCellId(null);
     await invoke("clear_proxy_active_card");
     await hideWindowByLabel(CARD_SETTINGS_WINDOW_LABEL);
-  }, []);
+  }, [persistCurrentSchedule]);
 
-  const openCardSettings = useCallback(async (card: SelectedCard) => {
-    if (cardSettingsWindowOpenRef.current && selectedCardRef.current && isSameSelectedCard(selectedCardRef.current, card)) {
-      await closeCardSettings();
-      return;
-    }
-
-    const currentSchedule = ensureScheduleCapacity(scheduleRef.current, settingsRef.current.periodCount);
-    scheduleRef.current = currentSchedule;
-    setSchedule(currentSchedule);
-    const draft = createDraftForCard(currentSchedule, card, settingsRef.current.term);
-    const titleContext = createCardSettingsTitleContext(currentSchedule, card, visibleDays);
-    const course = card.type === "course" ? findCourse(currentSchedule, card.courseId) : undefined;
-    const temporaryChanges = course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
-    selectedCardRef.current = card;
-    cardTitleContextRef.current = titleContext;
-    cardDraftRef.current = draft;
-    setSelectedCard(card);
-    setCardDraft(draft);
-    menuOpenRef.current = false;
-    setMenuOpen(false);
-
-    try {
-      await invoke("open_card_settings_window", {
-        title: buildInitialCardSettingsWindowTitle(card, titleContext, draft),
-      });
-      cardSettingsWindowOpenRef.current = true;
-      await emitTo<CardSettingsWindowStatePayload>(CARD_SETTINGS_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_EVENT, {
-        selectedCard: card,
-        draft,
-        mergeState: getCourseCardMergeState(currentSchedule, card),
-        term: settingsRef.current.term,
-        titleContext,
-        temporaryChanges,
-        activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
-      });
-    } catch {
-    }
-  }, [closeCardSettings, visibleDays]);
-
-  useEffect(() => {
-    const unlistenUpdate = listen<SettingsWindowUpdatePayload>(SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
-      const nextSettings = event.payload.settings;
-      const previousSettings = settingsRef.current;
-      const previousAppearance = normalizeAppearanceSettings(previousSettings.appearance);
-      const nextAppearance = normalizeAppearanceSettings(nextSettings.appearance);
-      const previousAxisColor = buildAxisPalette(previousAppearance.axisColorMode, previousAppearance.backgroundColor).main;
-      const nextAxisColor = buildAxisPalette(nextAppearance.axisColorMode, nextAppearance.backgroundColor).main;
-      const shouldResizeWidget = nextSettings.periodCount !== previousSettings.periodCount;
-      const shouldMaterializeScheduleGrid =
-        nextSettings.periodCount !== previousSettings.periodCount ||
-        nextSettings.workdayMode !== previousSettings.workdayMode;
-      const shouldSyncPeriodTextColor = previousAxisColor !== nextAxisColor;
-      const addedWeekdays = getAddedWorkdays(previousSettings.workdayMode, nextSettings.workdayMode);
-
-      settingsRef.current = nextSettings;
-      if (event.payload.windowMode && event.payload.windowMode !== modeRef.current) {
-        modeRef.current = event.payload.windowMode;
-        setMode(event.payload.windowMode);
-      }
-      settingsSectionRef.current = normalizeSettingsSection(event.payload.activeSection);
-      setSettingsSection(normalizeSettingsSection(event.payload.activeSection));
-      setSettings(nextSettings);
-
-      if (shouldMaterializeScheduleGrid || shouldSyncPeriodTextColor) {
-        let nextSchedule = shouldMaterializeScheduleGrid
-          ? ensureScheduleCapacity(scheduleRef.current, nextSettings.periodCount, addedWeekdays)
-          : scheduleRef.current;
-
-        if (shouldSyncPeriodTextColor) {
-          nextSchedule = applyAxisTextColorToPeriods(nextSchedule, nextAxisColor);
-        }
-
-        scheduleRef.current = nextSchedule;
-        setSchedule(nextSchedule);
-
-        const currentCard = selectedCardRef.current;
-        if (cardSettingsWindowOpenRef.current && currentCard?.type === "period") {
-          const nextDraft = createDraftForCard(nextSchedule, currentCard, nextSettings.term);
-          cardDraftRef.current = nextDraft;
-          setCardDraft(nextDraft);
-          void emitCardSettingsState(CARD_SETTINGS_WINDOW_LABEL, currentCard, nextDraft, nextSchedule, nextSettings.term, cardTitleContextRef.current);
-        }
-      }
-
-      if (!shouldResizeWidget) {
+  const openCardSettings = useCallback(
+    async (card: SelectedCard) => {
+      if (
+        cardSettingsWindowOpenRef.current &&
+        selectedCardRef.current &&
+        isSameSelectedCard(selectedCardRef.current, card)
+      ) {
+        await closeCardSettings();
         return;
       }
 
-      const visibleScheduleForRows = applyPeriodCountToSchedule(ensureScheduleCapacity(scheduleRef.current, nextSettings.periodCount, addedWeekdays), nextSettings.periodCount);
-      const scaleFactor = window.devicePixelRatio || 1;
-      const measuredRowHeight = measureCurrentCourseRowHeight();
-      if (measuredRowHeight) {
-        courseRowHeightRef.current = courseRowHeightRef.current ?? measuredRowHeight;
-      }
-      const rowHeight = Math.round((courseRowHeightRef.current ?? measuredRowHeight ?? DEFAULT_COURSE_ROW_HEIGHT) * scaleFactor);
-      void resizeDetachedWidgetToSchedule(visibleScheduleForRows, rowHeight);
-    });
+      const currentSchedule = {
+        ...scheduleRef.current,
+        rows: scheduleRef.current.rows.map((row) => ensureRowCourses(row)),
+      };
+      scheduleRef.current = currentSchedule;
+      setSchedule(currentSchedule);
+      const draft = createDraftForCard(
+        currentSchedule,
+        card,
+        settingsRef.current.term,
+      );
+      const titleContext = createCardSettingsTitleContext(
+        currentSchedule,
+        card,
+        visibleDays,
+      );
+      const course =
+        card.type === "course"
+          ? findCourse(currentSchedule, card.courseId)
+          : undefined;
+      const temporaryChanges =
+        course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
+      selectedCardRef.current = card;
+      cardTitleContextRef.current = titleContext;
+      cardDraftRef.current = draft;
+      setSelectedCard(card);
+      setCardDraft(draft);
+      menuOpenRef.current = false;
+      setMenuOpen(false);
 
-    const unlistenRequest = listen<SettingsWindowStateRequestPayload>(SETTINGS_WINDOW_STATE_REQUEST_EVENT, (event) => {
-      void emitTo<SettingsWindowStatePayload>(event.payload.windowLabel, SETTINGS_WINDOW_STATE_EVENT, {
-        settings: settingsRef.current,
-        activeSection: normalizeSettingsSection(settingsSectionRef.current),
-        windowMode: modeRef.current,
-      });
-    });
+      try {
+        await invoke("open_card_settings_window", {
+          title: buildInitialCardSettingsWindowTitle(card, titleContext, draft),
+        });
+        cardSettingsWindowOpenRef.current = true;
+        await emitTo<CardSettingsWindowStatePayload>(
+          CARD_SETTINGS_WINDOW_LABEL,
+          CARD_SETTINGS_WINDOW_STATE_EVENT,
+          {
+            selectedCard: card,
+            draft,
+            mergeState: getCourseCardMergeState(currentSchedule, card),
+            term: settingsRef.current.term,
+            titleContext,
+            temporaryChanges,
+            activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
+          },
+        );
+      } catch {}
+    },
+    [closeCardSettings, visibleDays],
+  );
+
+  useEffect(() => {
+    const unlistenUpdate = listen<SettingsWindowUpdatePayload>(
+      SETTINGS_WINDOW_UPDATE_EVENT,
+      (event) => {
+        const nextSettings = event.payload.settings;
+        const previousSettings = settingsRef.current;
+        const previousAppearance = normalizeAppearanceSettings(
+          previousSettings.appearance,
+        );
+        const nextAppearance = normalizeAppearanceSettings(
+          nextSettings.appearance,
+        );
+        const previousAxisColor = buildAxisPalette(
+          previousAppearance.axisColorMode,
+          previousAppearance.backgroundColor,
+        ).main;
+        const nextAxisColor = buildAxisPalette(
+          nextAppearance.axisColorMode,
+          nextAppearance.backgroundColor,
+        ).main;
+        const shouldResizeWidget =
+          nextSettings.periodCount !== previousSettings.periodCount;
+        const shouldMaterializeScheduleGrid =
+          nextSettings.workdayMode !== previousSettings.workdayMode;
+        const shouldSyncPeriodTextColor = previousAxisColor !== nextAxisColor;
+        const addedWeekdays = getAddedWorkdays(
+          previousSettings.workdayMode,
+          nextSettings.workdayMode,
+        );
+        const nextPeriods =
+          event.payload.periods ??
+          schedulePeriodsForSettings(scheduleRef.current);
+        const shouldApplyPeriodConfig =
+          JSON.stringify(nextPeriods) !==
+          JSON.stringify(schedulePeriodsForSettings(scheduleRef.current));
+        const effectiveNextSettings = shouldApplyPeriodConfig
+          ? {
+              ...nextSettings,
+              periodCount: Math.max(1, Math.min(nextPeriods.length, 15)),
+            }
+          : nextSettings;
+
+        settingsRef.current = effectiveNextSettings;
+        if (
+          event.payload.windowMode &&
+          event.payload.windowMode !== modeRef.current
+        ) {
+          modeRef.current = event.payload.windowMode;
+          setMode(event.payload.windowMode);
+        }
+        settingsSectionRef.current = normalizeSettingsSection(
+          event.payload.activeSection,
+        );
+        setSettingsSection(
+          normalizeSettingsSection(event.payload.activeSection),
+        );
+        setSettings(effectiveNextSettings);
+
+        if (
+          shouldMaterializeScheduleGrid ||
+          shouldSyncPeriodTextColor ||
+          shouldApplyPeriodConfig
+        ) {
+          let nextSchedule = shouldApplyPeriodConfig
+            ? applyPeriodConfigToSchedule(scheduleRef.current, nextPeriods)
+            : shouldMaterializeScheduleGrid
+              ? {
+                  ...scheduleRef.current,
+                  rows: scheduleRef.current.rows.map((row) =>
+                    ensureRowCourses(row, addedWeekdays),
+                  ),
+                }
+              : scheduleRef.current;
+
+          if (shouldSyncPeriodTextColor) {
+            nextSchedule = applyAxisTextColorToPeriods(
+              nextSchedule,
+              nextAxisColor,
+            );
+          }
+
+          scheduleRef.current = nextSchedule;
+          suppressNextSchedulePersistenceRef.current =
+            shouldApplyPeriodConfig ||
+            suppressNextSchedulePersistenceRef.current;
+          settingsWindowHasPendingScheduleSaveRef.current =
+            shouldApplyPeriodConfig ||
+            settingsWindowHasPendingScheduleSaveRef.current;
+          setSchedule(nextSchedule);
+
+          const currentCard = selectedCardRef.current;
+          if (
+            cardSettingsWindowOpenRef.current &&
+            currentCard?.type === "period"
+          ) {
+            const nextDraft = createDraftForCard(
+              nextSchedule,
+              currentCard,
+              effectiveNextSettings.term,
+            );
+            cardDraftRef.current = nextDraft;
+            setCardDraft(nextDraft);
+            void emitCardSettingsState(
+              CARD_SETTINGS_WINDOW_LABEL,
+              currentCard,
+              nextDraft,
+              nextSchedule,
+              effectiveNextSettings.term,
+              cardTitleContextRef.current,
+            );
+          }
+        }
+
+        if (!shouldResizeWidget && !shouldApplyPeriodConfig) {
+          return;
+        }
+
+        const visibleScheduleForRows = shouldApplyPeriodConfig
+          ? scheduleRef.current
+          : {
+              ...scheduleRef.current,
+              rows: scheduleRef.current.rows.map((row) =>
+                ensureRowCourses(row, addedWeekdays),
+              ),
+            };
+        const scaleFactor = window.devicePixelRatio || 1;
+        const measuredRowHeight = measureCurrentCourseRowHeight();
+        if (measuredRowHeight) {
+          courseRowHeightRef.current =
+            courseRowHeightRef.current ?? measuredRowHeight;
+        }
+        const rowHeight = Math.round(
+          (courseRowHeightRef.current ??
+            measuredRowHeight ??
+            DEFAULT_COURSE_ROW_HEIGHT) * scaleFactor,
+        );
+        void resizeDetachedWidgetToSchedule(visibleScheduleForRows, rowHeight);
+      },
+    );
+
+    const unlistenRequest = listen<SettingsWindowStateRequestPayload>(
+      SETTINGS_WINDOW_STATE_REQUEST_EVENT,
+      (event) => {
+        void emitTo<SettingsWindowStatePayload>(
+          event.payload.windowLabel,
+          SETTINGS_WINDOW_STATE_EVENT,
+          {
+            settings: settingsRef.current,
+            activeSection: normalizeSettingsSection(settingsSectionRef.current),
+            periods: schedulePeriodsForSettings(scheduleRef.current),
+            windowMode: modeRef.current,
+          },
+        );
+      },
+    );
 
     const unlistenClose = listen(SETTINGS_WINDOW_CLOSE_EVENT, () => {
+      if (settingsWindowHasPendingScheduleSaveRef.current) {
+        void persistCurrentSchedule("desktop.periodSettings.close")
+          .then(() => {
+            settingsWindowHasPendingScheduleSaveRef.current = false;
+            return loadLocalSyncStatus();
+          })
+          .catch(() => {});
+      }
       settingsWindowOpenRef.current = false;
     });
 
@@ -639,7 +996,7 @@ export function App() {
       void unlistenRequest.then((unlisten) => unlisten());
       void unlistenClose.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [loadLocalSyncStatus, persistCurrentSchedule]);
 
   useEffect(() => {
     const unlistenClose = listen(WIDGET_MENU_CLOSE_EVENT, () => {
@@ -654,8 +1011,48 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const unlistenPromise = listen<LocalAccountState>(AUTH_STATE_CHANGED_EVENT, () => {
-      void refreshAccountAndSchedule();
+    const unlistenPromise = listen<LocalAccountState>(
+      AUTH_STATE_CHANGED_EVENT,
+      () => {
+        void refreshAccountAndSchedule();
+      },
+    );
+
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [refreshAccountAndSchedule]);
+
+  useEffect(() => {
+    if (!accountState.loggedIn) {
+      void invoke("stop_realtime_sync");
+      return;
+    }
+
+    void invoke("start_realtime_sync");
+    void invoke<LocalSyncStatus>("manual_sync_current_user")
+      .then((nextStatus) => {
+        applyLocalSyncStatus(nextStatus);
+        return refreshAccountAndSchedule(true);
+      })
+      .catch(() => {
+        void loadLocalSyncStatus();
+      });
+    return () => {
+      void invoke("stop_realtime_sync");
+    };
+  }, [
+    accountState.loggedIn,
+    accountState.ownerUserId,
+    applyLocalSyncStatus,
+    loadLocalSyncStatus,
+    refreshAccountAndSchedule,
+  ]);
+
+  useEffect(() => {
+    const unlistenPromise = listen(SYNC_SERVER_CHANGE_EVENT, (event) => {
+      console.info("sync websocket ui refresh", event.payload);
+      void refreshAccountAndSchedule(true);
     });
 
     return () => {
@@ -668,88 +1065,171 @@ export function App() {
       return;
     }
 
-    void emitTo<SettingsWindowStatePayload>(SETTINGS_WINDOW_LABEL, SETTINGS_WINDOW_STATE_EVENT, {
-      settings,
-      activeSection: normalizeSettingsSection(settingsSection),
-      windowMode: mode,
-    });
-  }, [settings, settingsSection, mode]);
+    void emitTo<SettingsWindowStatePayload>(
+      SETTINGS_WINDOW_LABEL,
+      SETTINGS_WINDOW_STATE_EVENT,
+      {
+        settings,
+        activeSection: normalizeSettingsSection(settingsSection),
+        periods: schedulePeriodsForSettings(scheduleRef.current),
+        windowMode: mode,
+      },
+    );
+  }, [settings, settingsSection, mode, scheduleRenderVersion]);
 
   useEffect(() => {
     void syncFloatingToolbarState();
-  }, [computedWeek, menuOpen, mode, syncFloatingToolbarState, toolbarLayoutMode]);
+  }, [
+    accountState,
+    computedWeek,
+    localSyncStatus,
+    manualSyncRunning,
+    menuOpen,
+    mode,
+    syncFloatingToolbarState,
+    toolbarLayoutMode,
+  ]);
 
   useEffect(() => {
-    const unlistenUpdate = listen<CardSettingsWindowUpdatePayload>(CARD_SETTINGS_WINDOW_UPDATE_EVENT, (event) => {
-      setSelectedCard(event.payload.selectedCard);
-      setCardDraft(event.payload.draft);
-      setSchedule((current) => {
-        const nextSchedule = applyCardDraft(
-          current,
+    const unlistenUpdate = listen<CardSettingsWindowUpdatePayload>(
+      CARD_SETTINGS_WINDOW_UPDATE_EVENT,
+      (event) => {
+        cardSettingsHasPendingSaveRef.current = true;
+        suppressNextSchedulePersistenceRef.current = true;
+        setSelectedCard(event.payload.selectedCard);
+        setCardDraft(event.payload.draft);
+        setSchedule((current) => {
+          const nextSchedule = applyCardDraft(
+            current,
+            event.payload.selectedCard,
+            event.payload.draft,
+            event.payload.temporaryChanges,
+            event.payload.activeTemporaryChangeId,
+          );
+          scheduleRef.current = nextSchedule;
+          void emitCardSettingsState(
+            event.payload.windowLabel,
+            event.payload.selectedCard,
+            event.payload.draft,
+            nextSchedule,
+            settingsRef.current.term,
+            cardTitleContextRef.current,
+          );
+          return nextSchedule;
+        });
+      },
+    );
+
+    const unlistenAction = listen<CardSettingsWindowActionPayload>(
+      CARD_SETTINGS_WINDOW_ACTION_EVENT,
+      (event) => {
+        const shouldPersistImmediately =
+          event.payload.action === "apply-schedule";
+        const nextSchedule =
+          event.payload.action === "apply-style" && event.payload.draft
+            ? applyGlobalStyleToSchedule(
+                scheduleRef.current,
+                event.payload.draft,
+              )
+            : event.payload.action === "apply-schedule" && event.payload.draft
+              ? applyGlobalScheduleToSchedule(
+                  scheduleRef.current,
+                  event.payload.draft,
+                )
+              : applyCourseCardAction(
+                  scheduleRef.current,
+                  event.payload.selectedCard,
+                  event.payload.action,
+                );
+        const nextDraft = createDraftForCard(
+          nextSchedule,
           event.payload.selectedCard,
-          event.payload.draft,
-          event.payload.temporaryChanges,
-          event.payload.activeTemporaryChangeId,
+          settingsRef.current.term,
         );
         scheduleRef.current = nextSchedule;
-        void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, event.payload.draft, nextSchedule, settingsRef.current.term, cardTitleContextRef.current);
-        return nextSchedule;
-      });
-    });
+        cardDraftRef.current = nextDraft;
+        setSchedule(nextSchedule);
+        setCardDraft(nextDraft);
+        suppressNextSchedulePersistenceRef.current = true;
+        if (shouldPersistImmediately) {
+          cardSettingsHasPendingSaveRef.current = false;
+          void persistCurrentSchedule("desktop.courseCard.applySchedule").catch(
+            () => {},
+          );
+        } else {
+          cardSettingsHasPendingSaveRef.current = true;
+        }
+        void emitCardSettingsState(
+          event.payload.windowLabel,
+          event.payload.selectedCard,
+          nextDraft,
+          nextSchedule,
+          settingsRef.current.term,
+          cardTitleContextRef.current,
+        );
+      },
+    );
 
-    const unlistenAction = listen<CardSettingsWindowActionPayload>(CARD_SETTINGS_WINDOW_ACTION_EVENT, (event) => {
-      const nextSchedule =
-        event.payload.action === "apply-style" && event.payload.draft
-          ? applyGlobalStyleToSchedule(scheduleRef.current, event.payload.draft)
-          : event.payload.action === "apply-schedule" && event.payload.draft
-            ? applyGlobalScheduleToSchedule(scheduleRef.current, event.payload.draft)
-            : applyCourseCardAction(scheduleRef.current, event.payload.selectedCard, event.payload.action);
-      const nextDraft = createDraftForCard(nextSchedule, event.payload.selectedCard, settingsRef.current.term);
-      scheduleRef.current = nextSchedule;
-      cardDraftRef.current = nextDraft;
-      setSchedule(nextSchedule);
-      setCardDraft(nextDraft);
-      void emitCardSettingsState(event.payload.windowLabel, event.payload.selectedCard, nextDraft, nextSchedule, settingsRef.current.term, cardTitleContextRef.current);
-    });
+    const unlistenRequest = listen<CardSettingsWindowStateRequestPayload>(
+      CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT,
+      (event) => {
+        const currentCard = selectedCardRef.current;
+        if (!currentCard) {
+          return;
+        }
 
-    const unlistenRequest = listen<CardSettingsWindowStateRequestPayload>(CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT, (event) => {
-      const currentCard = selectedCardRef.current;
-      if (!currentCard) {
-        return;
-      }
+        const currentCourse =
+          currentCard.type === "course"
+            ? findCourse(scheduleRef.current, currentCard.courseId)
+            : undefined;
 
-      const currentCourse = currentCard.type === "course" ? findCourse(scheduleRef.current, currentCard.courseId) : undefined;
-
-      void emitTo<CardSettingsWindowStatePayload>(event.payload.windowLabel, CARD_SETTINGS_WINDOW_STATE_EVENT, {
-        selectedCard: currentCard,
-          draft: cardDraftRef.current,
-          mergeState: getCourseCardMergeState(scheduleRef.current, currentCard),
-          term: settingsRef.current.term,
-          titleContext: cardTitleContextRef.current,
-          temporaryChanges: currentCourse?.temporaryChanges?.map((change) => ({
-          id: change.id,
-          type: change.type,
-          dates: change.dates,
-          title: change.title ?? change.replaceTitle ?? "",
-          subtitle: change.subtitle ?? change.replaceSecondary ?? "",
-          color: change.color ?? change.replaceColor ?? "#4f46e5",
-          style: change.style ?? {
-            fontFamily: "Microsoft YaHei",
-            fontSize: 14,
-            fontWeight: "medium",
-            displayMode: "auto",
+        void emitTo<CardSettingsWindowStatePayload>(
+          event.payload.windowLabel,
+          CARD_SETTINGS_WINDOW_STATE_EVENT,
+          {
+            selectedCard: currentCard,
+            draft: cardDraftRef.current,
+            mergeState: getCourseCardMergeState(
+              scheduleRef.current,
+              currentCard,
+            ),
+            term: settingsRef.current.term,
+            titleContext: cardTitleContextRef.current,
+            temporaryChanges:
+              currentCourse?.temporaryChanges?.map((change) => ({
+                id: change.id,
+                type: change.type,
+                dates: change.dates,
+                title: change.title ?? change.replaceTitle ?? "",
+                subtitle: change.subtitle ?? change.replaceSecondary ?? "",
+                color: change.color ?? change.replaceColor ?? "#4f46e5",
+                style: change.style ?? {
+                  fontFamily: "Microsoft YaHei",
+                  fontSize: 14,
+                  fontWeight: "medium",
+                  displayMode: "auto",
+                },
+                createdAt: change.createdAt ?? new Date().toISOString(),
+                updatedAt: change.updatedAt ?? new Date().toISOString(),
+                replaceTitle: change.replaceTitle ?? "",
+                replaceSecondary: change.replaceSecondary ?? "",
+                replaceColor: change.replaceColor ?? change.color ?? "#4f46e5",
+              })) ?? [],
+            activeTemporaryChangeId:
+              currentCourse?.temporaryChanges?.[0]?.id ?? null,
           },
-          createdAt: change.createdAt ?? new Date().toISOString(),
-          updatedAt: change.updatedAt ?? new Date().toISOString(),
-          replaceTitle: change.replaceTitle ?? "",
-          replaceSecondary: change.replaceSecondary ?? "",
-          replaceColor: change.replaceColor ?? change.color ?? "#4f46e5",
-        })) ?? [],
-        activeTemporaryChangeId: currentCourse?.temporaryChanges?.[0]?.id ?? null,
-      });
-    });
+        );
+      },
+    );
 
     const unlistenClose = listen(CARD_SETTINGS_WINDOW_CLOSE_EVENT, () => {
+      if (cardSettingsHasPendingSaveRef.current) {
+        void persistCurrentSchedule("desktop.courseCard.close")
+          .then(() => {
+            cardSettingsHasPendingSaveRef.current = false;
+          })
+          .catch(() => {});
+      }
       cardSettingsWindowOpenRef.current = false;
       selectedCardRef.current = null;
       setSelectedCard(null);
@@ -761,28 +1241,39 @@ export function App() {
       void unlistenRequest.then((unlisten) => unlisten());
       void unlistenClose.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [persistCurrentSchedule]);
 
   useEffect(() => {
-    const unlistenPromise = listen<DesktopInputEvent>("desktop-input", (event) => {
-      const payload = event.payload;
+    const unlistenPromise = listen<DesktopInputEvent>(
+      "desktop-input",
+      (event) => {
+        const payload = event.payload;
 
-      if (payload.kind === "hover" || payload.kind === "move") {
-        setHovered(true);
-      }
+        if (payload.kind === "hover" || payload.kind === "move") {
+          setHovered(true);
+        }
 
-      if (payload.kind === "leave") {
-        setHovered(false);
-      }
+        if (payload.kind === "leave") {
+          setHovered(false);
+        }
 
-      // Click handling is intentionally split by mode:
-      // detached uses normal DOM click/double-click events, attached uses the interaction proxy.
-    });
+        // Click handling is intentionally split by mode:
+        // detached uses normal DOM click/double-click events, attached uses the interaction proxy.
+      },
+    );
 
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [closeWidgetMenu, hideScheduleWidget, openAuth, openCardSettings, openSettings, openWidgetMenu, switchMode]);
+  }, [
+    closeWidgetMenu,
+    hideScheduleWidget,
+    openAuth,
+    openCardSettings,
+    openSettings,
+    openWidgetMenu,
+    switchMode,
+  ]);
 
   useEffect(() => {
     const publishHitboxes = () => {
@@ -795,7 +1286,8 @@ export function App() {
       void invoke("update_proxy_hitboxes", {
         update: {
           cssWidth: window.innerWidth || document.documentElement.clientWidth,
-          cssHeight: window.innerHeight || document.documentElement.clientHeight,
+          cssHeight:
+            window.innerHeight || document.documentElement.clientHeight,
           hitboxes,
         },
       });
@@ -821,6 +1313,7 @@ export function App() {
         hit,
         openFloatingToolbarWindow,
         openAuth,
+        runManualSync,
         openWidgetMenu,
         toggleToolbarLayoutMode,
         stepWeek,
@@ -830,24 +1323,28 @@ export function App() {
       );
     };
 
-    const unlistenPromise = listen<ProxyWidgetHit>(PROXY_TRIGGER_EVENT, (event) => {
-      if (modeRef.current !== "attached") {
-        return;
-      }
+    const unlistenPromise = listen<ProxyWidgetHit>(
+      PROXY_TRIGGER_EVENT,
+      (event) => {
+        if (modeRef.current !== "attached") {
+          return;
+        }
 
-      const hit = event.payload;
-      handleProxyWidgetHit(
-        hit,
-        openFloatingToolbarWindow,
-        openAuth,
-        openWidgetMenu,
-        toggleToolbarLayoutMode,
-        stepWeek,
-        openCardSettings,
-        setActiveCellId,
-        setMenuOpen,
-      );
-    });
+        const hit = event.payload;
+        handleProxyWidgetHit(
+          hit,
+          openFloatingToolbarWindow,
+          openAuth,
+          runManualSync,
+          openWidgetMenu,
+          toggleToolbarLayoutMode,
+          stepWeek,
+          openCardSettings,
+          setActiveCellId,
+          setMenuOpen,
+        );
+      },
+    );
 
     return () => {
       if (window.__teacherScheduleProxyTrigger) {
@@ -855,24 +1352,34 @@ export function App() {
       }
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [openAuth, openCardSettings, openFloatingToolbarWindow, openWidgetMenu, toggleToolbarLayoutMode]);
+  }, [
+    openAuth,
+    openCardSettings,
+    openFloatingToolbarWindow,
+    openWidgetMenu,
+    runManualSync,
+    toggleToolbarLayoutMode,
+  ]);
 
   useEffect(() => {
-    const unlistenPromise = listen<WidgetMenuAction>(WIDGET_MENU_ACTION_EVENT, (event) => {
-      if (event.payload === "settings") {
-        void openSettings();
-        return;
-      }
+    const unlistenPromise = listen<WidgetMenuAction>(
+      WIDGET_MENU_ACTION_EVENT,
+      (event) => {
+        if (event.payload === "settings") {
+          void openSettings();
+          return;
+        }
 
-      if (event.payload === "mode") {
-        void switchMode();
-        return;
-      }
+        if (event.payload === "mode") {
+          void switchMode();
+          return;
+        }
 
-      if (event.payload === "hide") {
-        void hideScheduleWidget();
-      }
-    });
+        if (event.payload === "hide") {
+          void hideScheduleWidget();
+        }
+      },
+    );
 
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
@@ -880,35 +1387,48 @@ export function App() {
   }, [hideScheduleWidget, openSettings, switchMode]);
 
   useEffect(() => {
-    const unlistenPromise = listen<FloatingToolbarActionPayload>(FLOATING_TOOLBAR_ACTION_EVENT, (event) => {
-      const action = event.payload.action;
-      const sourceWindowLabel = event.payload.windowLabel;
-      const anchor = event.payload.anchor;
+    const unlistenPromise = listen<FloatingToolbarActionPayload>(
+      FLOATING_TOOLBAR_ACTION_EVENT,
+      (event) => {
+        const action = event.payload.action;
+        const sourceWindowLabel = event.payload.windowLabel;
+        const anchor = event.payload.anchor;
 
-      if (action === "previous-week") {
-        void stepWeek(-1);
-        return;
-      }
+        if (action === "previous-week") {
+          void stepWeek(-1);
+          return;
+        }
 
-      if (action === "next-week") {
-        void stepWeek(1);
-        return;
-      }
+        if (action === "next-week") {
+          void stepWeek(1);
+          return;
+        }
 
-      if (action === "layout") {
-        void toggleToolbarLayoutMode();
-        return;
-      }
+        if (action === "layout") {
+          void toggleToolbarLayoutMode();
+          return;
+        }
 
-      if (action === "menu") {
-        void openWidgetMenu(sourceWindowLabel, anchor);
-      }
-    });
+        if (action === "auth") {
+          void openAuth();
+          return;
+        }
+
+        if (action === "sync") {
+          void runManualSync();
+          return;
+        }
+
+        if (action === "menu") {
+          void openWidgetMenu(sourceWindowLabel, anchor);
+        }
+      },
+    );
 
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [openWidgetMenu, switchMode, toggleToolbarLayoutMode]);
+  }, [openAuth, openWidgetMenu, runManualSync, toggleToolbarLayoutMode]);
 
   useEffect(() => {
     const unlistenPromise = listen(FLOATING_TOOLBAR_CLOSE_EVENT, () => {
@@ -961,8 +1481,16 @@ export function App() {
 
   const stepWeek = async (delta: number) => {
     setWeekOffset((current) => {
-      const baseWeek = calculateWeekNumber(settingsRef.current.term.startDate, getBeijingToday());
-      const nextOffset = Math.max(1, baseWeek + current + delta) - baseWeek;
+      const info = getTermWeekInfo(
+        settingsRef.current.term.startDate,
+        settingsRef.current.term.endDate,
+        getBeijingToday(),
+      );
+      const nextWeek = clampWeek(
+        info.baseWeek + current + delta,
+        info.totalWeeks,
+      );
+      const nextOffset = nextWeek - info.baseWeek;
       return nextOffset;
     });
   };
@@ -982,6 +1510,7 @@ export function App() {
       onPointerLeave={onPointerLeave}
     >
       <ScheduleWidget
+        key={scheduleRenderVersion}
         schedule={visibleSchedule}
         widgetTitle={activeWidget?.title ?? visibleSchedule.teacherName}
         mode={mode}
@@ -995,26 +1524,48 @@ export function App() {
         periodColumnStyle={normalizedAppearance.periodColumnStyle}
         toolbarLayoutMode={toolbarLayoutMode}
         authLabel={getAuthToolbarLabel(accountState)}
-        authTitle={getAuthToolbarTitle(accountState, localSyncStatus)}
+        authTitle={getAuthToolbarTitle(accountState)}
         loggedIn={accountState.loggedIn}
-        syncStatus={getToolbarSyncStatus(accountState, localSyncStatus)}
+        syncButtonState={getToolbarSyncButtonState(
+          accountState,
+          localSyncStatus,
+          manualSyncRunning,
+        )}
+        syncTitle={getToolbarSyncTitle(
+          accountState,
+          localSyncStatus,
+          manualSyncRunning,
+        )}
+        canPreviousWeek={computedWeek > 1}
+        canNextWeek={computedWeek < termWeekInfo.totalWeeks}
         onPreviousWeek={() => void stepWeek(-1)}
         onNextWeek={() => void stepWeek(1)}
         onToggleFloatingToolbar={openFloatingToolbarWindow}
         onToggleLayoutMode={toggleToolbarLayoutMode}
         onOpenAuth={openAuth}
+        onSync={() => void runManualSync()}
         onToggleMenu={openWidgetMenu}
         onCourseClick={onCourseClick}
         onCardEdit={openCardSettings}
         onDragStart={startWindowDrag}
         onResizeStart={startWindowResize}
       />
+      {syncTip ? (
+        <div className="sync-tip" role="status">
+          <strong>{syncTip.title}</strong>
+          <span>{syncTip.message}</span>
+        </div>
+      ) : null}
     </main>
   );
 }
 
-function getVisibleDays(mode: WorkdayMode, weekOffset: number): Schedule["days"] {
-  const days = buildVisibleDaysForWeek(mode, weekOffset);
+function getVisibleDays(
+  mode: WorkdayMode,
+  termStartDate: string,
+  weekNumber: number,
+): Schedule["days"] {
+  const days = buildVisibleDaysForWeek(mode, termStartDate, weekNumber);
   if (days.length > 0) {
     return days;
   }
@@ -1030,9 +1581,52 @@ function getVisibleDays(mode: WorkdayMode, weekOffset: number): Schedule["days"]
   return allScheduleDays.slice(0, 5);
 }
 
-function buildVisibleDaysForWeek(mode: WorkdayMode, weekOffset: number): Schedule["days"] {
+function deriveSettingsFromSyncedSchedule(
+  current: WidgetSettingsState,
+  schedule: Schedule,
+): WidgetSettingsState {
+  const syncedMeta = (
+    schedule as Schedule & {
+      syncMeta?: {
+        termStart?: string;
+        termEnd?: string;
+        visibleDays?: number;
+      };
+    }
+  ).syncMeta;
+  const rowCount = Math.max(
+    1,
+    Math.min(schedule.rows.length || current.periodCount, 15),
+  );
+  const visibleDayCount = Math.max(
+    1,
+    Math.min(syncedMeta?.visibleDays ?? schedule.days.length, 7),
+  );
+  const nextWorkdayMode: WorkdayMode =
+    visibleDayCount >= 7
+      ? "mon-sun"
+      : visibleDayCount >= 6
+        ? "mon-sat"
+        : "mon-fri";
+
+  return {
+    ...current,
+    workdayMode: nextWorkdayMode,
+    periodCount: rowCount,
+    term: {
+      startDate: syncedMeta?.termStart ?? current.term.startDate,
+      endDate: syncedMeta?.termEnd ?? current.term.endDate,
+    },
+  };
+}
+
+function buildVisibleDaysForWeek(
+  mode: WorkdayMode,
+  termStartDate: string,
+  weekNumber: number,
+): Schedule["days"] {
   const weekdays = getWorkdayWeekdays(mode);
-  const weekStart = getVisibleWeekStartDate(weekOffset);
+  const weekStart = getVisibleWeekStartDate(termStartDate, weekNumber);
   return weekdays.map((weekday, index) => {
     const current = new Date(weekStart);
     current.setDate(weekStart.getDate() + index);
@@ -1045,7 +1639,10 @@ function buildVisibleDaysForWeek(mode: WorkdayMode, weekOffset: number): Schedul
   });
 }
 
-function getActiveWeekdayForVisibleDays(days: Schedule["days"], today: Date): Weekday | undefined {
+function getActiveWeekdayForVisibleDays(
+  days: Schedule["days"],
+  today: Date,
+): Weekday | undefined {
   const todayIso = formatIsoDate(today);
   return days.find((day) => day.date === todayIso)?.id;
 }
@@ -1062,11 +1659,17 @@ function getWorkdayWeekdays(mode: WorkdayMode): Weekday[] {
   return allScheduleDays.slice(0, 5).map((day) => day.id);
 }
 
-function getVisibleWeekStartDate(weekOffset: number): Date {
-  const today = getBeijingToday();
-  const weekStart = new Date(today);
-  const mondayBasedDay = (today.getDay() + 6) % 7;
-  weekStart.setDate(today.getDate() - mondayBasedDay + weekOffset * 7);
+function getVisibleWeekStartDate(
+  termStartDate: string,
+  weekNumber: number,
+): Date {
+  const start = parseIsoDateOnly(termStartDate);
+  if (Number.isNaN(start.getTime())) {
+    return getWeekStartForTerm(getBeijingToday());
+  }
+
+  const weekStart = getWeekStartForTerm(start);
+  weekStart.setDate(weekStart.getDate() + (Math.max(1, weekNumber) - 1) * 7);
   return weekStart;
 }
 
@@ -1074,11 +1677,18 @@ function formatMonthDay(date: Date): string {
   return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function normalizeSettingsSection(section: SettingsSection | string): SettingsSection {
-  return section === "term" || section === "appearance" ? section : "schedule";
+function normalizeSettingsSection(
+  section: SettingsSection | string,
+): SettingsSection {
+  return section === "periods" || section === "term" || section === "appearance"
+    ? section
+    : "schedule";
 }
 
-function limitScheduleRows(scheduleRows: Schedule["rows"], periodCount: number): Schedule["rows"] {
+function limitScheduleRows(
+  scheduleRows: Schedule["rows"],
+  periodCount: number,
+): Schedule["rows"] {
   const count = Math.max(1, Math.min(periodCount, 15));
   const rows = scheduleRows.slice(0, count).map((row) => ensureRowCourses(row));
 
@@ -1090,16 +1700,115 @@ function limitScheduleRows(scheduleRows: Schedule["rows"], periodCount: number):
   return rows;
 }
 
-function applyPeriodCountToSchedule(schedule: Schedule, periodCount: number): Schedule {
+function applyPeriodCountToSchedule(
+  schedule: Schedule,
+  periodCount: number,
+): Schedule {
   return {
     ...schedule,
     rows: limitScheduleRows(schedule.rows, periodCount),
   };
 }
 
-function ensureScheduleCapacity(schedule: Schedule, periodCount: number, newlyVisibleWeekdays: Weekday[] = []): Schedule {
+function schedulePeriodsForSettings(schedule: Schedule): PeriodConfigItem[] {
+  return schedule.rows
+    .map((row) => ({
+      id: row.period.id,
+      label: row.period.label,
+      time: normalizePeriodTime(row.period.time),
+    }))
+    .sort(comparePeriodConfigItems);
+}
+
+function applyPeriodConfigToSchedule(
+  schedule: Schedule,
+  periods: PeriodConfigItem[],
+): Schedule {
+  const normalizedPeriods = normalizePeriodConfigItems(periods);
+  const previousRows = new Map(
+    schedule.rows.map((row) => [row.period.id, ensureRowCourses(row)]),
+  );
+  const nextRows = normalizedPeriods.map((period, index) => {
+    const existing = previousRows.get(period.id);
+    if (existing) {
+      return ensureRowCourses({
+        ...existing,
+        id: period.id,
+        period: {
+          ...existing.period,
+          id: period.id,
+          label: period.label,
+          time: period.time,
+        },
+      });
+    }
+    return createPeriodConfigRow(period, index + 1);
+  });
+
+  return {
+    ...schedule,
+    rows: nextRows,
+  };
+}
+
+function normalizePeriodConfigItems(
+  periods: PeriodConfigItem[],
+): PeriodConfigItem[] {
+  return periods
+    .map((period, index) => {
+      const order = periodOrder(period.id) ?? index + 1;
+      return {
+        id: period.id || `p${order}`,
+        label: period.label.trim() || `第${order}节`,
+        time: normalizePeriodTime(period.time),
+      };
+    })
+    .sort(comparePeriodConfigItems);
+}
+
+function comparePeriodConfigItems(
+  left: PeriodConfigItem,
+  right: PeriodConfigItem,
+): number {
+  const leftStart = timeToMinutes(left.time.split("-")[0]);
+  const rightStart = timeToMinutes(right.time.split("-")[0]);
+  if (leftStart !== rightStart) {
+    return leftStart - rightStart;
+  }
+  return (periodOrder(left.id) ?? 0) - (periodOrder(right.id) ?? 0);
+}
+
+function createPeriodConfigRow(
+  period: PeriodConfigItem,
+  order: number,
+): ScheduleRow {
+  return {
+    id: period.id || `p${order}`,
+    period: {
+      id: period.id || `p${order}`,
+      label: period.label || `第${order}节`,
+      time: normalizePeriodTime(period.time),
+    },
+    courses: Object.fromEntries(
+      allScheduleDays.map((day) => [
+        day.id,
+        createEmptyCourseCell(
+          courseCardIdFor(day.id, period.id || `p${order}`),
+        ),
+      ]),
+    ) as Record<Weekday, CourseCell>,
+  };
+}
+
+function ensureScheduleCapacity(
+  schedule: Schedule,
+  periodCount: number,
+  newlyVisibleWeekdays: Weekday[] = [],
+): Schedule {
   const count = Math.max(1, Math.min(periodCount, 15));
-  const rows = schedule.rows.map((row) => ensureRowCourses(row, newlyVisibleWeekdays));
+  const rows = schedule.rows.map((row) =>
+    ensureRowCourses(row, newlyVisibleWeekdays),
+  );
 
   while (rows.length < count) {
     const previous = rows[rows.length - 1];
@@ -1112,7 +1821,10 @@ function ensureScheduleCapacity(schedule: Schedule, periodCount: number, newlyVi
   };
 }
 
-function applyVisibleCourseRulesToSchedule(schedule: Schedule, weekNumber: number): Schedule {
+function applyVisibleCourseRulesToSchedule(
+  schedule: Schedule,
+  weekNumber: number,
+): Schedule {
   const visibleDateByWeekday = new Map<Weekday, string>();
   for (const day of schedule.days) {
     if (day.date) {
@@ -1127,19 +1839,29 @@ function applyVisibleCourseRulesToSchedule(schedule: Schedule, weekNumber: numbe
       const visibleCourses = Object.fromEntries(
         Object.entries(rowWithCourses.courses).map(([weekday, course]) => [
           weekday,
-          applyVisibleCourseForDate(course, visibleDateByWeekday.get(weekday as Weekday), weekNumber),
+          applyVisibleCourseForDate(
+            course,
+            visibleDateByWeekday.get(weekday as Weekday),
+            weekNumber,
+          ),
         ]),
       ) as Record<Weekday, CourseCell>;
 
       return {
         ...rowWithCourses,
-        courses: atomizeTemporaryMergedCoursesForRender(visibleCourses, schedule.days.map((day) => day.id)),
+        courses: atomizeTemporaryMergedCoursesForRender(
+          visibleCourses,
+          schedule.days.map((day) => day.id),
+        ),
       };
     }),
   };
 }
 
-function atomizeTemporaryMergedCoursesForRender(courses: Record<Weekday, CourseCell>, weekdays: Weekday[]): Record<Weekday, CourseCell> {
+function atomizeTemporaryMergedCoursesForRender(
+  courses: Record<Weekday, CourseCell>,
+  weekdays: Weekday[],
+): Record<Weekday, CourseCell> {
   const nextCourses = { ...courses };
   for (const weekday of weekdays) {
     const course = nextCourses[weekday];
@@ -1148,7 +1870,9 @@ function atomizeTemporaryMergedCoursesForRender(courses: Record<Weekday, CourseC
     }
 
     if (course.mergedInto && course.renderBadge === "temporary") {
-      const anchorLocation = weekdays.find((item) => nextCourses[item]?.id === course.mergedInto);
+      const anchorLocation = weekdays.find(
+        (item) => nextCourses[item]?.id === course.mergedInto,
+      );
       if (anchorLocation) {
         atomizeRenderMergeGroup(nextCourses, weekdays, anchorLocation);
       }
@@ -1156,7 +1880,11 @@ function atomizeTemporaryMergedCoursesForRender(courses: Record<Weekday, CourseC
       continue;
     }
 
-    if (!course.mergedInto && (course.colSpan ?? 1) > 1 && course.renderBadge === "temporary") {
+    if (
+      !course.mergedInto &&
+      (course.colSpan ?? 1) > 1 &&
+      course.renderBadge === "temporary"
+    ) {
       atomizeRenderMergeGroup(nextCourses, weekdays, weekday);
     }
   }
@@ -1164,7 +1892,11 @@ function atomizeTemporaryMergedCoursesForRender(courses: Record<Weekday, CourseC
   return nextCourses;
 }
 
-function atomizeRenderMergeGroup(courses: Record<Weekday, CourseCell>, weekdays: Weekday[], anchorWeekday: Weekday): void {
+function atomizeRenderMergeGroup(
+  courses: Record<Weekday, CourseCell>,
+  weekdays: Weekday[],
+  anchorWeekday: Weekday,
+): void {
   const anchor = courses[anchorWeekday];
   if (!anchor) {
     return;
@@ -1173,15 +1905,25 @@ function atomizeRenderMergeGroup(courses: Record<Weekday, CourseCell>, weekdays:
   const span = anchor.colSpan ?? 1;
   const startIndex = weekdays.indexOf(anchorWeekday);
   courses[anchorWeekday] = { ...anchor, colSpan: 1, mergedInto: undefined };
-  for (const coveredWeekday of weekdays.slice(startIndex + 1, startIndex + span)) {
+  for (const coveredWeekday of weekdays.slice(
+    startIndex + 1,
+    startIndex + span,
+  )) {
     const coveredCourse = courses[coveredWeekday];
     if (coveredCourse?.mergedInto === anchor.id) {
-      courses[coveredWeekday] = { ...coveredCourse, colSpan: 1, mergedInto: undefined };
+      courses[coveredWeekday] = {
+        ...coveredCourse,
+        colSpan: 1,
+        mergedInto: undefined,
+      };
     }
   }
 }
 
-function ensureRowCourses(row: ScheduleRow, newlyVisibleWeekdays: Weekday[] = []): ScheduleRow {
+function ensureRowCourses(
+  row: ScheduleRow,
+  newlyVisibleWeekdays: Weekday[] = [],
+): ScheduleRow {
   const newWeekdaySet = new Set(newlyVisibleWeekdays);
   return {
     ...row,
@@ -1190,11 +1932,19 @@ function ensureRowCourses(row: ScheduleRow, newlyVisibleWeekdays: Weekday[] = []
         const course = row.courses[day.id];
 
         if (newWeekdaySet.has(day.id)) {
-          return [day.id, createEmptyCourseCell(course?.id ?? `${row.id}-${day.id}`)];
+          return [
+            day.id,
+            createEmptyCourseCell(
+              course?.id ?? courseCardIdFor(day.id, row.id),
+            ),
+          ];
         }
 
         if (!course) {
-          return [day.id, createEmptyCourseCell(`${row.id}-${day.id}`)];
+          return [
+            day.id,
+            createEmptyCourseCell(courseCardIdFor(day.id, row.id)),
+          ];
         }
 
         return [day.id, course];
@@ -1203,32 +1953,40 @@ function ensureRowCourses(row: ScheduleRow, newlyVisibleWeekdays: Weekday[] = []
   };
 }
 
-function getAddedWorkdays(previousMode: WorkdayMode, nextMode: WorkdayMode): Weekday[] {
+function getAddedWorkdays(
+  previousMode: WorkdayMode,
+  nextMode: WorkdayMode,
+): Weekday[] {
   const previous = new Set(getWorkdayWeekdays(previousMode));
-  return getWorkdayWeekdays(nextMode).filter((weekday) => !previous.has(weekday));
+  return getWorkdayWeekdays(nextMode).filter(
+    (weekday) => !previous.has(weekday),
+  );
 }
 
-function applyVisibleCourseForDate(course: CourseCell, date: string | undefined, weekNumber: number): CourseCell {
-  if (course.hidden) {
-    return { ...course, renderBadge: undefined };
+function applyVisibleCourseForDate(
+  course: CourseCell,
+  date: string | undefined,
+  weekNumber: number,
+): CourseCell {
+  const temporaryCourse = applyTemporaryChangeToCourse(course, date);
+  if (temporaryCourse.renderBadge === "temporary") {
+    return { ...temporaryCourse, hidden: false };
   }
 
-  if (!isCourseScheduledForDate(course, date, weekNumber)) {
+  if (!isCourseConfigRenderable(course, date, weekNumber)) {
     return { ...course, hidden: true, renderBadge: undefined };
   }
 
-  const visibleCourse = applyTemporaryChangeToCourse(course, date);
-  if (visibleCourse.renderBadge === "temporary") {
-    return visibleCourse;
-  }
-
   return {
-    ...visibleCourse,
+    ...course,
+    hidden: false,
     renderBadge: getWeekPatternRenderBadge(course),
   };
 }
 
-function getWeekPatternRenderBadge(course: CourseCell): CourseCell["renderBadge"] {
+function getWeekPatternRenderBadge(
+  course: CourseCell,
+): CourseCell["renderBadge"] {
   if (course.scheduleRule?.weekPattern === "odd") {
     return "odd";
   }
@@ -1240,7 +1998,11 @@ function getWeekPatternRenderBadge(course: CourseCell): CourseCell["renderBadge"
   return undefined;
 }
 
-function isCourseScheduledForDate(course: CourseCell, date: string | undefined, weekNumber: number): boolean {
+function isCourseScheduledForDate(
+  course: CourseCell,
+  date: string | undefined,
+  weekNumber: number,
+): boolean {
   const rule = course.scheduleRule;
   if (!date || !rule) {
     return true;
@@ -1267,11 +2029,25 @@ function isCourseScheduledForDate(course: CourseCell, date: string | undefined, 
   return true;
 }
 
+function isCourseConfigRenderable(
+  course: CourseCell,
+  date: string | undefined,
+  weekNumber: number,
+): boolean {
+  return (
+    course.title.trim().length > 0 &&
+    isCourseScheduledForDate(course, date, weekNumber)
+  );
+}
+
 function compareIsoDate(left: string, right: string): number {
   return left.localeCompare(right);
 }
 
-function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefined): CourseCell {
+function applyTemporaryChangeToCourse(
+  course: CourseCell,
+  date: string | undefined,
+): CourseCell {
   if (!date || !course.temporaryChanges?.length) {
     return course;
   }
@@ -1288,7 +2064,11 @@ function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefin
   }
 
   if (change.type === "cancel") {
-    const baseColor = change.color ?? course.style?.baseColor ?? course.style?.backgroundColor ?? "#f8fafc";
+    const baseColor =
+      change.color ??
+      course.style?.baseColor ??
+      course.style?.backgroundColor ??
+      "#f8fafc";
     const computedPalette = computeCoursePalette(baseColor);
     return {
       ...course,
@@ -1306,7 +2086,12 @@ function applyTemporaryChangeToCourse(course: CourseCell, date: string | undefin
     };
   }
 
-  const baseColor = change.color ?? change.replaceColor ?? course.style?.baseColor ?? course.style?.backgroundColor ?? "#ffffff";
+  const baseColor =
+    change.color ??
+    change.replaceColor ??
+    course.style?.baseColor ??
+    course.style?.backgroundColor ??
+    "#ffffff";
   const computedPalette = computeCoursePalette(baseColor);
   return {
     ...course,
@@ -1329,23 +2114,26 @@ function formatIsoDate(date: Date): string {
 }
 
 function createFallbackRow(order: number, previous?: ScheduleRow): ScheduleRow {
-  const minutes = previous ? timeToMinutes(previous.period.time.split("-")[1]) : 480 + (order - 1) * 55;
+  const minutes = previous
+    ? timeToMinutes(previous.period.time.split("-")[1])
+    : 480 + (order - 1) * 55;
   const start = minutes;
   const end = minutes + 45;
   const startLabel = minutesToTime(start);
   const endLabel = minutesToTime(end);
+  const rowId = `p${order}`;
 
   return {
-    id: `row-auto-${order}`,
+    id: rowId,
     period: {
-      id: `row-auto-${order}`,
+      id: rowId,
       label: `第${order}节`,
       time: `${startLabel}-${endLabel}`,
     },
     courses: Object.fromEntries(
       allScheduleDays.map((day) => [
         day.id,
-        createEmptyCourseCell(`row-auto-${order}-${day.id}`),
+        createEmptyCourseCell(`${rowId}-${day.id}`),
       ]),
     ) as Record<Weekday, CourseCell>,
   };
@@ -1359,14 +2147,40 @@ function minutesToTime(totalMinutes: number): string {
 }
 
 function timeToMinutes(time: string): number {
-  const [hours, minutes] = time.split(":").map(Number);
+  const [hours, minutes] = normalizeTimeInput(time).split(":").map(Number);
   if (Number.isNaN(hours) || Number.isNaN(minutes)) {
     return 0;
   }
 
   return hours * 60 + minutes;
 }
-function updateActiveWidgetMode(registry: WidgetRegistryState, mode: WindowMode): WidgetRegistryState {
+
+function normalizePeriodTime(value: string): string {
+  const [start, end] = value.split("-");
+  return `${normalizeTimeInput(start)}-${normalizeTimeInput(end)}`;
+}
+
+function normalizeTimeInput(value: string | undefined): string {
+  const match = /^(\d{1,2}):(\d{1,2})$/.exec((value ?? "").trim());
+  if (!match) {
+    return "00:00";
+  }
+  const hour = Math.max(0, Math.min(23, Number(match[1])));
+  const minute = Math.max(0, Math.min(59, Number(match[2])));
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function periodOrder(id: string): number | null {
+  const match = /^p?(\d+)$/.exec(id.trim());
+  if (!match) {
+    return null;
+  }
+  return Number(match[1]);
+}
+function updateActiveWidgetMode(
+  registry: WidgetRegistryState,
+  mode: WindowMode,
+): WidgetRegistryState {
   return {
     ...registry,
     widgets: registry.widgets.map((widget) =>
@@ -1376,7 +2190,11 @@ function updateActiveWidgetMode(registry: WidgetRegistryState, mode: WindowMode)
 }
 
 async function emitWidgetMenuState(mode: WindowMode) {
-  await emitTo<WidgetMenuStatePayload>(WIDGET_MENU_WINDOW_LABEL, WIDGET_MENU_STATE_EVENT, { mode });
+  await emitTo<WidgetMenuStatePayload>(
+    WIDGET_MENU_WINDOW_LABEL,
+    WIDGET_MENU_STATE_EVENT,
+    { mode },
+  );
 }
 
 async function closeWindowByLabel(label: string) {
@@ -1389,7 +2207,9 @@ async function closeWindowByLabel(label: string) {
 }
 
 async function positionFloatingToolbarWindow() {
-  const toolbarWindow = await WebviewWindow.getByLabel(FLOATING_TOOLBAR_WINDOW_LABEL);
+  const toolbarWindow = await WebviewWindow.getByLabel(
+    FLOATING_TOOLBAR_WINDOW_LABEL,
+  );
   const widgetWindow = await WebviewWindow.getByLabel(WIDGET_WINDOW_LABEL);
   if (!toolbarWindow || !widgetWindow) {
     return;
@@ -1418,19 +2238,28 @@ function collectProxyHitboxes() {
       const courseId = element.dataset.courseId;
       const periodId = element.dataset.periodId;
       const toolbarAction = element.dataset.toolbarAction;
-      const courseHitIds = parseCourseHitIds(element.dataset.courseHitIds, courseId);
-      const courseHitAxis = element.dataset.courseHitAxis === "vertical" ? "vertical" : "horizontal";
+      const courseHitIds = parseCourseHitIds(
+        element.dataset.courseHitIds,
+        courseId,
+      );
+      const courseHitAxis =
+        element.dataset.courseHitAxis === "vertical"
+          ? "vertical"
+          : "horizontal";
       const kind = element.dataset.authButton
         ? "auth-button"
         : element.dataset.menuButton
-        ? "menu-button"
-        : element.dataset.headerToggle
-          ? "header-toggle"
-          : toolbarAction === "layout-toggle" || toolbarAction === "previous-week" || toolbarAction === "next-week"
-            ? toolbarAction
-            : courseId
-              ? "course"
-              : "period";
+          ? "menu-button"
+          : element.dataset.headerToggle
+            ? "header-toggle"
+            : toolbarAction === "layout-toggle" ||
+                toolbarAction === "previous-week" ||
+                toolbarAction === "next-week" ||
+                toolbarAction === "sync"
+              ? toolbarAction
+              : courseId
+                ? "course"
+                : "period";
 
       if (kind === "course" && courseHitIds.length > 1) {
         const segmentWidth = rect.width / courseHitIds.length;
@@ -1438,29 +2267,56 @@ function collectProxyHitboxes() {
         return courseHitIds.map((id, index) => ({
           kind,
           id,
-          left: courseHitAxis === "vertical" ? rect.left : rect.left + segmentWidth * index,
-          top: courseHitAxis === "vertical" ? rect.top + segmentHeight * index : rect.top,
-          right: courseHitAxis === "vertical" ? rect.right : index === courseHitIds.length - 1 ? rect.right : rect.left + segmentWidth * (index + 1),
-          bottom: courseHitAxis === "vertical" ? index === courseHitIds.length - 1 ? rect.bottom : rect.top + segmentHeight * (index + 1) : rect.bottom,
+          left:
+            courseHitAxis === "vertical"
+              ? rect.left
+              : rect.left + segmentWidth * index,
+          top:
+            courseHitAxis === "vertical"
+              ? rect.top + segmentHeight * index
+              : rect.top,
+          right:
+            courseHitAxis === "vertical"
+              ? rect.right
+              : index === courseHitIds.length - 1
+                ? rect.right
+                : rect.left + segmentWidth * (index + 1),
+          bottom:
+            courseHitAxis === "vertical"
+              ? index === courseHitIds.length - 1
+                ? rect.bottom
+                : rect.top + segmentHeight * (index + 1)
+              : rect.bottom,
         }));
       }
 
-      return [{
-        kind,
-        id: courseId ?? periodId,
-        left: rect.left,
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-      }];
+      return [
+        {
+          kind,
+          id: courseId ?? periodId,
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+        },
+      ];
     })
-    .filter((hitbox) => hitbox.right > hitbox.left && hitbox.bottom > hitbox.top);
+    .filter(
+      (hitbox) => hitbox.right > hitbox.left && hitbox.bottom > hitbox.top,
+    );
 
   return hitboxes;
 }
 
-function parseCourseHitIds(value: string | undefined, fallback: string | undefined): string[] {
-  const ids = value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
+function parseCourseHitIds(
+  value: string | undefined,
+  fallback: string | undefined,
+): string[] {
+  const ids =
+    value
+      ?.split(",")
+      .map((item) => item.trim())
+      .filter(Boolean) ?? [];
   if (ids.length > 0) {
     return ids;
   }
@@ -1490,6 +2346,7 @@ function handleProxyWidgetHit(
   hit: ProxyWidgetHit,
   openFloatingToolbarWindow: () => void,
   openAuth: () => Promise<void>,
+  runManualSync: () => Promise<void>,
   openWidgetMenu: () => Promise<void>,
   toggleToolbarLayoutMode: () => Promise<void>,
   stepWeek: (delta: number) => Promise<void>,
@@ -1504,6 +2361,11 @@ function handleProxyWidgetHit(
 
   if (hit.kind === "auth-button") {
     void openAuth();
+    return;
+  }
+
+  if (hit.kind === "sync") {
+    void runManualSync();
     return;
   }
 
@@ -1553,25 +2415,44 @@ async function positionWidgetMenuWindow(
   const scaleFactor = window.devicePixelRatio || 1;
   const width = 132;
   const height = 168;
-  const fallbackButton = document.querySelector<HTMLButtonElement>("[data-menu-button]");
-  const rect = anchor ? { right: anchor.x + anchor.width, bottom: anchor.y + anchor.height } : fallbackButton?.getBoundingClientRect();
+  const fallbackButton =
+    document.querySelector<HTMLButtonElement>("[data-menu-button]");
+  const rect = anchor
+    ? { right: anchor.x + anchor.width, bottom: anchor.y + anchor.height }
+    : fallbackButton?.getBoundingClientRect();
   if (!rect) {
     return;
   }
 
   const x = anchor
-    ? Math.max(8, Math.round(rect.right - Math.round((width * scaleFactor) / 2)))
-    : Math.max(8, Math.round((window.screenX + rect.right) * scaleFactor - Math.round((width * scaleFactor) / 2)));
+    ? Math.max(
+        8,
+        Math.round(rect.right - Math.round((width * scaleFactor) / 2)),
+      )
+    : Math.max(
+        8,
+        Math.round(
+          (window.screenX + rect.right) * scaleFactor -
+            Math.round((width * scaleFactor) / 2),
+        ),
+      );
   const y = anchor
     ? Math.max(8, Math.round(rect.bottom + 8))
     : Math.max(8, Math.round((window.screenY + rect.bottom) * scaleFactor + 8));
 
   await menuWindow.setPosition(new PhysicalPosition(x, y));
-  await menuWindow.setSize(new PhysicalSize(Math.round(width * scaleFactor), Math.round(height * scaleFactor)));
+  await menuWindow.setSize(
+    new PhysicalSize(
+      Math.round(width * scaleFactor),
+      Math.round(height * scaleFactor),
+    ),
+  );
 }
 
 function measureCurrentCourseRowHeight(): number | null {
-  const row = document.querySelector<HTMLElement>(".timetable-period-column .column-item");
+  const row = document.querySelector<HTMLElement>(
+    ".timetable-period-column .column-item",
+  );
   if (!row) {
     return null;
   }
@@ -1579,7 +2460,10 @@ function measureCurrentCourseRowHeight(): number | null {
   return Math.round(row.getBoundingClientRect().height);
 }
 
-async function resizeDetachedWidgetToSchedule(schedule: Schedule, rowHeight: number) {
+async function resizeDetachedWidgetToSchedule(
+  schedule: Schedule,
+  rowHeight: number,
+) {
   const widgetWindow = await WebviewWindow.getByLabel("widget");
   if (!widgetWindow) {
     return;
@@ -1605,21 +2489,81 @@ async function resizeDetachedWidgetToSchedule(schedule: Schedule, rowHeight: num
     contentPadding * 2;
   const innerWidth = inner.width;
 
-  await widgetWindow.setSize(new PhysicalSize(Math.round(innerWidth + chromeWidth), Math.round(innerHeight + chromeHeight)));
+  await widgetWindow.setSize(
+    new PhysicalSize(
+      Math.round(innerWidth + chromeWidth),
+      Math.round(innerHeight + chromeHeight),
+    ),
+  );
   await invoke("sync_active_widget_bounds");
 }
 
-function calculateWeekNumber(startDate: string, currentDate: Date): number {
+function getTermWeekInfo(
+  startDate: string,
+  endDate: string,
+  currentDate: Date,
+): { baseWeek: number; totalWeeks: number } {
   const start = parseIsoDateOnly(startDate);
+  const end = parseIsoDateOnly(endDate);
+  const totalWeeks = calculateTermTotalWeeks(start, end);
+
   if (Number.isNaN(start.getTime())) {
+    return { baseWeek: 1, totalWeeks };
+  }
+
+  const weekBase = getWeekStartForTerm(start);
+  const endOnly = Number.isNaN(end.getTime())
+    ? start
+    : new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const currentDayOnly = new Date(
+    currentDate.getFullYear(),
+    currentDate.getMonth(),
+    currentDate.getDate(),
+  );
+
+  if (currentDayOnly.getTime() < weekBase.getTime()) {
+    return { baseWeek: 1, totalWeeks };
+  }
+
+  if (currentDayOnly.getTime() > endOnly.getTime()) {
+    return { baseWeek: totalWeeks, totalWeeks };
+  }
+
+  const diffDays = Math.floor(
+    (currentDayOnly.getTime() - weekBase.getTime()) / 86400000,
+  );
+  return {
+    baseWeek: clampWeek(Math.floor(diffDays / 7) + 1, totalWeeks),
+    totalWeeks,
+  };
+}
+
+function calculateTermTotalWeeks(start: Date, end: Date): number {
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     return 1;
   }
 
-  const currentDayOnly = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
-  const startDay = start.getTime();
-  const currentDay = currentDayOnly.getTime();
-  const diffDays = Math.floor((currentDay - startDay) / 86400000);
+  const weekBase = getWeekStartForTerm(start);
+  const endOnly = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const diffDays = Math.floor(
+    (endOnly.getTime() - weekBase.getTime()) / 86400000,
+  );
   return Math.max(1, Math.floor(diffDays / 7) + 1);
+}
+
+function getWeekStartForTerm(start: Date): Date {
+  const normalized = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate(),
+  );
+  const mondayBasedDay = (normalized.getDay() + 6) % 7;
+  normalized.setDate(normalized.getDate() - mondayBasedDay);
+  return normalized;
+}
+
+function clampWeek(week: number, totalWeeks: number): number {
+  return Math.max(1, Math.min(Math.max(1, totalWeeks), week));
 }
 
 function getBeijingToday(): Date {
@@ -1633,9 +2577,17 @@ function getBeijingToday(): Date {
   const month = Number(parts.find((part) => part.type === "month")?.value);
   const day = Number(parts.find((part) => part.type === "day")?.value);
 
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
     const fallback = new Date();
-    return new Date(fallback.getFullYear(), fallback.getMonth(), fallback.getDate());
+    return new Date(
+      fallback.getFullYear(),
+      fallback.getMonth(),
+      fallback.getDate(),
+    );
   }
 
   return new Date(year, month - 1, day);
@@ -1650,7 +2602,10 @@ function parseIsoDateOnly(value: string): Date {
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
 
-function isSameWallpaperSignature(left: DesktopWallpaperSignature, right: DesktopWallpaperSignature): boolean {
+function isSameWallpaperSignature(
+  left: DesktopWallpaperSignature,
+  right: DesktopWallpaperSignature,
+): boolean {
   return (
     left.path === right.path &&
     left.fileSize === right.fileSize &&
@@ -1674,7 +2629,10 @@ function buildWidgetStyle(
 ): CSSProperties {
   const normalizedAppearance = normalizeAppearanceSettings(appearance);
   const gridLineOpacity = String(normalizedAppearance.gridLineOpacity / 100);
-  const blurIntensity = normalizedAppearance.backgroundMode === "blur" ? normalizedAppearance.blurIntensity : 0;
+  const blurIntensity =
+    normalizedAppearance.backgroundMode === "blur"
+      ? normalizedAppearance.blurIntensity
+      : 0;
   const blurMix = clamp01(blurIntensity / 40);
   const backgroundFill = buildRgbaColor(
     normalizedAppearance.backgroundColor,
@@ -1686,8 +2644,12 @@ function buildWidgetStyle(
     normalizedAppearance.gridLineWidth,
     normalizedAppearance.gridLineOpacity,
   );
-  const axisPalette = buildAxisPalette(normalizedAppearance.axisColorMode, normalizedAppearance.backgroundColor);
-  const deviceScale = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+  const axisPalette = buildAxisPalette(
+    normalizedAppearance.axisColorMode,
+    normalizedAppearance.backgroundColor,
+  );
+  const deviceScale =
+    typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   return {
     "--column-gap": `${normalizedAppearance.columnGap}px`,
     "--outer-padding": "16px",
@@ -1696,7 +2658,9 @@ function buildWidgetStyle(
     "--widget-background-mode": normalizedAppearance.backgroundMode,
     "--widget-background-color": normalizedAppearance.backgroundColor,
     "--widget-background-fill": backgroundFill,
-    "--widget-background-opacity": String(normalizedAppearance.backgroundOpacity / 100),
+    "--widget-background-opacity": String(
+      normalizedAppearance.backgroundOpacity / 100,
+    ),
     "--widget-blur-intensity": `${normalizedAppearance.blurIntensity}px`,
     "--widget-blur-filter": `blur(${normalizedAppearance.blurIntensity}px) saturate(1.08)`,
     "--row-divider": normalizedAppearance.gridLineColor,
@@ -1706,7 +2670,9 @@ function buildWidgetStyle(
     "--row-divider-thickness": `${normalizedAppearance.gridLineWidth}px`,
     "--row-divider-offset": `${normalizedAppearance.rowDividerHeight}px`,
     "--schedule-card-radius": `${normalizedAppearance.cardRadius}px`,
-    "--schedule-card-shadow": mapCardShadowStrength(normalizedAppearance.cardShadowStrength),
+    "--schedule-card-shadow": mapCardShadowStrength(
+      normalizedAppearance.cardShadowStrength,
+    ),
     "--schedule-grid-line-style": normalizedAppearance.gridLineType,
     "--schedule-grid-line-color": normalizedAppearance.gridLineColor,
     "--schedule-grid-line-width": `${normalizedAppearance.gridLineWidth}px`,
@@ -1719,19 +2685,31 @@ function buildWidgetStyle(
     "--axis-solid-bg": axisPalette.solidBg,
     "--axis-solid-border": axisPalette.solidBorder,
     "--widget-wallpaper-url": buildWallpaperCssImage(wallpaperInfo),
-    "--widget-wallpaper-offset-x": wallpaperInfo ? `${Math.round((wallpaperInfo.wallpaperLeft - wallpaperInfo.windowLeft) / deviceScale)}px` : "0px",
-    "--widget-wallpaper-offset-y": wallpaperInfo ? `${Math.round((wallpaperInfo.wallpaperTop - wallpaperInfo.windowTop) / deviceScale)}px` : "0px",
-    "--widget-wallpaper-width": wallpaperInfo ? `${Math.max(1, Math.round(wallpaperInfo.wallpaperWidth / deviceScale))}px` : "100%",
-    "--widget-wallpaper-height": wallpaperInfo ? `${Math.max(1, Math.round(wallpaperInfo.wallpaperHeight / deviceScale))}px` : "100%",
+    "--widget-wallpaper-offset-x": wallpaperInfo
+      ? `${Math.round((wallpaperInfo.wallpaperLeft - wallpaperInfo.windowLeft) / deviceScale)}px`
+      : "0px",
+    "--widget-wallpaper-offset-y": wallpaperInfo
+      ? `${Math.round((wallpaperInfo.wallpaperTop - wallpaperInfo.windowTop) / deviceScale)}px`
+      : "0px",
+    "--widget-wallpaper-width": wallpaperInfo
+      ? `${Math.max(1, Math.round(wallpaperInfo.wallpaperWidth / deviceScale))}px`
+      : "100%",
+    "--widget-wallpaper-height": wallpaperInfo
+      ? `${Math.max(1, Math.round(wallpaperInfo.wallpaperHeight / deviceScale))}px`
+      : "100%",
   } as CSSProperties;
 }
 
-function buildWallpaperCssImage(wallpaperInfo: DesktopWallpaperInfo | null): string {
+function buildWallpaperCssImage(
+  wallpaperInfo: DesktopWallpaperInfo | null,
+): string {
   const source = buildWallpaperSourceUrl(wallpaperInfo);
   return source ? `url("${escapeCssUrl(source)}")` : "none";
 }
 
-function buildWallpaperSourceUrl(wallpaperInfo: DesktopWallpaperInfo | null): string | null {
+function buildWallpaperSourceUrl(
+  wallpaperInfo: DesktopWallpaperInfo | null,
+): string | null {
   if (!wallpaperInfo) {
     return null;
   }
@@ -1755,7 +2733,10 @@ function safeConvertFileSrc(path: string): string | null {
   }
 }
 
-function appendWallpaperCacheKey(source: string, signature: DesktopWallpaperSignature): string {
+function appendWallpaperCacheKey(
+  source: string,
+  signature: DesktopWallpaperSignature,
+): string {
   const keyParts = [
     signature.path ?? "",
     signature.fileSize ?? "",
@@ -1773,7 +2754,12 @@ function appendWallpaperCacheKey(source: string, signature: DesktopWallpaperSign
 function escapeCssUrl(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
-function buildGridLineBorder(type: "none" | "solid" | "dashed" | "dotted", color: string, width: number, opacity: number): string {
+function buildGridLineBorder(
+  type: "none" | "solid" | "dashed" | "dotted",
+  color: string,
+  width: number,
+  opacity: number,
+): string {
   if (type === "none" || opacity <= 0 || width <= 0) {
     return "none";
   }
@@ -1801,7 +2787,9 @@ function buildAxisPalette(
   solidBg: string;
   solidBorder: string;
 } {
-  const useLightText = mode === "light" || (mode === "auto" && getHexLuminance(backgroundColor) < 138);
+  const useLightText =
+    mode === "light" ||
+    (mode === "auto" && getHexLuminance(backgroundColor) < 138);
 
   if (useLightText) {
     return {
@@ -1835,7 +2823,6 @@ function getHexLuminance(value: string): number {
 
   return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
 }
-
 
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) {
@@ -1905,7 +2892,9 @@ function createCardSettingsTitleContext(
     return undefined;
   }
 
-  const day = visibleDays.find((item) => item.id === location.weekday) ?? allScheduleDays.find((item) => item.id === location.weekday);
+  const day =
+    visibleDays.find((item) => item.id === location.weekday) ??
+    allScheduleDays.find((item) => item.id === location.weekday);
   return {
     date: day?.date,
     dateLabel: day?.dateLabel,
@@ -1928,7 +2917,9 @@ function buildInitialCardSettingsWindowTitle(
     titleContext?.weekdayLabel,
     titleContext?.periodLabel,
     courseTitle,
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return ["课程设置", "｜", context || "未命名课程"].join(" ");
 }
@@ -1938,11 +2929,16 @@ function createDraftForCard(
   card: SelectedCard,
   term: WidgetSettingsState["term"],
 ): CardDraft {
-  const base = { ...defaultCardDraft, startDate: term.startDate, endDate: term.endDate };
+  const base = {
+    ...defaultCardDraft,
+    startDate: term.startDate,
+    endDate: term.endDate,
+  };
 
   if (card.type === "course") {
     const course = findCourse(schedule, card.courseId);
-    const courseBaseColor = course?.style?.baseColor ?? course?.style?.backgroundColor ?? "#fff8e1";
+    const courseBaseColor =
+      course?.style?.baseColor ?? course?.style?.backgroundColor ?? "#FF3B30";
     const computedPalette = computeCoursePalette(courseBaseColor);
     const displayMode = course?.style?.displayMode ?? base.displayMode;
     return {
@@ -1969,7 +2965,8 @@ function createDraftForCard(
       ...base,
       title: period?.label ?? "",
       secondary: period?.time ?? "",
-      backgroundColor: period?.style?.baseColor ?? period?.style?.backgroundColor ?? "#ffffff",
+      backgroundColor:
+        period?.style?.baseColor ?? period?.style?.backgroundColor ?? "#ffffff",
       color: period?.style?.color ?? "#ffffff",
       iconColor: period?.style?.iconColor ?? period?.style?.color ?? "#ffffff",
       fontFamily: period?.style?.fontFamily ?? base.fontFamily,
@@ -1996,16 +2993,30 @@ function applyCardDraft(
     selectedCard.type === "course" && temporaryChanges !== undefined
       ? splitCourseCardForTemporaryChange(schedule, selectedCard.courseId)
       : schedule;
-  const style = selectedCard.type === "period" ? toPeriodCardStyle(draft) : toCardStyle(draft);
+  const style =
+    selectedCard.type === "period"
+      ? toPeriodCardStyle(draft)
+      : toCardStyle(draft);
   const targetCourseIds =
     selectedCard.type === "course" && temporaryChanges === undefined
       ? getCourseMergeGroupIds(sourceSchedule, selectedCard.courseId)
       : selectedCard.type === "course"
         ? new Set([selectedCard.courseId])
         : undefined;
-  const rows = sourceSchedule.rows.map((row) => applyDraftToRow(row, selectedCard, draft, style, temporaryChanges, targetCourseIds));
+  const rows = sourceSchedule.rows.map((row) =>
+    applyDraftToRow(
+      row,
+      selectedCard,
+      draft,
+      style,
+      temporaryChanges,
+      targetCourseIds,
+    ),
+  );
   const nextSchedule = { ...sourceSchedule, rows };
-  return selectedCard.type === "course" ? autoSplitInconsistentMergedCourse(nextSchedule, selectedCard.courseId) : nextSchedule;
+  return selectedCard.type === "course"
+    ? autoSplitInconsistentMergedCourse(nextSchedule, selectedCard.courseId)
+    : nextSchedule;
 }
 
 function emitCardSettingsState(
@@ -2016,48 +3027,111 @@ function emitCardSettingsState(
   term: WidgetSettingsState["term"],
   titleContext?: CardSettingsTitleContext,
 ) {
-  const course = selectedCard.type === "course" ? findCourse(schedule, selectedCard.courseId) : undefined;
-  const temporaryChanges = course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
-  return emitTo<CardSettingsWindowStatePayload>(windowLabel, CARD_SETTINGS_WINDOW_STATE_EVENT, {
-    selectedCard,
-    draft,
-    mergeState: getCourseCardMergeState(schedule, selectedCard),
-    term,
-    titleContext,
-    temporaryChanges,
-    activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
-  });
+  const course =
+    selectedCard.type === "course"
+      ? findCourse(schedule, selectedCard.courseId)
+      : undefined;
+  const temporaryChanges =
+    course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
+  return emitTo<CardSettingsWindowStatePayload>(
+    windowLabel,
+    CARD_SETTINGS_WINDOW_STATE_EVENT,
+    {
+      selectedCard,
+      draft,
+      mergeState: getCourseCardMergeState(schedule, selectedCard),
+      term,
+      titleContext,
+      temporaryChanges,
+      activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
+    },
+  );
 }
 
-function getCourseCardMergeState(schedule: Schedule, selectedCard: SelectedCard): CourseCardMergeState {
+function getCourseCardMergeState(
+  schedule: Schedule,
+  selectedCard: SelectedCard,
+): CourseCardMergeState {
   if (selectedCard.type !== "course") {
-    return { canMergeUp: false, canMergeLeft: false, canMergeRight: false, canMergeDown: false, canSplit: false };
+    return {
+      canMergeUp: false,
+      canMergeLeft: false,
+      canMergeRight: false,
+      canMergeDown: false,
+      canSplit: false,
+    };
   }
 
   const location = findCourseLocation(schedule, selectedCard.courseId);
   if (!location) {
-    return { canMergeUp: false, canMergeLeft: false, canMergeRight: false, canMergeDown: false, canSplit: false, reason: "未找到课程卡片" };
+    return {
+      canMergeUp: false,
+      canMergeLeft: false,
+      canMergeRight: false,
+      canMergeDown: false,
+      canSplit: false,
+      reason: "未找到课程卡片",
+    };
   }
 
   const course = location.course;
-  const canSplit = (course.colSpan ?? 1) > 1 || (course.rowSpan ?? 1) > 1 || Boolean(course.mergedInto);
+  const canSplit =
+    (course.colSpan ?? 1) > 1 ||
+    (course.rowSpan ?? 1) > 1 ||
+    Boolean(course.mergedInto);
   const horizontalGroup = getHorizontalMergeGroupLocation(location);
   const verticalGroup = getVerticalMergeGroupLocation(location);
-  const leftAnchorLocation = horizontalGroup ? findLeftHorizontalGroupLocation(horizontalGroup) : null;
-  const rightAnchorLocation = horizontalGroup ? findRightHorizontalGroupLocation(horizontalGroup) : null;
-  const upAnchorLocation = verticalGroup ? findUpVerticalGroupLocation(verticalGroup) : null;
-  const downAnchorLocation = verticalGroup ? findDownVerticalGroupLocation(verticalGroup) : null;
-  const canMergeLeft = Boolean(horizontalGroup && leftAnchorLocation && canMergeCoursesRight(leftAnchorLocation.course, horizontalGroup.course));
-  const canMergeRight = Boolean(horizontalGroup && rightAnchorLocation && canMergeCoursesRight(horizontalGroup.course, rightAnchorLocation.course));
-  const canMergeUp = Boolean(verticalGroup && upAnchorLocation && canMergeCoursesDown(upAnchorLocation.course, verticalGroup.course));
-  const canMergeDown = Boolean(verticalGroup && downAnchorLocation && canMergeCoursesDown(verticalGroup.course, downAnchorLocation.course));
-  const reason = canMergeUp || canMergeLeft || canMergeRight || canMergeDown || canSplit
-    ? undefined
-    : "相邻卡片内容不一致";
-  return { canMergeUp, canMergeLeft, canMergeRight, canMergeDown, canSplit, reason };
+  const leftAnchorLocation = horizontalGroup
+    ? findLeftHorizontalGroupLocation(horizontalGroup)
+    : null;
+  const rightAnchorLocation = horizontalGroup
+    ? findRightHorizontalGroupLocation(horizontalGroup)
+    : null;
+  const upAnchorLocation = verticalGroup
+    ? findUpVerticalGroupLocation(verticalGroup)
+    : null;
+  const downAnchorLocation = verticalGroup
+    ? findDownVerticalGroupLocation(verticalGroup)
+    : null;
+  const canMergeLeft = Boolean(
+    horizontalGroup &&
+    leftAnchorLocation &&
+    canMergeCoursesRight(leftAnchorLocation.course, horizontalGroup.course),
+  );
+  const canMergeRight = Boolean(
+    horizontalGroup &&
+    rightAnchorLocation &&
+    canMergeCoursesRight(horizontalGroup.course, rightAnchorLocation.course),
+  );
+  const canMergeUp = Boolean(
+    verticalGroup &&
+    upAnchorLocation &&
+    canMergeCoursesDown(upAnchorLocation.course, verticalGroup.course),
+  );
+  const canMergeDown = Boolean(
+    verticalGroup &&
+    downAnchorLocation &&
+    canMergeCoursesDown(verticalGroup.course, downAnchorLocation.course),
+  );
+  const reason =
+    canMergeUp || canMergeLeft || canMergeRight || canMergeDown || canSplit
+      ? undefined
+      : "相邻卡片内容不一致";
+  return {
+    canMergeUp,
+    canMergeLeft,
+    canMergeRight,
+    canMergeDown,
+    canSplit,
+    reason,
+  };
 }
 
-function applyCourseCardAction(schedule: Schedule, selectedCard: SelectedCard, action: CardSettingsWindowActionPayload["action"]): Schedule {
+function applyCourseCardAction(
+  schedule: Schedule,
+  selectedCard: SelectedCard,
+  action: CardSettingsWindowActionPayload["action"],
+): Schedule {
   if (selectedCard.type !== "course") {
     return schedule;
   }
@@ -2082,14 +3156,13 @@ function applyCourseCardAction(schedule: Schedule, selectedCard: SelectedCard, a
     return splitCourseCard(schedule, selectedCard.courseId);
   }
 
-  if (action === "add") {
-    return restoreHiddenCourseCard(schedule, selectedCard.courseId);
-  }
-
   return deleteCourseCard(schedule, selectedCard.courseId);
 }
 
-function applyGlobalStyleToSchedule(schedule: Schedule, draft: CardDraft): Schedule {
+function applyGlobalStyleToSchedule(
+  schedule: Schedule,
+  draft: CardDraft,
+): Schedule {
   const style = {
     fontFamily: draft.fontFamily,
     fontSize: draft.fontSize,
@@ -2116,7 +3189,10 @@ function applyGlobalStyleToSchedule(schedule: Schedule, draft: CardDraft): Sched
   };
 }
 
-function applyGlobalScheduleToSchedule(schedule: Schedule, draft: CardDraft): Schedule {
+function applyGlobalScheduleToSchedule(
+  schedule: Schedule,
+  draft: CardDraft,
+): Schedule {
   return {
     ...schedule,
     rows: schedule.rows.map((row) => ({
@@ -2139,7 +3215,10 @@ function applyGlobalScheduleToSchedule(schedule: Schedule, draft: CardDraft): Sc
   };
 }
 
-function applyAxisTextColorToPeriods(schedule: Schedule, color: string): Schedule {
+function applyAxisTextColorToPeriods(
+  schedule: Schedule,
+  color: string,
+): Schedule {
   return {
     ...schedule,
     rows: schedule.rows.map((row) => ({
@@ -2185,8 +3264,19 @@ function applyDraftToRow(
   temporaryChanges?: TemporaryChangeDraft[],
   targetCourseIds?: Set<string>,
 ): ScheduleRow {
-  if (selectedCard.type === "period" && selectedCard.periodId === row.period.id) {
-    return { ...row, period: { ...row.period, label: draft.title, time: draft.secondary, style } };
+  if (
+    selectedCard.type === "period" &&
+    selectedCard.periodId === row.period.id
+  ) {
+    return {
+      ...row,
+      period: {
+        ...row.period,
+        label: draft.title,
+        time: draft.secondary,
+        style,
+      },
+    };
   }
 
   if (selectedCard.type !== "course") {
@@ -2201,7 +3291,7 @@ function applyDraftToRow(
             ...course,
             title: draft.title,
             room: draft.secondary,
-            hidden: course.hidden ?? false,
+            hidden: !isCourseDraftRenderable(draft),
             style,
             scheduleRule: {
               weekPattern: draft.weekPattern,
@@ -2209,7 +3299,10 @@ function applyDraftToRow(
               startDate: draft.applyWholeTerm ? undefined : draft.startDate,
               endDate: draft.applyWholeTerm ? undefined : draft.endDate,
             } satisfies CourseScheduleRule,
-            temporaryChanges: temporaryChanges === undefined ? course.temporaryChanges : temporaryChanges.map(toCourseTemporaryChange),
+            temporaryChanges:
+              temporaryChanges === undefined
+                ? course.temporaryChanges
+                : temporaryChanges.map(toCourseTemporaryChange),
           }
         : course,
     ]),
@@ -2235,7 +3328,25 @@ function toCourseTemporaryChange(change: TemporaryChangeDraft) {
   } satisfies CourseTemporaryChange;
 }
 
-function toTemporaryChangeDraft(change: CourseTemporaryChange): TemporaryChangeDraft {
+function isCourseDraftRenderable(draft: CardDraft): boolean {
+  if (draft.title.trim().length === 0) {
+    return false;
+  }
+
+  if (draft.applyWholeTerm) {
+    return true;
+  }
+
+  return Boolean(
+    draft.startDate &&
+    draft.endDate &&
+    compareIsoDate(draft.startDate, draft.endDate) <= 0,
+  );
+}
+
+function toTemporaryChangeDraft(
+  change: CourseTemporaryChange,
+): TemporaryChangeDraft {
   const color = change.color ?? change.replaceColor ?? "#4f46e5";
   const style = change.style ?? {
     fontFamily: "Microsoft YaHei",
@@ -2269,12 +3380,19 @@ type CourseLocation = {
   rows: ScheduleRow[];
 };
 
-function findCourseLocation(schedule: Schedule, courseId: string): CourseLocation | null {
+function findCourseLocation(
+  schedule: Schedule,
+  courseId: string,
+): CourseLocation | null {
   const weekdays = allScheduleDays.map((day) => day.id);
   return findCourseLocationInRows(schedule.rows, weekdays, courseId);
 }
 
-function findCourseLocationInRows(rows: ScheduleRow[], weekdays: Weekday[], courseId: string): CourseLocation | null {
+function findCourseLocationInRows(
+  rows: ScheduleRow[],
+  weekdays: Weekday[],
+  courseId: string,
+): CourseLocation | null {
   for (const [rowIndex, row] of rows.entries()) {
     for (const [weekdayIndex, weekday] of weekdays.entries()) {
       const course = row.courses[weekday];
@@ -2292,54 +3410,82 @@ function findAnchorLocation(location: CourseLocation): CourseLocation | null {
     return location;
   }
 
-  return findCourseLocationInRows(location.rows, location.weekdays, location.course.mergedInto);
+  return findCourseLocationInRows(
+    location.rows,
+    location.weekdays,
+    location.course.mergedInto,
+  );
 }
 
-function getHorizontalMergeGroupLocation(location: CourseLocation): CourseLocation | null {
+function getHorizontalMergeGroupLocation(
+  location: CourseLocation,
+): CourseLocation | null {
   const anchorLocation = findAnchorLocation(location);
   if (!anchorLocation || anchorLocation.rowIndex !== location.rowIndex) {
     return null;
   }
 
-  if ((anchorLocation.course.rowSpan ?? 1) > 1 || anchorLocation.course.mergeDirection === "vertical") {
+  if (
+    (anchorLocation.course.rowSpan ?? 1) > 1 ||
+    anchorLocation.course.mergeDirection === "vertical"
+  ) {
     return null;
   }
 
   return anchorLocation;
 }
 
-function getVerticalMergeGroupLocation(location: CourseLocation): CourseLocation | null {
+function getVerticalMergeGroupLocation(
+  location: CourseLocation,
+): CourseLocation | null {
   const anchorLocation = findAnchorLocation(location);
   if (!anchorLocation || anchorLocation.weekday !== location.weekday) {
     return null;
   }
 
-  if ((anchorLocation.course.colSpan ?? 1) > 1 || anchorLocation.course.mergeDirection === "horizontal") {
+  if (
+    (anchorLocation.course.colSpan ?? 1) > 1 ||
+    anchorLocation.course.mergeDirection === "horizontal"
+  ) {
     return null;
   }
 
   return anchorLocation;
 }
 
-function getCourseMergeGroupIds(schedule: Schedule, courseId: string): Set<string> {
+function getCourseMergeGroupIds(
+  schedule: Schedule,
+  courseId: string,
+): Set<string> {
   const location = findCourseLocation(schedule, courseId);
   if (!location) {
     return new Set([courseId]);
   }
 
   const horizontalGroup = getHorizontalMergeGroupLocation(location);
-  if (horizontalGroup && ((horizontalGroup.course.colSpan ?? 1) > 1 || horizontalGroup.course.mergeDirection === "horizontal")) {
+  if (
+    horizontalGroup &&
+    ((horizontalGroup.course.colSpan ?? 1) > 1 ||
+      horizontalGroup.course.mergeDirection === "horizontal")
+  ) {
     const span = horizontalGroup.course.colSpan ?? 1;
     return new Set(
       horizontalGroup.weekdays
-        .slice(horizontalGroup.weekdayIndex, horizontalGroup.weekdayIndex + span)
+        .slice(
+          horizontalGroup.weekdayIndex,
+          horizontalGroup.weekdayIndex + span,
+        )
         .map((weekday) => horizontalGroup.row.courses[weekday]?.id)
         .filter((id): id is string => Boolean(id)),
     );
   }
 
   const verticalGroup = getVerticalMergeGroupLocation(location);
-  if (verticalGroup && ((verticalGroup.course.rowSpan ?? 1) > 1 || verticalGroup.course.mergeDirection === "vertical")) {
+  if (
+    verticalGroup &&
+    ((verticalGroup.course.rowSpan ?? 1) > 1 ||
+      verticalGroup.course.mergeDirection === "vertical")
+  ) {
     const span = verticalGroup.course.rowSpan ?? 1;
     return new Set(
       verticalGroup.rows
@@ -2352,8 +3498,11 @@ function getCourseMergeGroupIds(schedule: Schedule, courseId: string): Set<strin
   return new Set([courseId]);
 }
 
-function findRightHorizontalGroupLocation(location: CourseLocation): CourseLocation | null {
-  const nextWeekday = location.weekdays[location.weekdayIndex + (location.course.colSpan ?? 1)];
+function findRightHorizontalGroupLocation(
+  location: CourseLocation,
+): CourseLocation | null {
+  const nextWeekday =
+    location.weekdays[location.weekdayIndex + (location.course.colSpan ?? 1)];
   if (!nextWeekday) {
     return null;
   }
@@ -2363,14 +3512,24 @@ function findRightHorizontalGroupLocation(location: CourseLocation): CourseLocat
     return null;
   }
 
-  const nextLocation = findCourseLocationInRows(location.rows, location.weekdays, nextCourse.id);
-  const anchorLocation = nextLocation ? getHorizontalMergeGroupLocation(nextLocation) : null;
-  return anchorLocation?.rowIndex === location.rowIndex && anchorLocation.weekdayIndex === location.weekdayIndex + (location.course.colSpan ?? 1)
+  const nextLocation = findCourseLocationInRows(
+    location.rows,
+    location.weekdays,
+    nextCourse.id,
+  );
+  const anchorLocation = nextLocation
+    ? getHorizontalMergeGroupLocation(nextLocation)
+    : null;
+  return anchorLocation?.rowIndex === location.rowIndex &&
+    anchorLocation.weekdayIndex ===
+      location.weekdayIndex + (location.course.colSpan ?? 1)
     ? anchorLocation
     : null;
 }
 
-function findLeftHorizontalGroupLocation(location: CourseLocation): CourseLocation | null {
+function findLeftHorizontalGroupLocation(
+  location: CourseLocation,
+): CourseLocation | null {
   if (location.weekdayIndex <= 0) {
     return null;
   }
@@ -2381,13 +3540,26 @@ function findLeftHorizontalGroupLocation(location: CourseLocation): CourseLocati
     return null;
   }
 
-  const previousLocation = findCourseLocationInRows(location.rows, location.weekdays, previousCourse.id);
-  const anchorLocation = previousLocation ? getHorizontalMergeGroupLocation(previousLocation) : null;
-  const anchorEndIndex = anchorLocation ? anchorLocation.weekdayIndex + (anchorLocation.course.colSpan ?? 1) : -1;
-  return anchorLocation?.rowIndex === location.rowIndex && anchorEndIndex === location.weekdayIndex ? anchorLocation : null;
+  const previousLocation = findCourseLocationInRows(
+    location.rows,
+    location.weekdays,
+    previousCourse.id,
+  );
+  const anchorLocation = previousLocation
+    ? getHorizontalMergeGroupLocation(previousLocation)
+    : null;
+  const anchorEndIndex = anchorLocation
+    ? anchorLocation.weekdayIndex + (anchorLocation.course.colSpan ?? 1)
+    : -1;
+  return anchorLocation?.rowIndex === location.rowIndex &&
+    anchorEndIndex === location.weekdayIndex
+    ? anchorLocation
+    : null;
 }
 
-function findDownVerticalGroupLocation(location: CourseLocation): CourseLocation | null {
+function findDownVerticalGroupLocation(
+  location: CourseLocation,
+): CourseLocation | null {
   const nextRowIndex = location.rowIndex + (location.course.rowSpan ?? 1);
   const nextRow = location.rows[nextRowIndex];
   const nextCourse = nextRow?.courses[location.weekday];
@@ -2395,12 +3567,23 @@ function findDownVerticalGroupLocation(location: CourseLocation): CourseLocation
     return null;
   }
 
-  const nextLocation = findCourseLocationInRows(location.rows, location.weekdays, nextCourse.id);
-  const anchorLocation = nextLocation ? getVerticalMergeGroupLocation(nextLocation) : null;
-  return anchorLocation?.weekday === location.weekday && anchorLocation.rowIndex === nextRowIndex ? anchorLocation : null;
+  const nextLocation = findCourseLocationInRows(
+    location.rows,
+    location.weekdays,
+    nextCourse.id,
+  );
+  const anchorLocation = nextLocation
+    ? getVerticalMergeGroupLocation(nextLocation)
+    : null;
+  return anchorLocation?.weekday === location.weekday &&
+    anchorLocation.rowIndex === nextRowIndex
+    ? anchorLocation
+    : null;
 }
 
-function findUpVerticalGroupLocation(location: CourseLocation): CourseLocation | null {
+function findUpVerticalGroupLocation(
+  location: CourseLocation,
+): CourseLocation | null {
   if (location.rowIndex <= 0) {
     return null;
   }
@@ -2411,10 +3594,21 @@ function findUpVerticalGroupLocation(location: CourseLocation): CourseLocation |
     return null;
   }
 
-  const previousLocation = findCourseLocationInRows(location.rows, location.weekdays, previousCourse.id);
-  const anchorLocation = previousLocation ? getVerticalMergeGroupLocation(previousLocation) : null;
-  const anchorEndIndex = anchorLocation ? anchorLocation.rowIndex + (anchorLocation.course.rowSpan ?? 1) : -1;
-  return anchorLocation?.weekday === location.weekday && anchorEndIndex === location.rowIndex ? anchorLocation : null;
+  const previousLocation = findCourseLocationInRows(
+    location.rows,
+    location.weekdays,
+    previousCourse.id,
+  );
+  const anchorLocation = previousLocation
+    ? getVerticalMergeGroupLocation(previousLocation)
+    : null;
+  const anchorEndIndex = anchorLocation
+    ? anchorLocation.rowIndex + (anchorLocation.course.rowSpan ?? 1)
+    : -1;
+  return anchorLocation?.weekday === location.weekday &&
+    anchorEndIndex === location.rowIndex
+    ? anchorLocation
+    : null;
 }
 
 function canMergeBase(left: CourseCell, right: CourseCell): boolean {
@@ -2436,8 +3630,10 @@ function canMergeCoursesRight(left: CourseCell, right: CourseCell): boolean {
     canMergeBase(left, right) &&
     (left.rowSpan ?? 1) === 1 &&
     (right.rowSpan ?? 1) === 1 &&
-    (left.mergeDirection === undefined || left.mergeDirection === "horizontal") &&
-    (right.mergeDirection === undefined || right.mergeDirection === "horizontal")
+    (left.mergeDirection === undefined ||
+      left.mergeDirection === "horizontal") &&
+    (right.mergeDirection === undefined ||
+      right.mergeDirection === "horizontal")
   );
 }
 
@@ -2447,11 +3643,15 @@ function canMergeCoursesDown(top: CourseCell, bottom: CourseCell): boolean {
     (top.colSpan ?? 1) === 1 &&
     (bottom.colSpan ?? 1) === 1 &&
     (top.mergeDirection === undefined || top.mergeDirection === "vertical") &&
-    (bottom.mergeDirection === undefined || bottom.mergeDirection === "vertical")
+    (bottom.mergeDirection === undefined ||
+      bottom.mergeDirection === "vertical")
   );
 }
 
-function areScheduleRulesEqual(left?: CourseScheduleRule, right?: CourseScheduleRule): boolean {
+function areScheduleRulesEqual(
+  left?: CourseScheduleRule,
+  right?: CourseScheduleRule,
+): boolean {
   if (!left && !right) {
     return true;
   }
@@ -2470,30 +3670,64 @@ function areScheduleRulesEqual(left?: CourseScheduleRule, right?: CourseSchedule
 
 function mergeCourseCardRight(schedule: Schedule, courseId: string): Schedule {
   const location = findCourseLocation(schedule, courseId);
-  const leftGroupLocation = location ? getHorizontalMergeGroupLocation(location) : null;
-  const rightGroupLocation = leftGroupLocation ? findRightHorizontalGroupLocation(leftGroupLocation) : null;
-  if (!leftGroupLocation || !rightGroupLocation || !canMergeCoursesRight(leftGroupLocation.course, rightGroupLocation.course)) {
+  const leftGroupLocation = location
+    ? getHorizontalMergeGroupLocation(location)
+    : null;
+  const rightGroupLocation = leftGroupLocation
+    ? findRightHorizontalGroupLocation(leftGroupLocation)
+    : null;
+  if (
+    !leftGroupLocation ||
+    !rightGroupLocation ||
+    !canMergeCoursesRight(leftGroupLocation.course, rightGroupLocation.course)
+  ) {
     return schedule;
   }
 
-  return mergeHorizontalCourseGroups(schedule, leftGroupLocation, rightGroupLocation, location?.course.style);
+  return mergeHorizontalCourseGroups(
+    schedule,
+    leftGroupLocation,
+    rightGroupLocation,
+    location?.course.style,
+  );
 }
 
 function mergeCourseCardLeft(schedule: Schedule, courseId: string): Schedule {
   const location = findCourseLocation(schedule, courseId);
-  const rightGroupLocation = location ? getHorizontalMergeGroupLocation(location) : null;
-  const leftGroupLocation = rightGroupLocation ? findLeftHorizontalGroupLocation(rightGroupLocation) : null;
-  if (!leftGroupLocation || !rightGroupLocation || !canMergeCoursesRight(leftGroupLocation.course, rightGroupLocation.course)) {
+  const rightGroupLocation = location
+    ? getHorizontalMergeGroupLocation(location)
+    : null;
+  const leftGroupLocation = rightGroupLocation
+    ? findLeftHorizontalGroupLocation(rightGroupLocation)
+    : null;
+  if (
+    !leftGroupLocation ||
+    !rightGroupLocation ||
+    !canMergeCoursesRight(leftGroupLocation.course, rightGroupLocation.course)
+  ) {
     return schedule;
   }
 
-  return mergeHorizontalCourseGroups(schedule, leftGroupLocation, rightGroupLocation, location?.course.style);
+  return mergeHorizontalCourseGroups(
+    schedule,
+    leftGroupLocation,
+    rightGroupLocation,
+    location?.course.style,
+  );
 }
 
-function mergeHorizontalCourseGroups(schedule: Schedule, leftLocation: CourseLocation, rightLocation: CourseLocation, sourceStyle?: CardStyle): Schedule {
+function mergeHorizontalCourseGroups(
+  schedule: Schedule,
+  leftLocation: CourseLocation,
+  rightLocation: CourseLocation,
+  sourceStyle?: CardStyle,
+): Schedule {
   const leftSpan = leftLocation.course.colSpan ?? 1;
   const rightSpan = rightLocation.course.colSpan ?? 1;
-  const mergedWeekdays = leftLocation.weekdays.slice(leftLocation.weekdayIndex, rightLocation.weekdayIndex + rightSpan);
+  const mergedWeekdays = leftLocation.weekdays.slice(
+    leftLocation.weekdayIndex,
+    rightLocation.weekdayIndex + rightSpan,
+  );
   const rows = schedule.rows.map((row, rowIndex) => {
     if (rowIndex !== leftLocation.rowIndex) {
       return row;
@@ -2540,27 +3774,58 @@ function mergeHorizontalCourseGroups(schedule: Schedule, leftLocation: CourseLoc
 
 function mergeCourseCardDown(schedule: Schedule, courseId: string): Schedule {
   const location = findCourseLocation(schedule, courseId);
-  const topGroupLocation = location ? getVerticalMergeGroupLocation(location) : null;
-  const bottomGroupLocation = topGroupLocation ? findDownVerticalGroupLocation(topGroupLocation) : null;
-  if (!topGroupLocation || !bottomGroupLocation || !canMergeCoursesDown(topGroupLocation.course, bottomGroupLocation.course)) {
+  const topGroupLocation = location
+    ? getVerticalMergeGroupLocation(location)
+    : null;
+  const bottomGroupLocation = topGroupLocation
+    ? findDownVerticalGroupLocation(topGroupLocation)
+    : null;
+  if (
+    !topGroupLocation ||
+    !bottomGroupLocation ||
+    !canMergeCoursesDown(topGroupLocation.course, bottomGroupLocation.course)
+  ) {
     return schedule;
   }
 
-  return mergeVerticalCourseGroups(schedule, topGroupLocation, bottomGroupLocation, location?.course.style);
+  return mergeVerticalCourseGroups(
+    schedule,
+    topGroupLocation,
+    bottomGroupLocation,
+    location?.course.style,
+  );
 }
 
 function mergeCourseCardUp(schedule: Schedule, courseId: string): Schedule {
   const location = findCourseLocation(schedule, courseId);
-  const bottomGroupLocation = location ? getVerticalMergeGroupLocation(location) : null;
-  const topGroupLocation = bottomGroupLocation ? findUpVerticalGroupLocation(bottomGroupLocation) : null;
-  if (!topGroupLocation || !bottomGroupLocation || !canMergeCoursesDown(topGroupLocation.course, bottomGroupLocation.course)) {
+  const bottomGroupLocation = location
+    ? getVerticalMergeGroupLocation(location)
+    : null;
+  const topGroupLocation = bottomGroupLocation
+    ? findUpVerticalGroupLocation(bottomGroupLocation)
+    : null;
+  if (
+    !topGroupLocation ||
+    !bottomGroupLocation ||
+    !canMergeCoursesDown(topGroupLocation.course, bottomGroupLocation.course)
+  ) {
     return schedule;
   }
 
-  return mergeVerticalCourseGroups(schedule, topGroupLocation, bottomGroupLocation, location?.course.style);
+  return mergeVerticalCourseGroups(
+    schedule,
+    topGroupLocation,
+    bottomGroupLocation,
+    location?.course.style,
+  );
 }
 
-function mergeVerticalCourseGroups(schedule: Schedule, topLocation: CourseLocation, bottomLocation: CourseLocation, sourceStyle?: CardStyle): Schedule {
+function mergeVerticalCourseGroups(
+  schedule: Schedule,
+  topLocation: CourseLocation,
+  bottomLocation: CourseLocation,
+  sourceStyle?: CardStyle,
+): Schedule {
   const topSpan = topLocation.course.rowSpan ?? 1;
   const bottomSpan = bottomLocation.course.rowSpan ?? 1;
   const mergedRowIndexes = Array.from(
@@ -2621,24 +3886,36 @@ function splitCourseCard(schedule: Schedule, courseId: string): Schedule {
   return splitCourseCardPreservingMembers(schedule, courseId);
 }
 
-function splitCourseCardForTemporaryChange(schedule: Schedule, courseId: string): Schedule {
+function splitCourseCardForTemporaryChange(
+  schedule: Schedule,
+  courseId: string,
+): Schedule {
   const location = findCourseLocation(schedule, courseId);
   if (!location) {
     return schedule;
   }
 
   if (location.course.mergedInto) {
-    return splitCourseCardPreservingMembers(schedule, location.course.mergedInto);
+    return splitCourseCardPreservingMembers(
+      schedule,
+      location.course.mergedInto,
+    );
   }
 
-  if ((location.course.colSpan ?? 1) > 1 || (location.course.rowSpan ?? 1) > 1) {
+  if (
+    (location.course.colSpan ?? 1) > 1 ||
+    (location.course.rowSpan ?? 1) > 1
+  ) {
     return splitCourseCardPreservingMembers(schedule, courseId);
   }
 
   return schedule;
 }
 
-function autoSplitInconsistentMergedCourse(schedule: Schedule, courseId: string): Schedule {
+function autoSplitInconsistentMergedCourse(
+  schedule: Schedule,
+  courseId: string,
+): Schedule {
   const location = findCourseLocation(schedule, courseId);
   if (!location) {
     return schedule;
@@ -2662,24 +3939,36 @@ function autoSplitInconsistentMergedCourse(schedule: Schedule, courseId: string)
 
   for (const neighbor of members) {
     if (buildCourseSignature(neighbor) !== baseSignature) {
-      return splitCourseCardPreservingMembers(schedule, anchorLocation.course.id);
+      return splitCourseCardPreservingMembers(
+        schedule,
+        anchorLocation.course.id,
+      );
     }
   }
 
   return schedule;
 }
 
-function splitCourseCardPreservingMembers(schedule: Schedule, courseId: string): Schedule {
+function splitCourseCardPreservingMembers(
+  schedule: Schedule,
+  courseId: string,
+): Schedule {
   const location = findCourseLocation(schedule, courseId);
   if (!location) {
     return schedule;
   }
 
   if (location.course.mergedInto) {
-    return splitCourseCardPreservingMembers(schedule, location.course.mergedInto);
+    return splitCourseCardPreservingMembers(
+      schedule,
+      location.course.mergedInto,
+    );
   }
 
-  if ((location.course.rowSpan ?? 1) > 1 || location.course.mergeDirection === "vertical") {
+  if (
+    (location.course.rowSpan ?? 1) > 1 ||
+    location.course.mergeDirection === "vertical"
+  ) {
     return splitVerticalCourseCard(schedule, location, true);
   }
 
@@ -2688,14 +3977,23 @@ function splitCourseCardPreservingMembers(schedule: Schedule, courseId: string):
   }
 
   const span = location.course.colSpan ?? 1;
-  const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + span);
+  const coveredWeekdays = location.weekdays.slice(
+    location.weekdayIndex + 1,
+    location.weekdayIndex + span,
+  );
   const rows = schedule.rows.map((row, rowIndex) => {
     if (rowIndex !== location.rowIndex) {
       return row;
     }
 
     const courses = { ...row.courses };
-    courses[location.weekday] = { ...location.course, colSpan: 1, rowSpan: 1, mergedInto: undefined, mergeDirection: undefined };
+    courses[location.weekday] = {
+      ...location.course,
+      colSpan: 1,
+      rowSpan: 1,
+      mergedInto: undefined,
+      mergeDirection: undefined,
+    };
     for (const weekday of coveredWeekdays) {
       courses[weekday] = {
         ...courses[weekday],
@@ -2712,14 +4010,20 @@ function splitCourseCardPreservingMembers(schedule: Schedule, courseId: string):
   return { ...schedule, rows };
 }
 
-function splitVerticalCourseCard(schedule: Schedule, location: CourseLocation, preserveMembers: boolean): Schedule {
+function splitVerticalCourseCard(
+  schedule: Schedule,
+  location: CourseLocation,
+  preserveMembers: boolean,
+): Schedule {
   const span = location.course.rowSpan ?? 1;
   if (span <= 1) {
     return schedule;
   }
 
-  const coveredRowIndexes = Array.from({ length: span }, (_, index) => location.rowIndex + index)
-    .filter((rowIndex) => rowIndex < schedule.rows.length);
+  const coveredRowIndexes = Array.from(
+    { length: span },
+    (_, index) => location.rowIndex + index,
+  ).filter((rowIndex) => rowIndex < schedule.rows.length);
   const rows = schedule.rows.map((row, rowIndex) => {
     if (!coveredRowIndexes.includes(rowIndex)) {
       return row;
@@ -2760,17 +4064,30 @@ function splitVerticalCourseCard(schedule: Schedule, location: CourseLocation, p
 }
 
 function collectMergedMemberCourses(location: CourseLocation): CourseCell[] {
-  if ((location.course.rowSpan ?? 1) > 1 || location.course.mergeDirection === "vertical") {
+  if (
+    (location.course.rowSpan ?? 1) > 1 ||
+    location.course.mergeDirection === "vertical"
+  ) {
     return location.rows
-      .slice(location.rowIndex + 1, location.rowIndex + (location.course.rowSpan ?? 1))
+      .slice(
+        location.rowIndex + 1,
+        location.rowIndex + (location.course.rowSpan ?? 1),
+      )
       .map((row) => row.courses[location.weekday])
-      .filter((course): course is CourseCell => Boolean(course && course.mergedInto === location.course.id));
+      .filter((course): course is CourseCell =>
+        Boolean(course && course.mergedInto === location.course.id),
+      );
   }
 
-  const coveredWeekdays = location.weekdays.slice(location.weekdayIndex + 1, location.weekdayIndex + (location.course.colSpan ?? 1));
+  const coveredWeekdays = location.weekdays.slice(
+    location.weekdayIndex + 1,
+    location.weekdayIndex + (location.course.colSpan ?? 1),
+  );
   return coveredWeekdays
     .map((weekday) => location.row.courses[weekday])
-    .filter((course): course is CourseCell => Boolean(course && course.mergedInto === location.course.id));
+    .filter((course): course is CourseCell =>
+      Boolean(course && course.mergedInto === location.course.id),
+    );
 }
 
 function deleteCourseCard(schedule: Schedule, courseId: string): Schedule {
@@ -2779,15 +4096,25 @@ function deleteCourseCard(schedule: Schedule, courseId: string): Schedule {
     return schedule;
   }
 
-  if (location.course.mergedInto || (location.course.colSpan ?? 1) > 1 || (location.course.rowSpan ?? 1) > 1) {
-    const splitSchedule = splitCourseCardPreservingMembers(schedule, location.course.mergedInto ?? courseId);
-    return hideSingleCourseCard(splitSchedule, courseId);
+  if (
+    location.course.mergedInto ||
+    (location.course.colSpan ?? 1) > 1 ||
+    (location.course.rowSpan ?? 1) > 1
+  ) {
+    const splitSchedule = splitCourseCardPreservingMembers(
+      schedule,
+      location.course.mergedInto ?? courseId,
+    );
+    return resetSingleCourseCardConfig(splitSchedule, courseId);
   }
 
-  return hideSingleCourseCard(schedule, courseId);
+  return resetSingleCourseCardConfig(schedule, courseId);
 }
 
-function hideSingleCourseCard(schedule: Schedule, courseId: string): Schedule {
+function resetSingleCourseCardConfig(
+  schedule: Schedule,
+  courseId: string,
+): Schedule {
   const location = findCourseLocation(schedule, courseId);
   if (!location) {
     return schedule;
@@ -2806,46 +4133,19 @@ function hideSingleCourseCard(schedule: Schedule, courseId: string): Schedule {
 
     courses[location.weekday] = {
       ...target,
+      title: "",
+      room: "",
       hidden: true,
       colSpan: 1,
       rowSpan: 1,
       mergedInto: undefined,
       mergeDirection: undefined,
-    };
-
-    return { ...row, courses };
-  });
-
-  return { ...schedule, rows };
-}
-
-function restoreHiddenCourseCard(schedule: Schedule, courseId: string): Schedule {
-  const location = findCourseLocation(schedule, courseId);
-  if (!location) {
-    return schedule;
-  }
-
-  const rows = schedule.rows.map((row, rowIndex) => {
-    if (rowIndex !== location.rowIndex) {
-      return row;
-    }
-
-    const courses = { ...row.courses };
-    const target = courses[location.weekday];
-    if (!target) {
-      return row;
-    }
-
-    courses[location.weekday] = {
-      ...target,
-      hidden: false,
-      colSpan: 1,
-      rowSpan: 1,
-      mergedInto: undefined,
-      mergeDirection: undefined,
+      style: createDefaultCourseCardStyle(),
       scheduleRule: {
         weekPattern: "all",
         applyWholeTerm: true,
+        startDate: undefined,
+        endDate: undefined,
       },
     };
 
@@ -2860,7 +4160,6 @@ function createEmptyCourseCell(id: string): CourseCell {
     id,
     title: "",
     room: "",
-    note: "",
     hidden: true,
     colSpan: 1,
     rowSpan: 1,
@@ -2868,12 +4167,20 @@ function createEmptyCourseCell(id: string): CourseCell {
       weekPattern: "all",
       applyWholeTerm: true,
     },
-    style: {
-      backgroundColor: "#ffffff",
-      color: "#64748b",
-      displayMode: "auto",
-    },
+    style: createDefaultCourseCardStyle(),
   };
+}
+
+function createDefaultCourseCardStyle(): CardStyle {
+  return toCardStyle(defaultCardDraft);
+}
+
+function courseCardIdFor(weekday: Weekday, periodId: string): string {
+  return `courseCard_${weekdayNumber(weekday)}_${periodOrder(periodId) ?? 1}`;
+}
+
+function weekdayNumber(weekday: Weekday): number {
+  return allScheduleDays.findIndex((day) => day.id === weekday) + 1 || 1;
 }
 
 function buildCourseSignature(course: CourseCell): string {
@@ -2895,34 +4202,23 @@ function buildCourseSignature(course: CourseCell): string {
   ].join("::");
 }
 
-function findCourse(schedule: Schedule, courseId: string): CourseCell | undefined {
+function findCourse(
+  schedule: Schedule,
+  courseId: string,
+): CourseCell | undefined {
   return findCourseLocation(schedule, courseId)?.course;
 }
 
-function findPeriod(schedule: Schedule, periodId: string): PeriodInfo | undefined {
+function findPeriod(
+  schedule: Schedule,
+  periodId: string,
+): PeriodInfo | undefined {
   const row = schedule.rows.find((item) => item.period.id === periodId);
   if (row) {
     return row.period;
   }
 
   return undefined;
-}
-
-function loadPersistedSchedule(): Schedule | null {
-  try {
-    const raw = window.localStorage.getItem(SCHEDULE_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Schedule) : null;
-  } catch {
-    return null;
-  }
-}
-
-function savePersistedSchedule(schedule: Schedule): void {
-  try {
-    window.localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(schedule));
-  } catch {
-    // local persistence is best-effort only
-  }
 }
 
 function getAuthToolbarLabel(accountState: LocalAccountState): string {
@@ -2933,30 +4229,74 @@ function getAuthToolbarLabel(accountState: LocalAccountState): string {
   return accountState.user?.phone?.slice(-2) ?? "账";
 }
 
-function getToolbarSyncStatus(accountState: LocalAccountState, syncStatus: LocalSyncStatus): ToolbarSyncStatus | undefined {
-  if (!accountState.loggedIn) {
-    return undefined;
-  }
-
-  if (syncStatus.lastSyncError) {
-    return "error";
-  }
-
-  return syncStatus.hasPendingChanges ? "pending" : "local";
-}
-
-function getAuthToolbarTitle(accountState: LocalAccountState, syncStatus: LocalSyncStatus): string {
+function getAuthToolbarTitle(accountState: LocalAccountState): string {
   if (!accountState.loggedIn) {
     return "登录 / 账号";
   }
 
+  return "账号";
+}
+
+function getToolbarSyncButtonState(
+  accountState: LocalAccountState,
+  syncStatus: LocalSyncStatus,
+  manualSyncRunning: boolean,
+): ToolbarSyncButtonState {
+  if (!accountState.loggedIn) {
+    return "disabled";
+  }
+
+  if (manualSyncRunning || syncStatus.syncing) {
+    return "syncing";
+  }
+
+  if (!syncStatus.online) {
+    return "offline";
+  }
+
+  if (syncStatus.lastSyncError || syncStatus.conflict) {
+    return "error";
+  }
+
+  if (syncStatus.hasPendingChanges || syncStatus.hasRemoteChanges) {
+    return "pending";
+  }
+
+  return "synced";
+}
+
+function getToolbarSyncTitle(
+  accountState: LocalAccountState,
+  syncStatus: LocalSyncStatus,
+  manualSyncRunning: boolean,
+): string {
+  if (!accountState.loggedIn) {
+    return "登录后可同步";
+  }
+
+  if (manualSyncRunning || syncStatus.syncing) {
+    return "正在同步";
+  }
+
+  if (!syncStatus.online) {
+    return "网络不可用，稍后再同步";
+  }
+
+  if (syncStatus.conflict) {
+    return "本地和云端都有更新，请稍后处理";
+  }
+
   if (syncStatus.lastSyncError) {
-    return `账号，本地同步状态异常：${syncStatus.lastSyncError}`;
+    return `同步失败：${syncStatus.lastSyncError}`;
   }
 
   if (syncStatus.hasPendingChanges) {
-    return `账号，本地有 ${syncStatus.dirtyCount} 项待同步更改`;
+    return `有 ${syncStatus.dirtyCount} 项本地更改待同步`;
   }
 
-  return "账号，本地可用";
+  if (syncStatus.lastSyncedAt) {
+    return `已同步：${syncStatus.lastSyncedAt}`;
+  }
+
+  return "已同步";
 }

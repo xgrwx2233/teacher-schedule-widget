@@ -78,10 +78,14 @@ pub fn update_proxy_hitboxes(
     hitbox_store: tauri::State<'_, ProxyHitboxStore>,
     geometry_store: tauri::State<'_, ProxyGeometryStore>,
 ) -> Result<(), String> {
-    let mut hitboxes = hitbox_store.lock().map_err(|_| "proxy hitbox store poisoned".to_string())?;
+    let mut hitboxes = hitbox_store
+        .lock()
+        .map_err(|_| "proxy hitbox store poisoned".to_string())?;
     *hitboxes = update.hitboxes;
 
-    let mut geometry = geometry_store.lock().map_err(|_| "proxy geometry store poisoned".to_string())?;
+    let mut geometry = geometry_store
+        .lock()
+        .map_err(|_| "proxy geometry store poisoned".to_string())?;
     geometry.css_width = update.css_width;
     geometry.css_height = update.css_height;
     Ok(())
@@ -99,9 +103,7 @@ pub fn clear_proxy_active_card(
 }
 
 #[tauri::command]
-pub fn clear_proxy_menu_open(
-    ui_state: tauri::State<'_, ProxyUiStateStore>,
-) -> Result<(), String> {
+pub fn clear_proxy_menu_open(ui_state: tauri::State<'_, ProxyUiStateStore>) -> Result<(), String> {
     let mut state = ui_state
         .lock()
         .map_err(|_| "proxy ui state store poisoned".to_string())?;
@@ -148,8 +150,12 @@ pub struct ProxyHitboxResult {
 }
 
 #[tauri::command]
-pub fn proxy_hitbox_probe(app: AppHandle, probe: ProxyHitboxProbe) -> Result<ProxyHitboxResult, String> {
-    let desktop_icon_hit = desktop_icons::is_desktop_icon_at_screen_point(probe.screen_x, probe.screen_y);
+pub fn proxy_hitbox_probe(
+    app: AppHandle,
+    probe: ProxyHitboxProbe,
+) -> Result<ProxyHitboxResult, String> {
+    let desktop_icon_hit =
+        desktop_icons::is_desktop_icon_at_screen_point(probe.screen_x, probe.screen_y);
     let can_interact = !desktop_icon_hit && probe.widget_hit.is_some();
     let result = ProxyHitboxResult {
         screen_x: probe.screen_x,
@@ -194,11 +200,17 @@ pub fn ensure_proxy_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .build()
     .map_err(|error| error.to_string())?;
 
-    window.set_ignore_cursor_events(true).map_err(|error| error.to_string())?;
+    window
+        .set_ignore_cursor_events(true)
+        .map_err(|error| error.to_string())?;
     Ok(window)
 }
 
-pub fn show_proxy_for_widget(app: &AppHandle, widget: &WebviewWindow, state: &AppState) -> Result<(), String> {
+pub fn show_proxy_for_widget(
+    app: &AppHandle,
+    widget: &WebviewWindow,
+    state: &AppState,
+) -> Result<(), String> {
     if !state.is_attached() {
         hide_proxy(app)?;
         return Ok(());
@@ -207,7 +219,9 @@ pub fn show_proxy_for_widget(app: &AppHandle, widget: &WebviewWindow, state: &Ap
     let proxy = ensure_proxy_window(app)?;
     sync_proxy_bounds(&proxy, widget)?;
     proxy.show().map_err(|error| error.to_string())?;
-    proxy.set_ignore_cursor_events(true).map_err(|error| error.to_string())?;
+    proxy
+        .set_ignore_cursor_events(true)
+        .map_err(|error| error.to_string())?;
     keep_proxy_topmost(&proxy)?;
     Ok(())
 }
@@ -290,7 +304,8 @@ pub fn start_proxy_input_manager(
                 physical_height,
             );
             let widget_hit = hit_test_rects(&hitboxes, local_x, local_y);
-            let desktop_icon_hit = desktop_icons::is_desktop_icon_at_screen_point(cursor.x, cursor.y);
+            let desktop_icon_hit =
+                desktop_icons::is_desktop_icon_at_screen_point(cursor.x, cursor.y);
             let point_exposed = is_widget_point_exposed(&app, &widget, cursor.x, cursor.y);
             let can_interact = !desktop_icon_hit && widget_hit.is_some() && point_exposed;
 
@@ -322,7 +337,11 @@ pub fn start_proxy_input_manager(
                 // Store the element under the cursor at mouse-down time. Desktop
                 // icon priority is already included in can_interact, so an icon
                 // covering the widget records no widget target.
-                pressed_hit = if can_interact { widget_hit.clone() } else { None };
+                pressed_hit = if can_interact {
+                    widget_hit.clone()
+                } else {
+                    None
+                };
             }
 
             // Treat the mouse-up edge as click confirmation for the element that
@@ -333,15 +352,18 @@ pub fn start_proxy_input_manager(
                 if let Some(hit) = pressed_hit.take() {
                     let _ = proxy.set_ignore_cursor_events(true);
                     passthrough = true;
-                    let _ = app.emit(PROXY_EVENT, ProxyHitboxResult {
-                        screen_x: cursor.x,
-                        screen_y: cursor.y,
-                        local_x,
-                        local_y,
-                        can_interact,
-                        desktop_icon_hit,
-                        widget_hit: Some(hit.clone()),
-                    });
+                    let _ = app.emit(
+                        PROXY_EVENT,
+                        ProxyHitboxResult {
+                            screen_x: cursor.x,
+                            screen_y: cursor.y,
+                            local_x,
+                            local_y,
+                            can_interact,
+                            desktop_icon_hit,
+                            widget_hit: Some(hit.clone()),
+                        },
+                    );
                     handle_proxy_click(
                         &app,
                         &ui_state,
@@ -367,7 +389,13 @@ fn handle_proxy_click(
 ) {
     if matches!(
         hit.kind.as_str(),
-        "auth-button" | "menu-button" | "header-toggle" | "layout-toggle" | "previous-week" | "next-week"
+        "auth-button"
+            | "menu-button"
+            | "header-toggle"
+            | "layout-toggle"
+            | "previous-week"
+            | "next-week"
+            | "sync"
     ) {
         pending_card_click.take();
         let _ = app.emit(PROXY_TRIGGER_EVENT, hit.clone());
@@ -407,7 +435,9 @@ fn same_proxy_hit(left: &ProxyWidgetHit, right: &ProxyWidgetHit) -> bool {
 
 pub fn hide_proxy(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(PROXY_WINDOW_LABEL) {
-        window.set_ignore_cursor_events(true).map_err(|error| error.to_string())?;
+        window
+            .set_ignore_cursor_events(true)
+            .map_err(|error| error.to_string())?;
         window.hide().map_err(|error| error.to_string())?;
     }
 
@@ -425,7 +455,10 @@ pub fn sync_proxy_bounds(proxy: &WebviewWindow, widget: &WebviewWindow) -> Resul
     let width = (rect.right - rect.left).max(1) as u32;
     let height = (rect.bottom - rect.top).max(1) as u32;
     proxy
-        .set_position(PhysicalPosition { x: rect.left, y: rect.top })
+        .set_position(PhysicalPosition {
+            x: rect.left,
+            y: rect.top,
+        })
         .map_err(|error| error.to_string())?;
     proxy
         .set_size(PhysicalSize { width, height })
@@ -503,7 +536,12 @@ fn map_physical_to_css(
     )
 }
 
-fn is_widget_point_exposed(app: &AppHandle, widget: &WebviewWindow, screen_x: i32, screen_y: i32) -> bool {
+fn is_widget_point_exposed(
+    app: &AppHandle,
+    widget: &WebviewWindow,
+    screen_x: i32,
+    screen_y: i32,
+) -> bool {
     matches!(
         top_window_kind(app, widget, screen_x, screen_y),
         Some(TopWindowKind::Widget | TopWindowKind::Shell)
@@ -518,8 +556,18 @@ enum TopWindowKind {
     Other,
 }
 
-fn top_window_kind(app: &AppHandle, widget: &WebviewWindow, screen_x: i32, screen_y: i32) -> Option<TopWindowKind> {
-    let top = unsafe { WindowFromPoint(POINT { x: screen_x, y: screen_y }) };
+fn top_window_kind(
+    app: &AppHandle,
+    widget: &WebviewWindow,
+    screen_x: i32,
+    screen_y: i32,
+) -> Option<TopWindowKind> {
+    let top = unsafe {
+        WindowFromPoint(POINT {
+            x: screen_x,
+            y: screen_y,
+        })
+    };
     if top.0.is_null() {
         return None;
     }

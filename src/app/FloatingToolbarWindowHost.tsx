@@ -19,6 +19,13 @@ export function FloatingToolbarWindowHost() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [toolbarLayoutMode, setToolbarLayoutMode] = useState<ToolbarLayoutMode>("minimalist");
   const [backgroundMode, setBackgroundMode] = useState<WidgetBackgroundMode>("blur");
+  const [canPreviousWeek, setCanPreviousWeek] = useState(true);
+  const [canNextWeek, setCanNextWeek] = useState(true);
+  const [authLabel, setAuthLabel] = useState("账号");
+  const [authTitle, setAuthTitle] = useState("登录 / 账号");
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [syncButtonState, setSyncButtonState] = useState<FloatingToolbarStatePayload["syncButtonState"]>("disabled");
+  const [syncTitle, setSyncTitle] = useState("登录后可同步");
 
   useEffect(() => {
     const unlistenWindowState = listen<FloatingToolbarStatePayload>(FLOATING_TOOLBAR_STATE_EVENT, (event) => {
@@ -26,6 +33,13 @@ export function FloatingToolbarWindowHost() {
       setMenuOpen(event.payload.menuOpen);
       setToolbarLayoutMode(event.payload.toolbarLayoutMode);
       setBackgroundMode(event.payload.backgroundMode);
+      setCanPreviousWeek(event.payload.canPreviousWeek ?? true);
+      setCanNextWeek(event.payload.canNextWeek ?? true);
+      setAuthLabel(event.payload.authLabel);
+      setAuthTitle(event.payload.authTitle);
+      setLoggedIn(event.payload.loggedIn);
+      setSyncButtonState(event.payload.syncButtonState);
+      setSyncTitle(event.payload.syncTitle);
     });
     const unlistenClose = currentWindow.onCloseRequested(async (event) => {
       event.preventDefault();
@@ -74,9 +88,18 @@ export function FloatingToolbarWindowHost() {
         toolbarLayoutMode={toolbarLayoutMode}
         backgroundMode={backgroundMode}
         variant="floating"
+        canPreviousWeek={canPreviousWeek}
+        canNextWeek={canNextWeek}
         onPreviousWeek={() => void runAction("previous-week")}
         onNextWeek={() => void runAction("next-week")}
         onToggleLayoutMode={() => void runAction("layout")}
+        authLabel={authLabel}
+        authTitle={authTitle}
+        loggedIn={loggedIn}
+        syncButtonState={syncButtonState}
+        syncTitle={syncTitle}
+        onOpenAuth={() => void runAction("auth")}
+        onSync={() => void runAction("sync")}
         onToggleMenu={() => void runAction("menu")}
       />
     </main>

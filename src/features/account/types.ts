@@ -20,8 +20,16 @@ export type LocalSyncStatus = {
   ownerUserId: string;
   dirtyCount: number;
   localRevision: number;
+  cloudRevision?: number | null;
+  lastSyncedCloudRevision?: number | null;
+  lastSyncedAt?: string | null;
+  lastCheckedAt?: string | null;
   lastSyncError?: string | null;
   hasPendingChanges: boolean;
+  hasRemoteChanges: boolean;
+  syncing: boolean;
+  online: boolean;
+  conflict: boolean;
 };
 
 export const defaultLocalAccountState: LocalAccountState = {
@@ -34,6 +42,14 @@ export const defaultLocalSyncStatus: LocalSyncStatus = {
   ownerUserId: "default_local",
   dirtyCount: 0,
   localRevision: 0,
+  cloudRevision: null,
+  lastSyncedCloudRevision: null,
+  lastSyncedAt: null,
+  lastCheckedAt: null,
   lastSyncError: null,
   hasPendingChanges: false,
+  hasRemoteChanges: false,
+  syncing: false,
+  online: true,
+  conflict: false,
 };

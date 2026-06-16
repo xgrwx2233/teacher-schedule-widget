@@ -63,7 +63,6 @@ export type CourseCell = {
   id: string;
   title: string;
   room?: string;
-  note?: string;
   hidden?: boolean;
   colSpan?: number;
   rowSpan?: number;

@@ -14,8 +14,7 @@ mod window_mode;
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
-    Mutex,
+    Arc, Mutex,
 };
 use std::{thread, time::Duration};
 
@@ -67,6 +66,9 @@ pub fn run() {
             settings_windows::toggle_auth_window,
             local_account::load_local_account_state,
             local_account::load_local_sync_status,
+            local_account::manual_sync_current_user,
+            local_account::start_realtime_sync,
+            local_account::stop_realtime_sync,
             local_account::load_current_schedule,
             local_account::save_current_schedule,
             local_account::register_local_account,
@@ -101,11 +103,13 @@ pub fn run() {
                 }))?;
             }
 
-            apply_initial_attached_mode(&window, &state, &registry)?;
+            let initial_mode = apply_initial_attached_mode(&window, &state, &registry)?;
             window.show()?;
-            settings_windows::create_hidden_auxiliary_windows(app.handle())?;
-            interaction_proxy::show_proxy_for_widget(app.handle(), &window, &state)?;
-            tray::create_tray(app.handle())?;
+            let _ = settings_windows::create_hidden_auxiliary_windows(app.handle());
+            if matches!(initial_mode.mode, window_mode::WindowMode::Attached) {
+                let _ = interaction_proxy::show_proxy_for_widget(app.handle(), &window, &state);
+            }
+            let _ = tray::create_tray(app.handle());
             let _ = wallpaper_watcher::install_wallpaper_change_listener(&window, app.handle());
 
             start_input_forwarder(
@@ -135,15 +139,21 @@ pub fn run() {
             let listener_target = listener_window.clone();
             listener_window.on_window_event(move |event| match event {
                 WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
-                    if !attached_flag.load(Ordering::Relaxed) || !visible_flag.load(Ordering::Relaxed) {
+                    if !attached_flag.load(Ordering::Relaxed)
+                        || !visible_flag.load(Ordering::Relaxed)
+                    {
                         return;
                     }
 
-                    if widget_manager::save_window_bounds(&listener_target, &registry_store).is_err() {
+                    if widget_manager::save_window_bounds(&listener_target, &registry_store)
+                        .is_err()
+                    {
                         return;
                     }
 
-                    if let Some(proxy) = app_handle.get_webview_window(interaction_proxy::PROXY_WINDOW_LABEL) {
+                    if let Some(proxy) =
+                        app_handle.get_webview_window(interaction_proxy::PROXY_WINDOW_LABEL)
+                    {
                         let _ = interaction_proxy::sync_proxy_bounds(&proxy, &listener_target);
                     }
                 }

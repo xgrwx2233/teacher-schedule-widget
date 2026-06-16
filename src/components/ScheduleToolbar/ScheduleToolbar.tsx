@@ -2,7 +2,7 @@ import type { PointerEvent, ReactNode, RefObject } from "react";
 import type { WidgetBackgroundMode } from "../../features/settings/settingsTypes";
 import type { ToolbarLayoutMode } from "../../features/settings/windowEvents";
 
-export type ToolbarSyncStatus = "local" | "pending" | "error";
+export type ToolbarSyncButtonState = "disabled" | "synced" | "pending" | "syncing" | "error" | "offline";
 
 type ScheduleToolbarProps = {
   weekNumber: number;
@@ -14,11 +14,15 @@ type ScheduleToolbarProps = {
   authLabel?: string;
   authTitle?: string;
   loggedIn?: boolean;
-  syncStatus?: ToolbarSyncStatus;
+  syncButtonState?: ToolbarSyncButtonState;
+  syncTitle?: string;
+  canPreviousWeek?: boolean;
+  canNextWeek?: boolean;
   onPreviousWeek: () => void;
   onNextWeek: () => void;
   onToggleLayoutMode: () => void;
   onOpenAuth?: () => void;
+  onSync?: () => void;
   onToggleMenu: () => void;
   onDragStart?: (event: PointerEvent<HTMLDivElement>) => void;
 };
@@ -33,11 +37,15 @@ export function ScheduleToolbar({
   authLabel,
   authTitle,
   loggedIn = false,
-  syncStatus,
+  syncButtonState = "disabled",
+  syncTitle,
+  canPreviousWeek = true,
+  canNextWeek = true,
   onPreviousWeek,
   onNextWeek,
   onToggleLayoutMode,
   onOpenAuth,
+  onSync,
   onToggleMenu,
   onDragStart,
 }: ScheduleToolbarProps) {
@@ -51,13 +59,13 @@ export function ScheduleToolbar({
       data-background-mode={backgroundMode}
     >
       <div className="toolbar-left" aria-label="周次切换">
-        <ToolbarIconButton title="上一周" ariaLabel="上一周" variant={variant} dataToolbarAction="previous-week" onClick={onPreviousWeek}>
+        <ToolbarIconButton title="上一周" ariaLabel="上一周" variant={variant} dataToolbarAction="previous-week" disabled={!canPreviousWeek} onClick={onPreviousWeek}>
           <ChevronLeftIcon />
         </ToolbarIconButton>
         <button className="week-number-button" type="button" title={`第${weekNumber}周`} aria-label={`第${weekNumber}周`}>
           第{weekNumber}周
         </button>
-        <ToolbarIconButton title="下一周" ariaLabel="下一周" variant={variant} dataToolbarAction="next-week" onClick={onNextWeek}>
+        <ToolbarIconButton title="下一周" ariaLabel="下一周" variant={variant} dataToolbarAction="next-week" disabled={!canNextWeek} onClick={onNextWeek}>
           <ChevronRightIcon />
         </ToolbarIconButton>
       </div>
@@ -76,13 +84,18 @@ export function ScheduleToolbar({
             className={loggedIn ? "toolbar-account-button is-logged-in" : "toolbar-account-button"}
             title={authTitle ?? (loggedIn ? "账号" : "登录 / 账号")}
             aria-label={authTitle ?? (loggedIn ? "账号" : "登录 / 账号")}
-            data-sync-status={loggedIn ? syncStatus : undefined}
             data-auth-button="true"
             onClick={onOpenAuth}
           >
             {loggedIn ? <span>{authLabel}</span> : <UserIcon />}
-            {loggedIn && syncStatus ? <i className="toolbar-account-sync-dot" aria-hidden="true" /> : null}
           </button>
+        ) : null}
+        {onSync ? (
+          <ToolbarSyncButton
+            state={syncButtonState}
+            title={syncTitle ?? "同步"}
+            onClick={onSync}
+          />
         ) : null}
         <ToolbarIconButton
           transparent
@@ -130,6 +143,7 @@ function ToolbarIconButton({
   dataMenuButton = false,
   dataToolbarAction,
   transparent = false,
+  disabled = false,
 }: {
   children: ReactNode;
   title: string;
@@ -141,12 +155,14 @@ function ToolbarIconButton({
   dataMenuButton?: boolean;
   dataToolbarAction?: "layout-toggle" | "previous-week" | "next-week";
   transparent?: boolean;
+  disabled?: boolean;
 }) {
   const className = [
     "toolbar-icon-button",
     variant === "floating" ? "is-floating" : "",
     active ? "is-active" : "",
     transparent ? "is-transparent" : "",
+    disabled ? "is-disabled" : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -160,10 +176,51 @@ function ToolbarIconButton({
       data-menu-button={dataMenuButton ? "true" : undefined}
       data-toolbar-action={dataToolbarAction}
       data-tauri-drag-region={undefined}
-      onClick={onClick}
+      aria-disabled={disabled}
+      disabled={disabled}
+      onClick={disabled ? undefined : onClick}
     >
       {children}
     </button>
+  );
+}
+
+function ToolbarSyncButton({
+  state,
+  title,
+  onClick,
+}: {
+  state: ToolbarSyncButtonState;
+  title: string;
+  onClick: () => void;
+}) {
+  const disabled = state === "disabled" || state === "syncing";
+  return (
+    <button
+      type="button"
+      className="toolbar-sync-button"
+      title={title}
+      aria-label={title}
+      aria-disabled={disabled}
+      data-sync-button-state={state}
+      data-toolbar-action="sync"
+      disabled={disabled}
+      onClick={disabled ? undefined : onClick}
+    >
+      <SyncIcon />
+      <i aria-hidden="true" />
+    </button>
+  );
+}
+
+function SyncIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+      <path d="M18.4 8.3a6.8 6.8 0 0 0-11.9-2.1L4.4 8.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5 5.5v3.7h3.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5.6 15.7a6.8 6.8 0 0 0 11.9 2.1l2.1-2.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M19 18.5v-3.7h-3.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

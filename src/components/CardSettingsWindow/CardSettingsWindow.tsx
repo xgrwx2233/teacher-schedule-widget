@@ -27,7 +27,6 @@ type CardSettingsWindowProps = {
   onMergeDown: () => void;
   onSplit: () => void;
   onDeleteCourse: () => void;
-  onAddCourse: () => void;
   onGlobalStyleApply: () => void;
   onGlobalScheduleApply: () => void;
   onTemporaryChangeSelect: (id: string | null) => void;
@@ -38,9 +37,21 @@ type CardSettingsWindowProps = {
 
 type CardSettingsTab = "course" | "temporary";
 
-const courseFontSizeOptions = Array.from({ length: 9 }, (_, index) => index + 8);
-const periodFontSizeOptions = Array.from({ length: 9 }, (_, index) => index + 8);
-const todayIso = new Date().toISOString().slice(0, 10);
+type TemporaryHistoryEntry = {
+  change: TemporaryChangeDraft;
+  date: string;
+  completed: boolean;
+};
+
+const courseFontSizeOptions = Array.from(
+  { length: 9 },
+  (_, index) => index + 8,
+);
+const periodFontSizeOptions = Array.from(
+  { length: 9 },
+  (_, index) => index + 8,
+);
+const todayIso = getBeijingDateIso();
 
 export function CardSettingsWindow({
   selectedCard,
@@ -60,7 +71,6 @@ export function CardSettingsWindow({
   onMergeDown,
   onSplit,
   onDeleteCourse,
-  onAddCourse,
   onGlobalStyleApply,
   onGlobalScheduleApply,
   onTemporaryChangeSelect,
@@ -88,10 +98,18 @@ export function CardSettingsWindow({
 
   if (selectedCard.type === "period") {
     return (
-      <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="课次卡片设置">
+      <div
+        className="settings-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-label="课次卡片设置"
+      >
         <section className="card-settings-window period-settings-window">
           <div className="card-settings-body is-period-settings" ref={bodyRef}>
-            <PeriodConfigurationTab draft={draft} onDraftChange={onDraftChange} />
+            <PeriodConfigurationTab
+              draft={draft}
+              onDraftChange={onDraftChange}
+            />
           </div>
         </section>
       </div>
@@ -108,27 +126,62 @@ export function CardSettingsWindow({
   };
 
   return (
-    <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="课程卡片设置">
+    <div
+      className="settings-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="课程卡片设置"
+    >
       <section className="card-settings-window">
         <nav className="card-settings-tabs" aria-label="卡片设置分类">
-          <button type="button" className={activeTab === "course" ? "is-active" : ""} onClick={() => onActiveTabChange("course")}>
+          <button
+            type="button"
+            className={activeTab === "course" ? "is-active" : ""}
+            onClick={() => onActiveTabChange("course")}
+          >
             课程配置
           </button>
-          <button type="button" className={activeTab === "temporary" ? "is-active" : ""} onClick={openTemporaryTab}>
+          <button
+            type="button"
+            className={activeTab === "temporary" ? "is-active" : ""}
+            onClick={openTemporaryTab}
+          >
             临时改动
           </button>
         </nav>
 
-        <div className={activeTab === "temporary" ? "card-settings-body is-temporary-tab" : "card-settings-body"} ref={bodyRef}>
+        <div
+          className={
+            activeTab === "temporary"
+              ? "card-settings-body is-temporary-tab"
+              : "card-settings-body"
+          }
+          ref={bodyRef}
+        >
           {activeTab === "course" ? (
             selectedCard.type === "course" ? (
-              <CourseConfigurationTab draft={draft} term={term} mergeState={mergeState} onDraftChange={onDraftChange} onMergeUp={onMergeUp} onMergeLeft={onMergeLeft} onMergeRight={onMergeRight} onMergeDown={onMergeDown} onSplit={onSplit} onDeleteCourse={onDeleteCourse} onAddCourse={onAddCourse} onGlobalStyleApply={onGlobalStyleApply} onGlobalScheduleApply={onGlobalScheduleApply} />
+              <CourseConfigurationTab
+                draft={draft}
+                term={term}
+                mergeState={mergeState}
+                onDraftChange={onDraftChange}
+                onMergeUp={onMergeUp}
+                onMergeLeft={onMergeLeft}
+                onMergeRight={onMergeRight}
+                onMergeDown={onMergeDown}
+                onSplit={onSplit}
+                onDeleteCourse={onDeleteCourse}
+                onGlobalStyleApply={onGlobalStyleApply}
+                onGlobalScheduleApply={onGlobalScheduleApply}
+              />
             ) : (
-              <PeriodConfigurationTab draft={draft} onDraftChange={onDraftChange} />
+              <PeriodConfigurationTab
+                draft={draft}
+                onDraftChange={onDraftChange}
+              />
             )
           ) : (
             <TemporaryChangesTab
-              key={`${selectedCard.courseId}:${activeTemporaryChangeId ?? "new"}`}
               changes={temporaryChanges}
               activeChangeId={activeTemporaryChangeId}
               term={term}
@@ -141,7 +194,6 @@ export function CardSettingsWindow({
             />
           )}
         </div>
-
       </section>
     </div>
   );
@@ -158,7 +210,6 @@ function CourseConfigurationTab({
   onMergeDown,
   onSplit,
   onDeleteCourse,
-  onAddCourse,
   onGlobalStyleApply,
   onGlobalScheduleApply,
 }: {
@@ -172,7 +223,6 @@ function CourseConfigurationTab({
   onMergeDown: () => void;
   onSplit: () => void;
   onDeleteCourse: () => void;
-  onAddCourse: () => void;
   onGlobalStyleApply: () => void;
   onGlobalScheduleApply: () => void;
 }) {
@@ -204,7 +254,12 @@ function CourseConfigurationTab({
           </div>
           <div className="basic-info-color">
             <span>颜色</span>
-            <ColorPickerRow value={draft.backgroundColor} onChange={(backgroundColor) => onDraftChange({ ...draft, backgroundColor })} />
+            <ColorPickerRow
+              value={draft.backgroundColor}
+              onChange={(backgroundColor) =>
+                onDraftChange({ ...draft, backgroundColor })
+              }
+            />
           </div>
         </div>
       </SettingsCard>
@@ -213,15 +268,27 @@ function CourseConfigurationTab({
         <details className="row-card row-card-accordion accordion-style">
           <summary>
             <span className="row-card-label">风格</span>
-              <span className="card-settings-accordion-chevron" aria-hidden="true">
-                ▾
-              </span>
+            <span
+              className="card-settings-accordion-chevron"
+              aria-hidden="true"
+            >
+              ▾
+            </span>
           </summary>
           <div className="row-card-accordion-content">
             <div className="style-row-stack">
               <div className="style-row-grid">
                 <CompactField label="字体">
-                  <select className="card-settings-select" value={draft.fontFamily} onChange={(event) => onDraftChange({ ...draft, fontFamily: event.currentTarget.value })}>
+                  <select
+                    className="card-settings-select"
+                    value={draft.fontFamily}
+                    onChange={(event) =>
+                      onDraftChange({
+                        ...draft,
+                        fontFamily: event.currentTarget.value,
+                      })
+                    }
+                  >
                     <option value="Microsoft YaHei">微软雅黑</option>
                     <option value="Segoe UI">Segoe UI</option>
                     <option value="SimSun">宋体</option>
@@ -229,7 +296,20 @@ function CourseConfigurationTab({
                   </select>
                 </CompactField>
                 <CompactField label="字号">
-                  <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 8, 16) })}>
+                  <select
+                    className="card-settings-select"
+                    value={draft.fontSize}
+                    onChange={(event) =>
+                      onDraftChange({
+                        ...draft,
+                        fontSize: clamp(
+                          Number(event.currentTarget.value),
+                          8,
+                          16,
+                        ),
+                      })
+                    }
+                  >
                     {courseFontSizeOptions.map((size) => (
                       <option key={size} value={size}>
                         {size}
@@ -238,32 +318,58 @@ function CourseConfigurationTab({
                   </select>
                 </CompactField>
                 <CompactField label="粗细">
-                  <select className="card-settings-select" value={draft.fontWeight} onChange={(event) => onDraftChange({ ...draft, fontWeight: event.currentTarget.value as CardDraft["fontWeight"] })}>
+                  <select
+                    className="card-settings-select"
+                    value={draft.fontWeight}
+                    onChange={(event) =>
+                      onDraftChange({
+                        ...draft,
+                        fontWeight: event.currentTarget
+                          .value as CardDraft["fontWeight"],
+                      })
+                    }
+                  >
                     <option value="regular">常规</option>
                     <option value="medium">中等</option>
                     <option value="bold">加粗</option>
                   </select>
                 </CompactField>
               </div>
-          <div className="style-row-secondary">
-            <div className="card-settings-field display-mode-control">
-              <select
-                className="card-settings-select card-settings-select-narrow display-mode-select"
-                value={draft.displayMode}
-                onChange={(event) => onDraftChange({ ...draft, displayMode: event.currentTarget.value as typeof draft.displayMode })}
-              >
-                    <option value="auto" title="有辅助信息时自动显示双行，没有辅助信息时显示单行">
+              <div className="style-row-secondary">
+                <div className="card-settings-field display-mode-control">
+                  <select
+                    className="card-settings-select card-settings-select-narrow display-mode-select"
+                    value={draft.displayMode}
+                    onChange={(event) =>
+                      onDraftChange({
+                        ...draft,
+                        displayMode: event.currentTarget
+                          .value as typeof draft.displayMode,
+                      })
+                    }
+                  >
+                    <option
+                      value="auto"
+                      title="有辅助信息时自动显示双行，没有辅助信息时显示单行"
+                    >
                       自动
                     </option>
                     <option value="oneLine" title="只显示一行课程名">
                       单行
                     </option>
-                    <option value="twoLine" title="有辅助信息时固定双行，没有辅助信息时自动退回单行">
+                    <option
+                      value="twoLine"
+                      title="有辅助信息时固定双行，没有辅助信息时自动退回单行"
+                    >
                       双行
                     </option>
                   </select>
                 </div>
-                <button type="button" className="card-settings-secondary action-global-apply" onClick={onGlobalStyleApply}>
+                <button
+                  type="button"
+                  className="card-settings-secondary action-global-apply"
+                  onClick={onGlobalStyleApply}
+                >
                   全局应用
                 </button>
               </div>
@@ -274,37 +380,67 @@ function CourseConfigurationTab({
         <details className="row-card row-card-accordion accordion-date">
           <summary>
             <span className="row-card-label">排课日期</span>
-              <span className="card-settings-accordion-chevron" aria-hidden="true">
-                ▾
-              </span>
+            <span
+              className="card-settings-accordion-chevron"
+              aria-hidden="true"
+            >
+              ▾
+            </span>
           </summary>
           <div className="row-card-accordion-content">
             <div className="schedule-row-top">
               <DatePickerField
                 label="开始日期"
                 value={draft.startDate}
-                onChange={(startDate) => onDraftChange({ ...draft, applyWholeTerm: false, startDate })}
+                onChange={(startDate) =>
+                  onDraftChange({ ...draft, applyWholeTerm: false, startDate })
+                }
               />
               <DatePickerField
                 label="结束日期"
                 value={draft.endDate}
-                onChange={(endDate) => onDraftChange({ ...draft, applyWholeTerm: false, endDate })}
+                onChange={(endDate) =>
+                  onDraftChange({ ...draft, applyWholeTerm: false, endDate })
+                }
               />
             </div>
             <div className="schedule-row-bottom">
               <select
                 className="card-settings-select compact-select schedule-pattern-select"
                 value={draft.weekPattern}
-                onChange={(event) => onDraftChange({ ...draft, weekPattern: event.currentTarget.value as CardDraft["weekPattern"] })}
+                onChange={(event) =>
+                  onDraftChange({
+                    ...draft,
+                    weekPattern: event.currentTarget
+                      .value as CardDraft["weekPattern"],
+                  })
+                }
               >
                 <option value="all">每周</option>
                 <option value="odd">单周</option>
                 <option value="even">双周</option>
               </select>
-              <button type="button" className="icon-chip-button" title="使用学期起止日期" aria-label="使用学期起止日期" onClick={() => onDraftChange({ ...draft, applyWholeTerm: true, startDate: term.startDate, endDate: term.endDate })}>
+              <button
+                type="button"
+                className="icon-chip-button"
+                title="使用学期起止日期"
+                aria-label="使用学期起止日期"
+                onClick={() =>
+                  onDraftChange({
+                    ...draft,
+                    applyWholeTerm: true,
+                    startDate: term.startDate,
+                    endDate: term.endDate,
+                  })
+                }
+              >
                 <CalendarIcon />
               </button>
-              <button type="button" className="card-settings-secondary action-global-apply schedule-global-apply" onClick={onGlobalScheduleApply}>
+              <button
+                type="button"
+                className="card-settings-secondary action-global-apply schedule-global-apply"
+                onClick={onGlobalScheduleApply}
+              >
                 全局应用
               </button>
             </div>
@@ -314,27 +450,51 @@ function CourseConfigurationTab({
         <details className="row-card row-card-accordion accordion-merge">
           <summary>
             <span className="row-card-label">合并 / 拆分</span>
-              <span className="card-settings-accordion-chevron" aria-hidden="true">
-                ▾
-              </span>
+            <span
+              className="card-settings-accordion-chevron"
+              aria-hidden="true"
+            >
+              ▾
+            </span>
           </summary>
           <div className="row-card-accordion-content">
             <div className="merge-panel">
               <div className="merge-dpad" aria-label="合并方向">
-                <button type="button" disabled={!mergeState.canMergeUp} onClick={onMergeUp}>
+                <button
+                  type="button"
+                  disabled={!mergeState.canMergeUp}
+                  onClick={onMergeUp}
+                >
                   上合并
                 </button>
-                <button type="button" disabled={!mergeState.canMergeLeft} onClick={onMergeLeft}>
+                <button
+                  type="button"
+                  disabled={!mergeState.canMergeLeft}
+                  onClick={onMergeLeft}
+                >
                   左合并
                 </button>
-                <button type="button" disabled={!mergeState.canMergeRight} onClick={onMergeRight}>
+                <button
+                  type="button"
+                  disabled={!mergeState.canMergeRight}
+                  onClick={onMergeRight}
+                >
                   右合并
                 </button>
-                <button type="button" disabled={!mergeState.canMergeDown} onClick={onMergeDown}>
+                <button
+                  type="button"
+                  disabled={!mergeState.canMergeDown}
+                  onClick={onMergeDown}
+                >
                   下合并
                 </button>
               </div>
-              <button className="split-card-button" type="button" disabled={!mergeState.canSplit} onClick={onSplit}>
+              <button
+                className="split-card-button"
+                type="button"
+                disabled={!mergeState.canSplit}
+                onClick={onSplit}
+              >
                 拆分
               </button>
             </div>
@@ -342,11 +502,12 @@ function CourseConfigurationTab({
         </details>
       </div>
       <div className="course-config-footer">
-        <button type="button" className="card-settings-footer-action card-settings-danger" onClick={onDeleteCourse}>
+        <button
+          type="button"
+          className="card-settings-footer-action card-settings-danger"
+          onClick={onDeleteCourse}
+        >
           删除
-        </button>
-        <button type="button" className="card-settings-footer-action card-settings-add" onClick={onAddCourse}>
-          添加
         </button>
       </div>
     </div>
@@ -366,9 +527,18 @@ function PeriodConfigurationTab({
         <div className="period-primary-grid">
           <label className="period-settings-field">
             <span>课次</span>
-            <LimitedTextInput className="card-settings-input period-name-input" value={draft.title} maxLength={3} placeholder="第5节" onCommit={(title) => onDraftChange({ ...draft, title })} />
+            <LimitedTextInput
+              className="card-settings-input period-name-input"
+              value={draft.title}
+              maxLength={3}
+              placeholder="第5节"
+              onCommit={(title) => onDraftChange({ ...draft, title })}
+            />
           </label>
-          <TimeRangeField value={draft.secondary} onChange={(secondary) => onDraftChange({ ...draft, secondary })} />
+          <TimeRangeField
+            value={draft.secondary}
+            onChange={(secondary) => onDraftChange({ ...draft, secondary })}
+          />
         </div>
       </SettingsCard>
 
@@ -376,7 +546,16 @@ function PeriodConfigurationTab({
         <div className="period-style-grid">
           <label className="period-settings-field">
             <span>字体</span>
-            <select className="card-settings-select" value={draft.fontFamily} onChange={(event) => onDraftChange({ ...draft, fontFamily: event.currentTarget.value })}>
+            <select
+              className="card-settings-select"
+              value={draft.fontFamily}
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  fontFamily: event.currentTarget.value,
+                })
+              }
+            >
               <option value="Microsoft YaHei">微软雅黑</option>
               <option value="Segoe UI">Segoe UI</option>
               <option value="SimSun">宋体</option>
@@ -385,7 +564,16 @@ function PeriodConfigurationTab({
           </label>
           <label className="period-settings-field">
             <span>字号</span>
-            <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 8, 16) })}>
+            <select
+              className="card-settings-select"
+              value={draft.fontSize}
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  fontSize: clamp(Number(event.currentTarget.value), 8, 16),
+                })
+              }
+            >
               {periodFontSizeOptions.map((size) => (
                 <option key={size} value={size}>
                   {size}
@@ -397,11 +585,21 @@ function PeriodConfigurationTab({
         <div className="period-color-grid">
           <div className="period-color-field">
             <span>字体颜色</span>
-            <ColorPickerRow value={draft.color} onChange={(color) => onDraftChange({ ...draft, color, iconColor: color })} />
+            <ColorPickerRow
+              value={draft.color}
+              onChange={(color) =>
+                onDraftChange({ ...draft, color, iconColor: color })
+              }
+            />
           </div>
           <div className="period-color-field">
             <span>背景颜色</span>
-            <ColorPickerRow value={draft.backgroundColor} onChange={(backgroundColor) => onDraftChange({ ...draft, backgroundColor })} />
+            <ColorPickerRow
+              value={draft.backgroundColor}
+              onChange={(backgroundColor) =>
+                onDraftChange({ ...draft, backgroundColor })
+              }
+            />
           </div>
         </div>
       </SettingsCard>
@@ -414,20 +612,56 @@ function PeriodConfigurationTab({
         <div className="basic-inline-inputs">
           <label>
             <span>课次</span>
-            <input className="card-settings-input" value={draft.title} maxLength={4} placeholder="课次" onChange={(event) => onDraftChange({ ...draft, title: limitCardText(event.currentTarget.value) })} />
+            <input
+              className="card-settings-input"
+              value={draft.title}
+              maxLength={4}
+              placeholder="课次"
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  title: limitCardText(event.currentTarget.value),
+                })
+              }
+            />
           </label>
           <label>
             <span>时间</span>
-            <input className="card-settings-input" value={draft.secondary} maxLength={4} placeholder="时间" onChange={(event) => onDraftChange({ ...draft, secondary: limitCardText(event.currentTarget.value) })} />
+            <input
+              className="card-settings-input"
+              value={draft.secondary}
+              maxLength={4}
+              placeholder="时间"
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  secondary: limitCardText(event.currentTarget.value),
+                })
+              }
+            />
           </label>
         </div>
         <SettingRow label="颜色">
-        <ColorPickerRow value={draft.backgroundColor} onChange={(backgroundColor) => onDraftChange({ ...draft, backgroundColor })} />
+          <ColorPickerRow
+            value={draft.backgroundColor}
+            onChange={(backgroundColor) =>
+              onDraftChange({ ...draft, backgroundColor })
+            }
+          />
         </SettingRow>
         <div className="typography-matrix">
           <label>
             <span>字体</span>
-            <select className="card-settings-select" value={draft.fontFamily} onChange={(event) => onDraftChange({ ...draft, fontFamily: event.currentTarget.value })}>
+            <select
+              className="card-settings-select"
+              value={draft.fontFamily}
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  fontFamily: event.currentTarget.value,
+                })
+              }
+            >
               <option value="Microsoft YaHei">微软雅黑</option>
               <option value="Segoe UI">Segoe UI</option>
               <option value="SimSun">宋体</option>
@@ -436,7 +670,16 @@ function PeriodConfigurationTab({
           </label>
           <label>
             <span>字号</span>
-            <select className="card-settings-select" value={draft.fontSize} onChange={(event) => onDraftChange({ ...draft, fontSize: clamp(Number(event.currentTarget.value), 8, 16) })}>
+            <select
+              className="card-settings-select"
+              value={draft.fontSize}
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  fontSize: clamp(Number(event.currentTarget.value), 8, 16),
+                })
+              }
+            >
               {periodFontSizeOptions.map((size) => (
                 <option key={size} value={size}>
                   {size}
@@ -450,7 +693,13 @@ function PeriodConfigurationTab({
   );
 }
 
-function TimeRangeField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function TimeRangeField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
   const { start, end } = splitTimeRange(value);
 
   const updateTime = (nextStart: string, nextEnd: string) => {
@@ -523,22 +772,60 @@ function TemporaryChangesTab({
   onRemoveChange: (id: string) => void;
   onEditorTitleChange: (title: string) => void;
 }) {
-  const sortedChanges = useMemo(() => [...changes].sort(sortTemporaryChangesByUpdatedAt), [changes]);
-  const activeChange = sortedChanges.find((change) => change.id === activeChangeId) ?? null;
+  const sortedChanges = useMemo(
+    () => [...changes].sort(sortTemporaryChangesByDate),
+    [changes],
+  );
+  const historyEntries = useMemo(
+    () => createTemporaryHistoryEntries(changes),
+    [changes],
+  );
+  const [activeHistoryDate, setActiveHistoryDate] = useState<string | null>(
+    null,
+  );
+  const activeSourceChange =
+    sortedChanges.find((change) => change.id === activeChangeId) ?? null;
+  const activeChange = useMemo(
+    () =>
+      activeSourceChange
+        ? {
+            ...activeSourceChange,
+            dates: activeHistoryDate
+              ? [activeHistoryDate]
+              : activeSourceChange.dates.slice(0, 1),
+          }
+        : null,
+    [activeHistoryDate, activeSourceChange],
+  );
   const resolvedDefaultDate = useMemo(
     () => resolveDefaultTemporaryDate(defaultDate, titleContext, term),
     [defaultDate, term, titleContext],
   );
-  const [editor, setEditor] = useState<TemporaryChangeDraft>(() => createEditableTemporaryChange(activeChange, resolvedDefaultDate));
+  const [editor, setEditor] = useState<TemporaryChangeDraft>(() =>
+    createEditableTemporaryChange(activeChange, resolvedDefaultDate),
+  );
   const defaultDateSeededRef = useRef(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const [replaceConfirmChange, setReplaceConfirmChange] = useState<TemporaryChangeDraft | null>(null);
+  const [replaceConfirmChange, setReplaceConfirmChange] =
+    useState<TemporaryChangeDraft | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(true);
   const isNoClass = editor.type === "cancel";
   const sortedEditorDates = sortDates(editor.dates);
 
   useEffect(() => {
-    setEditor(createEditableTemporaryChange(activeChange, activeChange ? undefined : resolvedDefaultDate));
+    if (!activeChangeId) {
+      setActiveHistoryDate(null);
+    }
+  }, [activeChangeId]);
+
+  useEffect(() => {
+    setEditor(
+      createEditableTemporaryChange(
+        activeChange,
+        activeChange ? undefined : resolvedDefaultDate,
+      ),
+    );
     if (activeChange) {
       defaultDateSeededRef.current = true;
     } else {
@@ -574,7 +861,8 @@ function TemporaryChangesTab({
       ...current,
       ...patch,
       replaceTitle: patch.title ?? patch.replaceTitle ?? current.replaceTitle,
-      replaceSecondary: patch.subtitle ?? patch.replaceSecondary ?? current.replaceSecondary,
+      replaceSecondary:
+        patch.subtitle ?? patch.replaceSecondary ?? current.replaceSecondary,
       replaceColor: patch.color ?? patch.replaceColor ?? current.replaceColor,
     }));
   };
@@ -608,7 +896,7 @@ function TemporaryChangesTab({
     updateEditor({ dates: nextDates });
   };
 
-  const saveChange = (forceReplace = false) => {
+  const saveChange = (_forceReplace = false) => {
     const normalized = normalizeTemporaryEditor(editor);
     if (normalized.dates.length === 0) {
       setFeedback("请至少选择一个改动日期");
@@ -620,36 +908,100 @@ function TemporaryChangesTab({
       return;
     }
 
-    const anotherEffective = changes.find((change) => change.id !== normalized.id && isEffectiveTemporaryChange(change));
-    if (!forceReplace && isEffectiveTemporaryChange(normalized) && anotherEffective) {
-      setReplaceConfirmChange(normalized);
+    if (activeChangeId && normalized.dates.length > 1) {
+      setFeedback("每次只能修改一条改动信息");
       return;
     }
 
-    if (forceReplace) {
-      changes
-        .filter((change) => change.id !== normalized.id && isEffectiveTemporaryChange(change))
-        .forEach((change) => onRemoveChange(change.id));
+    const conflictDate = normalized.dates.find((date) =>
+      changes.some(
+        (change) =>
+          change.dates.includes(date) &&
+          !(change.id === normalized.id && activeHistoryDate === date),
+      ),
+    );
+    if (conflictDate) {
+      setFeedback(
+        `${formatDateChip(conflictDate)} 已有临时改课，重复改课。请先删除冲突的改课信息后再添加。`,
+      );
+      return;
     }
 
-    onUpdateChange(normalized);
-    onSelectChange(normalized.id);
-    setEditor(normalized);
+    if (normalized.dates.length === 1) {
+      const shouldSplitPackedEntry = Boolean(
+        activeSourceChange &&
+        activeSourceChange.dates.length > 1 &&
+        activeHistoryDate,
+      );
+      const nextChange = shouldSplitPackedEntry
+        ? {
+            ...normalized,
+            id: `${normalized.id}-${normalized.dates[0]}-${Date.now().toString(36)}`,
+          }
+        : normalized;
+      if (shouldSplitPackedEntry && activeSourceChange && activeHistoryDate) {
+        onUpdateChange({
+          ...activeSourceChange,
+          dates: activeSourceChange.dates.filter(
+            (date) => date !== activeHistoryDate,
+          ),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      onUpdateChange(nextChange);
+      onSelectChange(nextChange.id);
+      setActiveHistoryDate(nextChange.dates[0]);
+      setEditor(nextChange);
+      setReplaceConfirmChange(null);
+      setFeedback("已保存");
+      return;
+    }
+
+    const timestamp = Date.now().toString(36);
+    const splitChanges = normalized.dates.map((date, index) => ({
+      ...normalized,
+      id: `${normalized.id}-${date}-${timestamp}-${index}`,
+      dates: [date],
+    }));
+    splitChanges.forEach(onUpdateChange);
+    onSelectChange(splitChanges[0]?.id ?? null);
+    setActiveHistoryDate(splitChanges[0]?.dates[0] ?? null);
+    setEditor(splitChanges[0] ?? createEditableTemporaryChange(null));
     setReplaceConfirmChange(null);
     setFeedback("已保存");
   };
 
-  const deleteHistory = () => {
-    if (!activeChange) {
+  const deleteHistoryEntry = (entry: TemporaryHistoryEntry) => {
+    if (entry.completed) {
       return;
     }
 
-    if (!window.confirm("是否删除该条临时改动历史？")) {
-      return;
+    if (entry.change.dates.length > 1) {
+      onUpdateChange({
+        ...entry.change,
+        dates: entry.change.dates.filter((date) => date !== entry.date),
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      onRemoveChange(entry.change.id);
     }
 
-    onRemoveChange(activeChange.id);
+    onSelectChange(null);
+    setActiveHistoryDate(null);
     setEditor(createEditableTemporaryChange(null));
+    setFeedback("");
+  };
+
+  const editHistoryEntry = (entry: TemporaryHistoryEntry) => {
+    if (entry.completed) {
+      return;
+    }
+    setActiveHistoryDate(entry.date);
+    onSelectChange(entry.change.id);
+    setEditor(
+      createEditableTemporaryChange({ ...entry.change, dates: [entry.date] }),
+    );
+    setHistoryOpen(true);
     setFeedback("");
   };
 
@@ -660,23 +1012,57 @@ function TemporaryChangesTab({
           {sortedEditorDates.map((date) => (
             <span className="date-chip" key={date}>
               {formatDateChip(date)}
-              <button type="button" aria-label={`删除 ${date}`} onClick={() => removeDate(date)}>
+              <button
+                type="button"
+                aria-label={`删除 ${date}`}
+                onClick={() => removeDate(date)}
+              >
                 ×
               </button>
             </span>
           ))}
-          <button type="button" className="temporary-date-add" title="选择日期" aria-label="选择日期" onClick={() => setCalendarOpen(true)}>
+          <button
+            type="button"
+            className="temporary-date-add"
+            title="选择日期"
+            aria-label="选择日期"
+            onClick={() => setCalendarOpen(true)}
+          >
             +
           </button>
         </div>
       </SettingsCard>
 
-      <div className="temporary-mode-radio-row" role="radiogroup" aria-label="临时改动类型">
-        <button type="button" role="radio" aria-checked={isNoClass} className={isNoClass ? "temporary-radio-option is-active" : "temporary-radio-option"} onClick={() => setTemporaryMode("cancel")}>
+      <div
+        className="temporary-mode-radio-row"
+        role="radiogroup"
+        aria-label="临时改动类型"
+      >
+        <button
+          type="button"
+          role="radio"
+          aria-checked={isNoClass}
+          className={
+            isNoClass
+              ? "temporary-radio-option is-active"
+              : "temporary-radio-option"
+          }
+          onClick={() => setTemporaryMode("cancel")}
+        >
           <span aria-hidden="true" />
           不上啦
         </button>
-        <button type="button" role="radio" aria-checked={!isNoClass} className={!isNoClass ? "temporary-radio-option is-active" : "temporary-radio-option"} onClick={() => setTemporaryMode("replace")}>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={!isNoClass}
+          className={
+            !isNoClass
+              ? "temporary-radio-option is-active"
+              : "temporary-radio-option"
+          }
+          onClick={() => setTemporaryMode("replace")}
+        >
           <span aria-hidden="true" />
           换课
         </button>
@@ -710,7 +1096,10 @@ function TemporaryChangesTab({
               </div>
               <div className="basic-info-color">
                 <span>颜色</span>
-                <ColorPickerRow value={editor.color} onChange={(color) => updateEditor({ color })} />
+                <ColorPickerRow
+                  value={editor.color}
+                  onChange={(color) => updateEditor({ color })}
+                />
               </div>
             </div>
 
@@ -718,7 +1107,10 @@ function TemporaryChangesTab({
               <details className="row-card row-card-accordion accordion-style">
                 <summary>
                   <span className="row-card-label">风格</span>
-                  <span className="card-settings-accordion-chevron" aria-hidden="true">
+                  <span
+                    className="card-settings-accordion-chevron"
+                    aria-hidden="true"
+                  >
                     ▾
                   </span>
                 </summary>
@@ -726,7 +1118,18 @@ function TemporaryChangesTab({
                   <div className="style-row-stack">
                     <div className="style-row-grid">
                       <CompactField label="字体">
-                        <select className="card-settings-select" value={editor.style.fontFamily} onChange={(event) => updateEditor({ style: { ...editor.style, fontFamily: event.currentTarget.value } })}>
+                        <select
+                          className="card-settings-select"
+                          value={editor.style.fontFamily}
+                          onChange={(event) =>
+                            updateEditor({
+                              style: {
+                                ...editor.style,
+                                fontFamily: event.currentTarget.value,
+                              },
+                            })
+                          }
+                        >
                           <option value="Microsoft YaHei">微软雅黑</option>
                           <option value="Segoe UI">Segoe UI</option>
                           <option value="SimSun">宋体</option>
@@ -734,7 +1137,22 @@ function TemporaryChangesTab({
                         </select>
                       </CompactField>
                       <CompactField label="字号">
-                        <select className="card-settings-select" value={editor.style.fontSize} onChange={(event) => updateEditor({ style: { ...editor.style, fontSize: clamp(Number(event.currentTarget.value), 8, 16) } })}>
+                        <select
+                          className="card-settings-select"
+                          value={editor.style.fontSize}
+                          onChange={(event) =>
+                            updateEditor({
+                              style: {
+                                ...editor.style,
+                                fontSize: clamp(
+                                  Number(event.currentTarget.value),
+                                  8,
+                                  16,
+                                ),
+                              },
+                            })
+                          }
+                        >
                           {courseFontSizeOptions.map((size) => (
                             <option key={size} value={size}>
                               {size}
@@ -743,7 +1161,19 @@ function TemporaryChangesTab({
                         </select>
                       </CompactField>
                       <CompactField label="粗细">
-                        <select className="card-settings-select" value={editor.style.fontWeight} onChange={(event) => updateEditor({ style: { ...editor.style, fontWeight: event.currentTarget.value as CardDraft["fontWeight"] } })}>
+                        <select
+                          className="card-settings-select"
+                          value={editor.style.fontWeight}
+                          onChange={(event) =>
+                            updateEditor({
+                              style: {
+                                ...editor.style,
+                                fontWeight: event.currentTarget
+                                  .value as CardDraft["fontWeight"],
+                              },
+                            })
+                          }
+                        >
                           <option value="regular">常规</option>
                           <option value="medium">中等</option>
                           <option value="bold">加粗</option>
@@ -755,15 +1185,29 @@ function TemporaryChangesTab({
                         <select
                           className="card-settings-select card-settings-select-narrow display-mode-select"
                           value={editor.style.displayMode}
-                          onChange={(event) => updateEditor({ style: { ...editor.style, displayMode: event.currentTarget.value as CardDraft["displayMode"] } })}
+                          onChange={(event) =>
+                            updateEditor({
+                              style: {
+                                ...editor.style,
+                                displayMode: event.currentTarget
+                                  .value as CardDraft["displayMode"],
+                              },
+                            })
+                          }
                         >
-                          <option value="auto" title="有辅助信息时自动显示双行，没有辅助信息时显示单行">
+                          <option
+                            value="auto"
+                            title="有辅助信息时自动显示双行，没有辅助信息时显示单行"
+                          >
                             自动
                           </option>
                           <option value="oneLine" title="只显示一行课程名">
                             单行
                           </option>
-                          <option value="twoLine" title="有辅助信息时固定双行，没有辅助信息时自动退回单行">
+                          <option
+                            value="twoLine"
+                            title="有辅助信息时固定双行，没有辅助信息时自动退回单行"
+                          >
                             双行
                           </option>
                         </select>
@@ -777,12 +1221,20 @@ function TemporaryChangesTab({
         </SettingsCard>
       ) : null}
 
-      <button type="button" className="temporary-save-button" onClick={() => saveChange(false)}>
+      <button
+        type="button"
+        className="temporary-save-button"
+        onClick={() => saveChange(false)}
+      >
         确认并保存
       </button>
       {feedback ? <div className="temporary-feedback">{feedback}</div> : null}
 
-      <details className="settings-card temporary-history-drawer">
+      <details
+        className="settings-card temporary-history-drawer"
+        open={historyOpen}
+        onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+      >
         <summary>
           <span>改动历史</span>
           <span className="card-settings-accordion-chevron" aria-hidden="true">
@@ -790,24 +1242,49 @@ function TemporaryChangesTab({
           </span>
         </summary>
         <div className="settings-card-content temporary-history-content">
-          <div className="temporary-history-actions">
-            <button type="button" className="card-settings-secondary temporary-delete-history" disabled={!activeChange} onClick={deleteHistory}>
-              删除该条历史
-            </button>
-          </div>
-          {sortedChanges.length === 0 ? (
-            <div className="temporary-list-empty">暂无改动历史</div>
+          {historyEntries.length === 0 ? (
+            <div className="temporary-list-empty">
+              {"\u6682\u65e0\u6539\u52a8\u5386\u53f2"}
+            </div>
           ) : (
             <div className="temporary-history-list">
-              {sortedChanges.map((change) => (
-                <button
-                  key={change.id}
-                  type="button"
-                  className={change.id === activeChange?.id ? "temporary-history-item is-active" : "temporary-history-item"}
-                  onClick={() => onSelectChange(change.id)}
+              {historyEntries.map((entry) => (
+                <div
+                  key={`${entry.change.id}:${entry.date}`}
+                  className={[
+                    "temporary-history-item",
+                    entry.change.id === activeChange?.id &&
+                    entry.date === activeHistoryDate
+                      ? "is-active"
+                      : "",
+                    entry.completed ? "is-completed" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 >
-                  {formatTemporaryHistorySummary(change)}
-                </button>
+                  <button
+                    type="button"
+                    className="temporary-history-item-main"
+                    disabled={entry.completed}
+                    onClick={() => editHistoryEntry(entry)}
+                  >
+                    {formatTemporaryHistoryEntrySummary(entry)}
+                  </button>
+                  {entry.completed ? (
+                    <span className="temporary-history-status">
+                      {"\u5df2\u5b8c\u7ed3"}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="temporary-history-delete"
+                      aria-label={"\u5220\u9664\u6539\u52a8\u5386\u53f2"}
+                      onClick={() => deleteHistoryEntry(entry)}
+                    >
+                      {"\u5220\u9664"}
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           )}
@@ -826,14 +1303,29 @@ function TemporaryChangesTab({
       ) : null}
 
       {replaceConfirmChange ? (
-        <div className="temporary-confirm-overlay" role="alertdialog" aria-modal="true" aria-label="替换临时改动">
+        <div
+          className="temporary-confirm-overlay"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="替换临时改动"
+        >
           <div className="temporary-confirm-dialog">
-            <p>当前课程已有一条有效临时改动。保存后将替换原有效改动，是否继续？</p>
+            <p>
+              当前课程已有一条有效临时改动。保存后将替换原有效改动，是否继续？
+            </p>
             <div>
-              <button type="button" className="card-settings-secondary" onClick={() => setReplaceConfirmChange(null)}>
+              <button
+                type="button"
+                className="card-settings-secondary"
+                onClick={() => setReplaceConfirmChange(null)}
+              >
                 取消
               </button>
-              <button type="button" className="temporary-confirm-primary" onClick={() => saveChange(true)}>
+              <button
+                type="button"
+                className="temporary-confirm-primary"
+                onClick={() => saveChange(true)}
+              >
                 替换并保存
               </button>
             </div>
@@ -855,27 +1347,49 @@ function MultiSelectCalendarDialog({
 }) {
   const initialMonth = getCalendarInitialMonth(selectedDates);
   const [monthDate, setMonthDate] = useState(initialMonth);
-  const [draftDates, setDraftDates] = useState<string[]>(() => sortDates(selectedDates));
+  const [draftDates, setDraftDates] = useState<string[]>(() =>
+    sortDates(selectedDates),
+  );
   const days = buildCalendarMonthDays(monthDate);
   const monthLabel = `${monthDate.getFullYear()}年${monthDate.getMonth() + 1}月`;
 
   const shiftMonth = (delta: number) => {
-    setMonthDate((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
+    setMonthDate(
+      (current) =>
+        new Date(current.getFullYear(), current.getMonth() + delta, 1),
+    );
   };
 
   const toggleDate = (date: string) => {
-    setDraftDates((current) => (current.includes(date) ? current.filter((item) => item !== date) : sortDates([...current, date])));
+    setDraftDates((current) =>
+      current.includes(date)
+        ? current.filter((item) => item !== date)
+        : sortDates([...current, date]),
+    );
   };
 
   return (
-    <div className="temporary-calendar-overlay" role="dialog" aria-modal="true" aria-label="选择改动日期">
+    <div
+      className="temporary-calendar-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="选择改动日期"
+    >
       <div className="temporary-calendar-dialog">
         <header className="temporary-calendar-header">
-          <button type="button" aria-label="上一月" onClick={() => shiftMonth(-1)}>
+          <button
+            type="button"
+            aria-label="上一月"
+            onClick={() => shiftMonth(-1)}
+          >
             ‹
           </button>
           <strong>{monthLabel}</strong>
-          <button type="button" aria-label="下一月" onClick={() => shiftMonth(1)}>
+          <button
+            type="button"
+            aria-label="下一月"
+            onClick={() => shiftMonth(1)}
+          >
             ›
           </button>
         </header>
@@ -893,7 +1407,9 @@ function MultiSelectCalendarDialog({
                 "temporary-calendar-day",
                 day.inMonth ? "" : "is-outside",
                 draftDates.includes(day.date) ? "is-selected" : "",
-              ].filter(Boolean).join(" ")}
+              ]
+                .filter(Boolean)
+                .join(" ")}
               onClick={() => toggleDate(day.date)}
             >
               {day.dayOfMonth}
@@ -901,13 +1417,25 @@ function MultiSelectCalendarDialog({
           ))}
         </div>
         <footer className="temporary-calendar-footer">
-          <button type="button" className="card-settings-secondary" onClick={onCancel}>
+          <button
+            type="button"
+            className="card-settings-secondary"
+            onClick={onCancel}
+          >
             取消
           </button>
-          <button type="button" className="card-settings-secondary" onClick={() => setDraftDates([])}>
+          <button
+            type="button"
+            className="card-settings-secondary"
+            onClick={() => setDraftDates([])}
+          >
             清空
           </button>
-          <button type="button" className="temporary-confirm-primary" onClick={() => onConfirm(sortDates(draftDates))}>
+          <button
+            type="button"
+            className="temporary-confirm-primary"
+            onClick={() => onConfirm(sortDates(draftDates))}
+          >
             确定
           </button>
         </footer>
@@ -916,7 +1444,17 @@ function MultiSelectCalendarDialog({
   );
 }
 
-function SettingsCard({ title, action, className, children }: { title?: string; action?: ReactNode; className?: string; children: ReactNode }) {
+function SettingsCard({
+  title,
+  action,
+  className,
+  children,
+}: {
+  title?: string;
+  action?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
     <section className={["settings-card", className].filter(Boolean).join(" ")}>
       {title ? (
@@ -975,7 +1513,8 @@ function LimitedTextInput({
       }}
       onChange={(event) => {
         const nextValue = event.currentTarget.value;
-        const isComposing = composingRef.current || (event.nativeEvent as InputEvent).isComposing;
+        const isComposing =
+          composingRef.current || (event.nativeEvent as InputEvent).isComposing;
         if (isComposing) {
           setLocalValue(nextValue);
           return;
@@ -994,7 +1533,13 @@ function LimitedTextInput({
   );
 }
 
-function CompactField({ label, children }: { label: string; children: ReactNode }) {
+function CompactField({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
   return (
     <label className="card-settings-field">
       <span>{label}</span>
@@ -1041,7 +1586,13 @@ function DatePickerField({
           value={value}
           onChange={(event) => onChange(event.currentTarget.value)}
         />
-        <button type="button" className="date-picker-icon-button" aria-label={`打开${label}日历`} title={`打开${label}日历`} onClick={openPicker}>
+        <button
+          type="button"
+          className="date-picker-icon-button"
+          aria-label={`打开${label}日历`}
+          title={`打开${label}日历`}
+          onClick={openPicker}
+        >
           <CalendarIcon />
         </button>
       </div>
@@ -1058,7 +1609,13 @@ function RowCard({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function SettingRow({ label, children }: { label: string; children: ReactNode }) {
+function SettingRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
   return (
     <label className="setting-card-row">
       <span>{label}</span>
@@ -1067,31 +1624,55 @@ function SettingRow({ label, children }: { label: string; children: ReactNode })
   );
 }
 
-function ColorPickerRow({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function ColorPickerRow({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <div className="color-dot-row">
       {courseCardPresetColors.map((color) => (
         <button
           key={color.value}
           type="button"
-          className={color.value.toLowerCase() === value.toLowerCase() ? "color-dot is-active" : "color-dot"}
+          className={
+            color.value.toLowerCase() === value.toLowerCase()
+              ? "color-dot is-active"
+              : "color-dot"
+          }
           style={{ "--dot-color": color.value } as CSSProperties}
           aria-label={`选择颜色 ${color.name} ${color.value}`}
           title={`${color.name} ${color.value}`}
           onClick={() => onChange(color.value)}
         />
       ))}
-      <label className="custom-color-trigger" style={{ "--dot-color": value } as CSSProperties} aria-label="自定义颜色" title={value}>
-        <input type="color" value={value} onChange={(event) => onChange(event.currentTarget.value)} />
+      <label
+        className="custom-color-trigger"
+        style={{ "--dot-color": value } as CSSProperties}
+        aria-label="自定义颜色"
+        title={value}
+      >
+        <input
+          type="color"
+          value={value}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
       </label>
     </div>
   );
 }
 
-function createEditableTemporaryChange(change: TemporaryChangeDraft | null, defaultDate?: string): TemporaryChangeDraft {
+function createEditableTemporaryChange(
+  change: TemporaryChangeDraft | null,
+  defaultDate?: string,
+): TemporaryChangeDraft {
   const now = new Date().toISOString();
   return {
-    id: change?.id ?? `temporary-change-${now}-${Math.random().toString(16).slice(2, 8)}`,
+    id:
+      change?.id ??
+      `temporary-change-${now}-${Math.random().toString(16).slice(2, 8)}`,
     type: change?.type ?? "cancel",
     dates: [...(change?.dates ?? (defaultDate ? [defaultDate] : []))],
     title: change?.title ?? change?.replaceTitle ?? "",
@@ -1138,7 +1719,8 @@ function resolveDefaultTemporaryDate(
   const startYear = Number(term.startDate.slice(0, 4));
   const endYear = Number(term.endDate.slice(0, 4));
   const startMonth = Number(term.startDate.slice(5, 7));
-  const year = endYear !== startYear && month < startMonth ? endYear : startYear;
+  const year =
+    endYear !== startYear && month < startMonth ? endYear : startYear;
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
@@ -1146,11 +1728,24 @@ function isIsoDate(value: string | undefined): value is string {
   return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
 
-function normalizeTemporaryEditor(change: TemporaryChangeDraft): TemporaryChangeDraft {
+function getBeijingDateIso(): string {
+  return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function normalizeTemporaryEditor(
+  change: TemporaryChangeDraft,
+): TemporaryChangeDraft {
   const now = new Date().toISOString();
   const isCancel = change.type === "cancel";
-  const title = isCancel ? "无课" : limitCardText(change.title || change.replaceTitle || "");
-  const subtitle = isCancel ? "" : limitTextByCharacters(change.subtitle || change.replaceSecondary || "", 5);
+  const title = isCancel
+    ? "无课"
+    : limitCardText(change.title || change.replaceTitle || "");
+  const subtitle = isCancel
+    ? ""
+    : limitTextByCharacters(
+        change.subtitle || change.replaceSecondary || "",
+        5,
+      );
   const color = (change.color || change.replaceColor || "#4f46e5").trim();
   return {
     ...change,
@@ -1171,8 +1766,37 @@ function isEffectiveTemporaryChange(change: TemporaryChangeDraft): boolean {
   return change.dates.some((date) => date >= todayIso);
 }
 
-function sortTemporaryChangesByUpdatedAt(left: TemporaryChangeDraft, right: TemporaryChangeDraft): number {
-  return Date.parse(right.updatedAt ?? right.createdAt ?? "") - Date.parse(left.updatedAt ?? left.createdAt ?? "");
+function createTemporaryHistoryEntries(
+  changes: TemporaryChangeDraft[],
+): TemporaryHistoryEntry[] {
+  return changes
+    .flatMap((change) =>
+      sortDates(change.dates).map((date) => ({
+        change,
+        date,
+        completed: date < todayIso,
+      })),
+    )
+    .sort((left, right) => right.date.localeCompare(left.date));
+}
+
+function sortTemporaryChangesByDate(
+  left: TemporaryChangeDraft,
+  right: TemporaryChangeDraft,
+): number {
+  const leftDate = sortDates(left.dates)[0] ?? "";
+  const rightDate = sortDates(right.dates)[0] ?? "";
+  return rightDate.localeCompare(leftDate);
+}
+
+function sortTemporaryChangesByUpdatedAt(
+  left: TemporaryChangeDraft,
+  right: TemporaryChangeDraft,
+): number {
+  return (
+    Date.parse(right.updatedAt ?? right.createdAt ?? "") -
+    Date.parse(left.updatedAt ?? left.createdAt ?? "")
+  );
 }
 
 function sortDates(dates: string[]): string[] {
@@ -1187,7 +1811,18 @@ function formatTemporaryHistorySummary(change: TemporaryChangeDraft): string {
 
   const titlePart = change.title || change.replaceTitle || "未命名";
   const subtitlePart = change.subtitle || change.replaceSecondary || "";
-  return [datePart, "换课", titlePart, subtitlePart].filter(Boolean).join(" · ");
+  return [datePart, "换课", titlePart, subtitlePart]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function formatTemporaryHistoryEntrySummary(
+  entry: TemporaryHistoryEntry,
+): string {
+  return formatTemporaryHistorySummary({
+    ...entry.change,
+    dates: [entry.date],
+  });
 }
 
 function summarizeDates(dates: string[]): string {
@@ -1217,13 +1852,16 @@ function getCalendarInitialMonth(dates: string[]): Date {
   return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
 }
 
-function buildCalendarMonthDays(monthDate: Date): Array<{ date: string; dayOfMonth: number; inMonth: boolean }> {
+function buildCalendarMonthDays(
+  monthDate: Date,
+): Array<{ date: string; dayOfMonth: number; inMonth: boolean }> {
   const year = monthDate.getFullYear();
   const month = monthDate.getMonth();
   const firstOfMonth = new Date(year, month, 1);
   const startDay = firstOfMonth.getDay();
   const start = new Date(year, month, 1 - startDay);
-  const result: Array<{ date: string; dayOfMonth: number; inMonth: boolean }> = [];
+  const result: Array<{ date: string; dayOfMonth: number; inMonth: boolean }> =
+    [];
 
   for (let index = 0; index < 42; index += 1) {
     const current = new Date(start);
@@ -1245,9 +1883,28 @@ function formatIsoDate(date: Date): string {
 function CalendarIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-      <rect x="4.5" y="5.5" width="15" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M8 4.5v3M16 4.5v3M5.5 9.5h13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M8 13h3M13 13h3M8 16h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.85" />
+      <rect
+        x="4.5"
+        y="5.5"
+        width="15"
+        height="14"
+        rx="3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M8 4.5v3M16 4.5v3M5.5 9.5h13"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8 13h3M13 13h3M8 16h3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        opacity="0.85"
+      />
     </svg>
   );
 }

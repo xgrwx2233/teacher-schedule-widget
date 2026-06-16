@@ -6,6 +6,7 @@ import type {
   TemporaryChangeDraft,
   WidgetBackgroundMode,
   WidgetSettingsState,
+  PeriodConfigItem,
 } from "./settingsTypes";
 import type { WindowMode } from "../windowMode/types";
 
@@ -17,12 +18,14 @@ export const WIDGET_WINDOW_LABEL = "widget";
 export const AUTH_WINDOW_LABEL = "auth";
 
 export const SETTINGS_WINDOW_STATE_EVENT = "settings-window-state";
-export const SETTINGS_WINDOW_STATE_REQUEST_EVENT = "settings-window-state-request";
+export const SETTINGS_WINDOW_STATE_REQUEST_EVENT =
+  "settings-window-state-request";
 export const SETTINGS_WINDOW_UPDATE_EVENT = "settings-window-update";
 export const SETTINGS_WINDOW_CLOSE_EVENT = "settings-window-close";
 
 export const CARD_SETTINGS_WINDOW_STATE_EVENT = "card-settings-window-state";
-export const CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT = "card-settings-window-state-request";
+export const CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT =
+  "card-settings-window-state-request";
 export const CARD_SETTINGS_WINDOW_UPDATE_EVENT = "card-settings-window-update";
 export const CARD_SETTINGS_WINDOW_CLOSE_EVENT = "card-settings-window-close";
 export const CARD_SETTINGS_WINDOW_ACTION_EVENT = "card-settings-window-action";
@@ -38,7 +41,20 @@ export const AUTH_WINDOW_CLOSED_EVENT = "auth-window-closed";
 
 export type WidgetMenuAction = "settings" | "mode" | "hide";
 export type ToolbarLayoutMode = "normal" | "minimalist";
-export type FloatingToolbarAction = "previous-week" | "next-week" | "layout" | "menu";
+export type FloatingToolbarAction =
+  | "previous-week"
+  | "next-week"
+  | "layout"
+  | "auth"
+  | "sync"
+  | "menu";
+export type FloatingToolbarSyncButtonState =
+  | "disabled"
+  | "synced"
+  | "pending"
+  | "syncing"
+  | "error"
+  | "offline";
 
 export type WidgetMenuStatePayload = {
   mode: WindowMode;
@@ -50,6 +66,13 @@ export type FloatingToolbarStatePayload = {
   menuOpen: boolean;
   toolbarLayoutMode: ToolbarLayoutMode;
   backgroundMode: WidgetBackgroundMode;
+  canPreviousWeek: boolean;
+  canNextWeek: boolean;
+  authLabel: string;
+  authTitle: string;
+  loggedIn: boolean;
+  syncButtonState: FloatingToolbarSyncButtonState;
+  syncTitle: string;
 };
 
 export type FloatingToolbarActionPayload = {
@@ -66,6 +89,7 @@ export type FloatingToolbarActionPayload = {
 export type SettingsWindowStatePayload = {
   settings: WidgetSettingsState;
   activeSection: SettingsSection;
+  periods: PeriodConfigItem[];
   windowMode?: WindowMode;
 };
 
@@ -73,6 +97,7 @@ export type SettingsWindowUpdatePayload = {
   windowLabel: string;
   settings: WidgetSettingsState;
   activeSection: SettingsSection;
+  periods: PeriodConfigItem[];
   windowMode?: WindowMode;
 };
 
@@ -108,7 +133,15 @@ export type CardSettingsWindowUpdatePayload = {
 export type CardSettingsWindowActionPayload = {
   windowLabel: string;
   selectedCard: SelectedCard;
-  action: "merge-up" | "merge-left" | "merge-right" | "merge-down" | "split" | "delete" | "add" | "apply-style" | "apply-schedule";
+  action:
+    | "merge-up"
+    | "merge-left"
+    | "merge-right"
+    | "merge-down"
+    | "split"
+    | "delete"
+    | "apply-style"
+    | "apply-schedule";
   draft?: CardDraft;
   temporaryChanges?: TemporaryChangeDraft[];
   activeTemporaryChangeId?: string | null;

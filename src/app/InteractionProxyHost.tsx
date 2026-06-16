@@ -101,7 +101,8 @@ function findWidgetHit(hitboxes: RectHitbox[], x: number, y: number): ProxyWidge
       hitbox.kind === "header-toggle" ||
       hitbox.kind === "layout-toggle" ||
       hitbox.kind === "previous-week" ||
-      hitbox.kind === "next-week"
+      hitbox.kind === "next-week" ||
+      hitbox.kind === "sync"
     ) {
       return { kind: hitbox.kind, id: hitbox.id };
     }
