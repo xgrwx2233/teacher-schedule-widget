@@ -19,7 +19,10 @@ use std::sync::{
 use std::{thread, time::Duration};
 
 use app_state::AppState;
-use desktop_layer::{attach_to_desktop_icon_layer, is_attached_to_desktop_icon_layer};
+use desktop_layer::{
+    attach_to_desktop_icon_layer, cleanup_desktop_layer_before_exit,
+    is_attached_to_desktop_icon_layer,
+};
 use input_forwarder::start_input_forwarder;
 use tauri::{Manager, Position, Size, WindowEvent};
 use widget_manager::WidgetRegistryStore;
@@ -32,6 +35,7 @@ pub fn run() {
     let attached_mode = Arc::new(AtomicBool::new(true));
     let widget_visible = Arc::new(AtomicBool::new(true));
     let allow_exit = Arc::new(AtomicBool::new(false));
+    let cleanup_done = Arc::new(AtomicBool::new(false));
     let proxy_hitboxes = Arc::new(Mutex::new(Vec::new()));
     let proxy_geometry = Arc::new(Mutex::new(interaction_proxy::ProxyGeometry::default()));
     let proxy_ui_state = Arc::new(Mutex::new(interaction_proxy::ProxyUiState::default()));
@@ -107,6 +111,7 @@ pub fn run() {
                 }))?;
             }
 
+            let _ = wallpaper_watcher::install_wallpaper_change_listener(&window, app.handle());
             let initial_mode = apply_initial_attached_mode(&window, &state, &registry)?;
             window.show()?;
             let _ = settings_windows::create_hidden_auxiliary_windows(app.handle());
@@ -114,7 +119,6 @@ pub fn run() {
                 let _ = interaction_proxy::show_proxy_for_widget(app.handle(), &window, &state);
             }
             let _ = tray::create_tray(app.handle());
-            let _ = wallpaper_watcher::install_wallpaper_change_listener(&window, app.handle());
 
             start_input_forwarder(
                 window.clone(),
@@ -172,6 +176,10 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if !allow_exit.load(Ordering::Relaxed) {
                     api.prevent_exit();
+                } else if !cleanup_done.swap(true, Ordering::Relaxed) {
+                    if let Some(widget) = _app_handle.get_webview_window("widget") {
+                        let _ = cleanup_desktop_layer_before_exit(&widget);
+                    }
                 }
             }
         });

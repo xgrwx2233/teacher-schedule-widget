@@ -71,11 +71,12 @@ pub fn apply_initial_attached_mode<R: Runtime>(
             mode: WindowMode::Attached,
             attach_diagnostics: Some(desktop_layer::attach_diagnostics(window)),
         }),
-        Err(_) => {
-            apply_initial_detached_fallback(window, state, registry)?;
+        Err(error) => {
+            let mut diagnostics = desktop_layer::attach_diagnostics(window);
+            diagnostics.error = Some(error);
             Ok(WindowModeState {
-                mode: WindowMode::Detached,
-                attach_diagnostics: Some(desktop_layer::attach_diagnostics(window)),
+                mode: WindowMode::Attached,
+                attach_diagnostics: Some(diagnostics),
             })
         }
     }
@@ -91,6 +92,8 @@ fn apply_attached_mode<R: Runtime>(
     }
 
     widget_manager::apply_registry_geometry(window, registry)?;
+    state.set_attached(true);
+    widget_manager::set_active_widget_mode(registry, WidgetWindowMode::Attached)?;
     window
         .set_resizable(false)
         .map_err(|error| error.to_string())?;
@@ -98,8 +101,6 @@ fn apply_attached_mode<R: Runtime>(
         .set_skip_taskbar(true)
         .map_err(|error| error.to_string())?;
     desktop_layer::attach_to_desktop_icon_layer(window).map_err(|error| error.to_string())?;
-    widget_manager::set_active_widget_mode(registry, WidgetWindowMode::Attached)?;
-    state.set_attached(true);
     Ok(())
 }
 
@@ -110,8 +111,12 @@ fn apply_detached_mode<R: Runtime>(
 ) -> Result<(), String> {
     widget_manager::save_window_bounds(window, registry)?;
     state.set_attached(false);
+    widget_manager::set_active_widget_mode(registry, WidgetWindowMode::Detached)?;
     desktop_layer::detach_from_desktop_icon_layer(window).map_err(|error| error.to_string())?;
     widget_manager::apply_registry_geometry(window, registry)?;
+    window
+        .set_focusable(true)
+        .map_err(|error| error.to_string())?;
     window
         .set_resizable(true)
         .map_err(|error| error.to_string())?;
@@ -119,24 +124,5 @@ fn apply_detached_mode<R: Runtime>(
         .set_skip_taskbar(false)
         .map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
-    widget_manager::set_active_widget_mode(registry, WidgetWindowMode::Detached)?;
-    Ok(())
-}
-
-fn apply_initial_detached_fallback<R: Runtime>(
-    window: &tauri::WebviewWindow<R>,
-    state: &AppState,
-    registry: &WidgetRegistryStore,
-) -> Result<(), String> {
-    state.set_attached(false);
-    let _ = desktop_layer::detach_from_desktop_icon_layer(window);
-    widget_manager::apply_registry_geometry(window, registry)?;
-    window
-        .set_resizable(true)
-        .map_err(|error| error.to_string())?;
-    window
-        .set_skip_taskbar(false)
-        .map_err(|error| error.to_string())?;
-    widget_manager::set_active_widget_mode(registry, WidgetWindowMode::Detached)?;
     Ok(())
 }
