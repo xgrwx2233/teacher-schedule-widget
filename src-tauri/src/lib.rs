@@ -85,6 +85,10 @@ pub fn run() {
             let window = app
                 .get_webview_window("widget")
                 .ok_or("widget window was not created")?;
+            window.set_min_size(Some(Size::Logical(tauri::LogicalSize {
+                width: 330.0,
+                height: 480.0,
+            })))?;
             let state = app.state::<AppState>();
             let registry = app.state::<WidgetRegistryStore>();
             let registry_store = widget_registry.clone();

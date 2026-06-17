@@ -1,4 +1,4 @@
-﻿/*
+/*
   Global reset for a transparent Tauri window.
   The widget background is drawn by .schedule-card, not by body, so the desktop
   wallpaper remains visible around rounded corners.
@@ -101,10 +101,16 @@ button {
   --widget-wallpaper-offset-y: 0px;
   --widget-wallpaper-width: 100%;
   --widget-wallpaper-height: 100%;
+  --density-card-inset: 6px;
+  --density-card-radius: var(--schedule-card-radius);
+  --density-title-size: var(--course-title-size);
+  --density-title-size-boosted: calc(var(--course-title-size) + 3px);
+  --density-subtitle-size: var(--course-meta-size);
+  --card-text-gap: 3px;
   width: 100vw;
   height: 100vh;
-  min-width: 360px;
-  min-height: 460px;
+  min-width: 330px;
+  min-height: 480px;
   position: relative;
   color: rgb(var(--widget-text));
   background: transparent;
@@ -153,6 +159,20 @@ button {
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
   overflow: hidden;
   position: relative;
+}
+
+.schedule-shell.density-compact {
+  --schedule-card-shadow: none;
+  --course-padding-y: 4px;
+  --course-padding-x: 4px;
+  --period-card-row-gap: 0;
+}
+
+.schedule-shell.density-dense {
+  --schedule-card-shadow: none;
+  --course-padding-y: 2px;
+  --course-padding-x: 2px;
+  --period-card-row-gap: 0;
 }
 
 .widget-mini-trigger {
@@ -266,7 +286,7 @@ button {
   position: relative;
   z-index: 1;
   min-width: 0;
-  min-height: 0;
+  min-height: var(--toolbar-height);
   height: var(--toolbar-height);
   max-height: var(--toolbar-height);
   display: grid;
@@ -313,7 +333,8 @@ button {
 
 .toolbar-left {
   justify-content: flex-start;
-  gap: clamp(5px, 1vmin, 8px);
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .toolbar-drag-zone {
@@ -350,6 +371,7 @@ button {
   position: relative;
   justify-content: flex-end;
   gap: 2px;
+  flex: 0 0 auto;
 }
 
 .week-arrow-button,
@@ -375,12 +397,13 @@ button {
 }
 
 .week-number-button {
-  min-width: clamp(68px, 12vmin, 84px);
+  width: 76px;
+  min-width: 76px;
   padding: 0 12px;
   color: rgba(var(--widget-text), 0.94);
   background: rgba(var(--widget-border), 0.08);
   border-color: rgba(var(--widget-border), 0.14);
-  font-size: clamp(12px, 1.35vmin, 14px);
+  font-size: 13px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -3053,7 +3076,9 @@ button {
 .date-row {
   position: relative;
   z-index: 1;
-  min-height: 0;
+  height: var(--date-row-height);
+  min-height: var(--date-row-height);
+  max-height: var(--date-row-height);
   display: grid;
   grid-template-columns: var(--layout-columns);
   gap: 0;
@@ -3065,7 +3090,7 @@ button {
   min-height: 0;
   display: grid;
   place-items: stretch;
-  padding: calc(var(--column-gap) / 2);
+  padding: 4px;
 }
 
 .arrow-card,
@@ -3104,19 +3129,24 @@ button {
   grid-template-rows: minmax(0, 1fr) auto;
   align-items: center;
   justify-items: center;
-  padding: clamp(3px, 0.8vmin, 6px);
+  padding: 4px 5px;
   color: var(--axis-main-color);
   background: transparent;
+  overflow: hidden;
 }
 
 .date-card span {
   color: var(--axis-main-color);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .date-card small {
   color: var(--axis-muted-color);
-  font-size: var(--meta-size);
+  font-size: 9px;
   line-height: 1.05;
+  white-space: nowrap;
 }
 
 .date-card.is-current {
@@ -3219,14 +3249,16 @@ button {
 }
 
 .period-card {
-  min-height: min(100%, 42px);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto auto;
   row-gap: var(--period-card-row-gap);
   align-items: center;
   align-content: center;
   justify-items: end;
-  padding: clamp(3px, 0.75vmin, 7px) clamp(2px, 0.8vmin, 6px);
+  padding: var(--density-card-inset);
   border: 1px solid var(--axis-capsule-border);
   border-radius: var(--schedule-card-radius, 10px);
   background: var(--card-bg, var(--axis-capsule-bg));
@@ -3248,12 +3280,15 @@ button {
   white-space: nowrap;
   text-align: right;
   -webkit-mask-image: linear-gradient(
-    90deg,
-    transparent 0,
-    #000 1px,
-    #000 100%
+    to right,
+    rgba(0, 0, 0, 1) calc(100% - 1px),
+    rgba(0, 0, 0, 0) 100%
   );
-  mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 100%);
+  mask-image: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 1) calc(100% - 1px),
+    rgba(0, 0, 0, 0) 100%
+  );
   font-size: var(--card-font-size, var(--period-title-size));
   font-weight: 850;
   line-height: 1.1;
@@ -3269,12 +3304,15 @@ button {
   white-space: nowrap;
   text-align: right;
   -webkit-mask-image: linear-gradient(
-    90deg,
-    transparent 0,
-    #000 1px,
-    #000 100%
+    to right,
+    rgba(0, 0, 0, 1) calc(100% - 1px),
+    rgba(0, 0, 0, 0) 100%
   );
-  mask-image: linear-gradient(90deg, transparent 0, #000 1px, #000 100%);
+  mask-image: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 1) calc(100% - 1px),
+    rgba(0, 0, 0, 0) 100%
+  );
   color: var(--card-fg, var(--axis-muted-color));
   opacity: 0.72;
   font-size: var(--period-time-size);
@@ -3294,13 +3332,14 @@ button {
 
 .course-card {
   width: 100%;
-  min-height: min(100%, 42px);
+  height: 100%;
+  min-height: 0;
   position: relative;
   display: grid;
   grid-template-rows: auto auto;
   align-items: center;
   justify-items: center;
-  gap: clamp(1px, 0.4vmin, 3px);
+  gap: var(--card-text-gap);
   align-content: center;
   padding: var(--course-padding-y) var(--course-padding-x);
   border: 0;
@@ -3338,18 +3377,14 @@ button {
   white-space: nowrap;
   text-align: center;
   -webkit-mask-image: linear-gradient(
-    90deg,
-    transparent 0,
-    #000 1px,
-    #000 calc(100% - 1px),
-    transparent 100%
+    to right,
+    rgba(0, 0, 0, 1) calc(100% - 1px),
+    rgba(0, 0, 0, 0) 100%
   );
   mask-image: linear-gradient(
-    90deg,
-    transparent 0,
-    #000 1px,
-    #000 calc(100% - 1px),
-    transparent 100%
+    to right,
+    rgba(0, 0, 0, 1) calc(100% - 1px),
+    rgba(0, 0, 0, 0) 100%
   );
 }
 
@@ -3432,18 +3467,14 @@ button {
   white-space: nowrap;
   text-align: center;
   -webkit-mask-image: linear-gradient(
-    90deg,
-    transparent 0,
-    #000 1px,
-    #000 calc(100% - 1px),
-    transparent 100%
+    to right,
+    rgba(0, 0, 0, 1) calc(100% - 1px),
+    rgba(0, 0, 0, 0) 100%
   );
   mask-image: linear-gradient(
-    90deg,
-    transparent 0,
-    #000 1px,
-    #000 calc(100% - 1px),
-    transparent 100%
+    to right,
+    rgba(0, 0, 0, 1) calc(100% - 1px),
+    rgba(0, 0, 0, 0) 100%
   );
   opacity: 0.82;
   font-size: var(--course-card-subtitle-size, var(--course-meta-size));
@@ -3456,13 +3487,21 @@ button {
 }
 
 .course-card.is-one-line .course-card-title-line {
+  font-size: min(
+    var(
+      --course-card-title-size-boosted,
+      calc(var(--course-card-title-size, var(--course-title-size)) + 3px)
+    ),
+    var(--density-title-size-boosted)
+  );
+  font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
 }
 
 .course-card.is-two-line {
-  gap: 3px;
+  gap: var(--card-text-gap);
   justify-items: center;
 }
 
@@ -3488,6 +3527,106 @@ button {
 .course-card {
   color: var(--card-fg, #99231d);
   background: var(--card-bg, #ffe3e0);
+}
+
+.schedule-shell.density-compact .period-card {
+  border-radius: min(var(--density-card-radius), 8px);
+}
+
+.schedule-shell.course-subtitle-hidden .period-card {
+  grid-template-rows: minmax(0, auto);
+}
+
+.schedule-shell.course-subtitle-hidden .period-card strong {
+  font-size: min(
+    var(--card-font-size, var(--period-title-size)),
+    var(--density-title-size-boosted)
+  );
+  font-weight: 600;
+}
+
+.schedule-shell.course-subtitle-hidden .period-card span {
+  display: none;
+}
+
+.schedule-shell.density-compact .course-card {
+  border-radius: min(var(--density-card-radius), 8px);
+}
+
+.schedule-shell.course-subtitle-hidden .course-card {
+  grid-template-rows: minmax(0, auto);
+}
+
+.schedule-shell.course-subtitle-hidden .course-card small {
+  display: none;
+}
+
+.schedule-shell.course-subtitle-hidden .course-card-title-line {
+  padding-top: 0;
+}
+
+.schedule-shell.density-compact .course-card-title-line {
+  font-size: min(
+    var(--course-card-title-size, var(--course-title-size)),
+    var(--density-title-size)
+  );
+  line-height: 1.12;
+}
+
+.schedule-shell.density-compact .course-card.has-badge .course-card-title-line {
+  padding-left: 14px;
+}
+
+.schedule-shell.density-compact .course-card-badge {
+  top: 3px;
+  left: 2px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  border-radius: 3px;
+  font-size: 7px;
+  box-shadow: none;
+}
+
+.schedule-shell.density-dense .period-card {
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.schedule-shell.density-dense .period-card strong {
+  font-size: clamp(8px, 1.15vmin, 10px);
+  font-weight: 750;
+  line-height: 1.05;
+}
+
+.schedule-shell.density-dense .course-card {
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.schedule-shell.density-dense .course-card-title-line {
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.schedule-shell.density-dense .course-card.has-badge .course-card-title-line {
+  padding-left: 8px;
+  padding-right: 0;
+}
+
+.schedule-shell.density-dense .course-card-badge {
+  top: 4px;
+  left: 4px;
+  min-width: 5px;
+  width: 5px;
+  height: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: transparent;
+  overflow: hidden;
+  box-shadow: none;
 }
 
 .course-card-hidden-hitbox,
@@ -3564,7 +3703,7 @@ button {
   Compact mode preserves readability in smaller detached windows. It only
   adjusts ratios and type limits; the same grid/flex principles still apply.
 */
-@media (max-width: 560px), (max-height: 620px) {
+@media (max-width: 560px) {
   .widget-root {
     --period-column-width: 54px;
     --column-gap: 8px;
@@ -3581,7 +3720,8 @@ button {
   }
 
   .week-number-button {
-    min-width: 62px;
+    width: 76px;
+    min-width: 76px;
     padding: 0 9px;
   }
 }
@@ -4785,3 +4925,5 @@ button {
     padding: 22px 24px 20px;
   }
 }
+
+

@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
 import { ScheduleToolbar, type ToolbarSyncButtonState } from "../ScheduleToolbar/ScheduleToolbar";
 import type { CardStyle, CourseCell, PeriodInfo, Schedule, Weekday } from "../../features/schedule/types";
@@ -48,6 +49,14 @@ type VerticalMergedCourseOverlay = {
   rowSpan: number;
 };
 
+type WidgetDensity = "comfortable" | "compact" | "dense";
+
+type WidgetDisplayMetrics = {
+  density: WidgetDensity;
+  showCourseSubtitle: boolean;
+  cssVars: CSSProperties;
+};
+
 export function ScheduleWidget({
   schedule,
   widgetTitle,
@@ -83,10 +92,25 @@ export function ScheduleWidget({
   const visibleWeekdays = schedule.days.map((day) => day.id);
   const isMinimalistMode = toolbarLayoutMode === "minimalist";
   const verticalOverlays = buildVerticalMergedCourseOverlays(schedule, visibleWeekdays);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const densityMetrics = useWidgetDensityMetrics(
+    cardRef,
+    schedule.rows.length,
+    visibleWeekdays.length,
+    isMinimalistMode,
+  );
 
   return (
-    <section className={`schedule-shell mode-${mode} background-${backgroundMode} toolbar-${toolbarLayoutMode} period-column-${periodColumnStyle} ${hovered ? "is-forward-hovered" : ""}`} aria-label={widgetTitle} style={widgetStyle}>
-      <div className={`schedule-card ${isMinimalistMode ? "is-minimalist-layout" : ""}`}>
+    <section
+      className={`schedule-shell mode-${mode} background-${backgroundMode} toolbar-${toolbarLayoutMode} period-column-${periodColumnStyle} density-${densityMetrics.density} course-subtitle-${densityMetrics.showCourseSubtitle ? "visible" : "hidden"} ${hovered ? "is-forward-hovered" : ""}`}
+      aria-label={widgetTitle}
+      style={widgetStyle}
+    >
+      <div
+        className={`schedule-card ${isMinimalistMode ? "is-minimalist-layout" : ""}`}
+        ref={cardRef}
+        style={densityMetrics.cssVars}
+      >
         <div className="schedule-background-overlay" key={`wallpaper-${wallpaperVersion}`} aria-hidden="true" />
         {!isMinimalistMode ? (
           <ScheduleToolbar
@@ -192,6 +216,7 @@ export function ScheduleWidget({
                           course={course}
                           mergedCourseIds={courseIds}
                           mergeAxis="horizontal"
+                          showSubtitle={densityMetrics.showCourseSubtitle}
                           activeCellId={activeCellId}
                           onCourseClick={onCourseClick}
                           onCardEdit={onCardEdit}
@@ -212,6 +237,7 @@ export function ScheduleWidget({
                   course={overlay.course}
                   mergedCourseIds={overlay.courseIds}
                   mergeAxis="vertical"
+                  showSubtitle={densityMetrics.showCourseSubtitle}
                   activeCellId={activeCellId}
                   onCourseClick={onCourseClick}
                   onCardEdit={onCardEdit}
@@ -228,6 +254,130 @@ export function ScheduleWidget({
       )}
     </section>
   );
+}
+
+function useWidgetDensityMetrics(
+  cardRef: RefObject<HTMLDivElement | null>,
+  rowCount: number,
+  dayCount: number,
+  isMinimalistMode: boolean,
+): WidgetDisplayMetrics {
+  const [metrics, setMetrics] = useState(() =>
+    calculateWidgetDensity(0, 0, rowCount, dayCount, isMinimalistMode),
+  );
+
+  useLayoutEffect(() => {
+    const element = cardRef.current;
+    if (!element) {
+      return;
+    }
+
+    let frame = 0;
+    const update = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const next = calculateWidgetDensity(
+          element.clientWidth,
+          element.clientHeight,
+          rowCount,
+          dayCount,
+          isMinimalistMode,
+          getComputedStyle(element),
+        );
+        setMetrics((current) =>
+          current.density === next.density &&
+          current.cellWidth === next.cellWidth &&
+          current.cellHeight === next.cellHeight &&
+          current.columnGap === next.columnGap
+            ? current
+            : next,
+        );
+      });
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [cardRef, rowCount, dayCount, isMinimalistMode]);
+
+  const minCellEdge = Math.max(1, Math.min(metrics.cellWidth, metrics.cellHeight));
+  const cardInset = metrics.density === "dense"
+    ? 2
+    : metrics.density === "compact"
+      ? 4
+      : clampNumber(minCellEdge * 0.12, 2, 10);
+  const radiusLimit = metrics.density === "dense" ? 4 : metrics.density === "compact" ? 8 : 24;
+  const showSecondaryText = metrics.cellHeight >= 52;
+  const densityTitleSize = clampNumber(metrics.cellHeight * 0.26, 10, 16);
+  const cardTextGap = showSecondaryText ? clampNumber(metrics.cellHeight * 0.08, 2, 12) : 0;
+  return {
+    density: metrics.density,
+    showCourseSubtitle: showSecondaryText,
+    cssVars: {
+      "--density-card-inset": `${cardInset}px`,
+      "--density-card-radius": `${clampNumber(minCellEdge * 0.22, 4, radiusLimit)}px`,
+      "--density-title-size": `${densityTitleSize}px`,
+      "--density-title-size-boosted": `${densityTitleSize + 3}px`,
+      "--density-subtitle-size": `${clampNumber(metrics.cellHeight * 0.18, 7, 11)}px`,
+      "--card-text-gap": `${cardTextGap}px`,
+      "--schedule-card-shadow": metrics.density === "comfortable" ? undefined : "none",
+      "--course-padding-y": `${cardInset}px`,
+      "--course-padding-x": `${cardInset}px`,
+      "--period-card-row-gap": `${cardTextGap}px`,
+      "--column-gap": metrics.density === "dense"
+        ? `${Math.min(metrics.columnGap, 4)}px`
+        : metrics.density === "compact"
+          ? `${Math.min(metrics.columnGap, 8)}px`
+          : undefined,
+    } as CSSProperties,
+  };
+}
+
+function calculateWidgetDensity(
+  cardWidth: number,
+  cardHeight: number,
+  rowCount: number,
+  dayCount: number,
+  isMinimalistMode: boolean,
+  sourceStyle?: CSSStyleDeclaration,
+): { density: WidgetDensity; cellWidth: number; cellHeight: number; columnGap: number } {
+  const widgetStyle = sourceStyle ?? getComputedStyle(document.documentElement);
+  const readPx = (name: string, fallback: number) => {
+    const value = Number.parseFloat(widgetStyle.getPropertyValue(name));
+    return Number.isFinite(value) ? value : fallback;
+  };
+  const periodColumnWidth = readPx("--period-column-width", 62);
+  const toolbarHeight = readPx("--toolbar-height", 34);
+  const dateRowHeight = readPx("--date-row-height", 48);
+  const contentPadding = readPx("--content-padding", 14);
+  const contentGap = readPx("--content-gap", 12);
+  const columnGap = readPx("--column-gap", 10);
+  const effectiveRowCount = Math.max(1, rowCount);
+  const effectiveDayCount = Math.max(1, dayCount);
+  const rowGaps = isMinimalistMode ? 1 : 2;
+  const gridWidth = Math.max(1, cardWidth - contentPadding * 2 - periodColumnWidth);
+  const gridHeight = Math.max(
+    1,
+    cardHeight -
+      contentPadding * 2 -
+      dateRowHeight -
+      (isMinimalistMode ? 0 : toolbarHeight) -
+      contentGap * rowGaps,
+  );
+  const cellWidth = Math.round((gridWidth / effectiveDayCount) * 10) / 10;
+  const cellHeight = Math.round((gridHeight / effectiveRowCount) * 10) / 10;
+  const density: WidgetDensity =
+    cellWidth < 72 || cellHeight < 40
+      ? "dense"
+      : cellWidth < 92 || cellHeight < 52
+        ? "compact"
+        : "comfortable";
+
+  return { density, cellWidth, cellHeight, columnGap };
 }
 
 function MiniToolbarIcon() {
@@ -298,6 +448,7 @@ function CourseCard({
   course,
   mergedCourseIds,
   mergeAxis,
+  showSubtitle,
   activeCellId,
   onCourseClick,
   onCardEdit,
@@ -305,6 +456,7 @@ function CourseCard({
   course: CourseCell;
   mergedCourseIds: string[];
   mergeAxis: MergeAxis;
+  showSubtitle: boolean;
   activeCellId: string | null;
   onCourseClick: (courseId: string) => void;
   onCardEdit: (card: SelectedCard) => void;
@@ -327,7 +479,7 @@ function CourseCard({
   const isTemporaryCancel = course.renderBadge === "temporary" && course.title.trim() === "无课" && !(course.room ?? "").trim();
   return (
     <button
-      className={`course-card ${displayMetrics.isTwoLine ? "is-two-line" : "is-one-line"} ${badgeLabel ? "has-badge" : ""} ${isTemporaryCancel ? "is-temporary-cancel" : ""} ${isActive ? "is-active" : ""}`}
+      className={`course-card ${showSubtitle ? "is-two-line" : "is-one-line"} ${badgeLabel ? "has-badge" : ""} ${isTemporaryCancel ? "is-temporary-cancel" : ""} ${isActive ? "is-active" : ""}`}
       style={toCardCssVars(course.style, displayMetrics)}
       data-course-id={course.id}
       data-course-hit-ids={mergedCourseIds.join(",")}
@@ -461,6 +613,7 @@ function toCardCssVars(style?: CardStyle, courseMetrics?: CourseCardDisplayMetri
     "--card-subtitle-font-weight": subtitleFontWeight,
     "--card-font-size": style?.fontSize ? `${style.fontSize}px` : undefined,
     "--course-card-title-size": courseMetrics ? `${courseMetrics.titleSize}px` : undefined,
+    "--course-card-title-size-boosted": courseMetrics ? `${courseMetrics.titleSize + 3}px` : undefined,
     "--course-card-subtitle-size": courseMetrics ? `${courseMetrics.subtitleSize}px` : undefined,
   } as CSSProperties;
 }
