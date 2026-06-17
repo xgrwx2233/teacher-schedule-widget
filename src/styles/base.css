@@ -3662,6 +3662,7 @@ button {
   color: rgba(255, 255, 255, 0.82);
   z-index: 3;
   pointer-events: auto;
+  cursor: nwse-resize !important;
 }
 
 .schedule-shell.mode-detached .resize-grip::before {
