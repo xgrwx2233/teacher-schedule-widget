@@ -7,8 +7,14 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:dev": "tauri dev --features desktop-win11 --config src-tauri/tauri.win11.conf.json",
+    "tauri:dev:win10": "tauri dev --features desktop-win10 --config src-tauri/tauri.win10.conf.json",
+    "tauri:dev:win11": "tauri dev --features desktop-win11 --config src-tauri/tauri.win11.conf.json",
+    "tauri:build": "tauri build --features desktop-win11 --config src-tauri/tauri.win11.conf.json",
+    "tauri:build:win10": "tauri build --features desktop-win10 --config src-tauri/tauri.win10.conf.json",
+    "tauri:build:win11": "tauri build --features desktop-win11 --config src-tauri/tauri.win11.conf.json",
+    "check:rust:win10": "cargo check --manifest-path src-tauri/Cargo.toml --no-default-features --features desktop-win10",
+    "check:rust:win11": "cargo check --manifest-path src-tauri/Cargo.toml --no-default-features --features desktop-win11"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",

@@ -15,6 +15,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
 
+[features]
+default = []
+desktop-win10 = []
+desktop-win11 = []
+
 [profile.release]
 panic = "abort"
 codegen-units = 1
