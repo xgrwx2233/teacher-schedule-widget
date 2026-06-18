@@ -827,7 +827,24 @@ export function App() {
             activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
           },
         );
-      } catch {}
+        window.setTimeout(() => {
+          void emitCardSettingsState(
+            targetWindowLabel,
+            card,
+            draft,
+            currentSchedule,
+            settingsRef.current.term,
+            titleContext,
+          );
+        }, 80);
+      } catch {
+        cardSettingsWindowOpenRef.current = false;
+        activeCardSettingsWindowLabelRef.current = null;
+        selectedCardRef.current = null;
+        setSelectedCard(null);
+        await invoke("set_proxy_passthrough", { passthrough: true });
+        await invoke("clear_proxy_active_card");
+      }
     },
     [closeCardSettings, visibleDays],
   );
@@ -1235,6 +1252,8 @@ export function App() {
     const unlistenClose = listen<{ windowLabel?: string }>(
       CARD_SETTINGS_WINDOW_CLOSE_EVENT,
       (event) => {
+        void invoke("set_proxy_passthrough", { passthrough: true });
+        void invoke("clear_proxy_active_card");
         const closedWindowLabel = event.payload?.windowLabel;
         if (
           closedWindowLabel &&

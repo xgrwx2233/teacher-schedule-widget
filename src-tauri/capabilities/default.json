@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capability for the teacher schedule widget window.",
-  "windows": ["widget", "settings", "card-settings", "interaction-proxy", "widget-menu", "floating-toolbar", "auth"],
+  "windows": ["widget", "settings", "card-settings", "period-card-settings", "interaction-proxy", "widget-menu", "floating-toolbar", "auth"],
   "permissions": [
     "core:default",
     "core:event:default",

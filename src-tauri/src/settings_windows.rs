@@ -1,11 +1,27 @@
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use serde::Serialize;
+use tauri::{
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
 
 const SETTINGS_WINDOW_LABEL: &str = "settings";
 const CARD_SETTINGS_WINDOW_LABEL: &str = "card-settings";
 const PERIOD_CARD_SETTINGS_WINDOW_LABEL: &str = "period-card-settings";
+const INTERACTION_PROXY_WINDOW_LABEL: &str = "interaction-proxy";
 const WIDGET_MENU_WINDOW_LABEL: &str = "widget-menu";
 const FLOATING_TOOLBAR_WINDOW_LABEL: &str = "floating-toolbar";
 const AUTH_WINDOW_LABEL: &str = "auth";
+const WIDGET_WINDOW_LABEL: &str = "widget";
+
+const SETTINGS_WINDOW_CLOSE_EVENT: &str = "settings-window-close";
+const CARD_SETTINGS_WINDOW_CLOSE_EVENT: &str = "card-settings-window-close";
+const WIDGET_MENU_CLOSE_EVENT: &str = "widget-menu-close";
+const FLOATING_TOOLBAR_CLOSE_EVENT: &str = "floating-toolbar-close";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowClosePayload {
+    window_label: &'static str,
+}
 
 #[tauri::command]
 pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
@@ -158,10 +174,10 @@ fn create_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         return Ok(window);
     }
 
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         SETTINGS_WINDOW_LABEL,
-        WebviewUrl::App("index.html#settings".into()),
+        WebviewUrl::App("index.html?window=settings#settings".into()),
     )
     .title("设置")
     .devtools(false)
@@ -174,7 +190,16 @@ fn create_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .visible(false)
     .inner_size(680.0, 560.0)
     .build()
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+
+    install_hide_on_close(
+        &window,
+        app,
+        Some(SETTINGS_WINDOW_CLOSE_EVENT),
+        Some(SETTINGS_WINDOW_LABEL),
+        false,
+    );
+    Ok(window)
 }
 
 fn create_widget_menu_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -182,10 +207,10 @@ fn create_widget_menu_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         return Ok(window);
     }
 
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         WIDGET_MENU_WINDOW_LABEL,
-        WebviewUrl::App("index.html#widget-menu".into()),
+        WebviewUrl::App("index.html?window=widget-menu#widget-menu".into()),
     )
     .title("课程表菜单")
     .devtools(false)
@@ -199,7 +224,16 @@ fn create_widget_menu_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .visible(false)
     .inner_size(132.0, 126.0)
     .build()
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+
+    install_hide_on_close(
+        &window,
+        app,
+        Some(WIDGET_MENU_CLOSE_EVENT),
+        Some(WIDGET_MENU_WINDOW_LABEL),
+        true,
+    );
+    Ok(window)
 }
 
 fn create_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -207,10 +241,10 @@ fn create_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String>
         return Ok(window);
     }
 
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         CARD_SETTINGS_WINDOW_LABEL,
-        WebviewUrl::App("index.html#card-settings".into()),
+        WebviewUrl::App("index.html?window=card-settings#card-settings".into()),
     )
     .title("课程卡片设置")
     .devtools(false)
@@ -223,7 +257,16 @@ fn create_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String>
     .visible(false)
     .inner_size(270.0, 380.0)
     .build()
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+
+    install_hide_on_close(
+        &window,
+        app,
+        Some(CARD_SETTINGS_WINDOW_CLOSE_EVENT),
+        Some(CARD_SETTINGS_WINDOW_LABEL),
+        true,
+    );
+    Ok(window)
 }
 
 fn create_period_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -231,10 +274,10 @@ fn create_period_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, 
         return Ok(window);
     }
 
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         PERIOD_CARD_SETTINGS_WINDOW_LABEL,
-        WebviewUrl::App("index.html#period-card-settings".into()),
+        WebviewUrl::App("index.html?window=period-card-settings#period-card-settings".into()),
     )
     .title("课次卡片设置")
     .devtools(false)
@@ -247,7 +290,16 @@ fn create_period_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, 
     .visible(false)
     .inner_size(270.0, 272.0)
     .build()
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+
+    install_hide_on_close(
+        &window,
+        app,
+        Some(CARD_SETTINGS_WINDOW_CLOSE_EVENT),
+        Some(PERIOD_CARD_SETTINGS_WINDOW_LABEL),
+        true,
+    );
+    Ok(window)
 }
 
 fn create_floating_toolbar_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -255,10 +307,10 @@ fn create_floating_toolbar_window(app: &AppHandle) -> Result<WebviewWindow, Stri
         return Ok(window);
     }
 
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         FLOATING_TOOLBAR_WINDOW_LABEL,
-        WebviewUrl::App("index.html#floating-toolbar".into()),
+        WebviewUrl::App("index.html?window=floating-toolbar#floating-toolbar".into()),
     )
     .title("浮动工具栏")
     .devtools(false)
@@ -271,7 +323,16 @@ fn create_floating_toolbar_window(app: &AppHandle) -> Result<WebviewWindow, Stri
     .visible(false)
     .inner_size(320.0, 48.0)
     .build()
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+
+    install_hide_on_close(
+        &window,
+        app,
+        Some(FLOATING_TOOLBAR_CLOSE_EVENT),
+        Some(FLOATING_TOOLBAR_WINDOW_LABEL),
+        false,
+    );
+    Ok(window)
 }
 
 fn create_auth_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -282,7 +343,7 @@ fn create_auth_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     let window = WebviewWindowBuilder::new(
         app,
         AUTH_WINDOW_LABEL,
-        WebviewUrl::App("index.html#auth".into()),
+        WebviewUrl::App("index.html?window=auth#auth".into()),
     )
     .title("登录")
     .devtools(false)
@@ -306,4 +367,39 @@ fn create_auth_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     });
 
     Ok(window)
+}
+
+fn install_hide_on_close(
+    window: &WebviewWindow,
+    app: &AppHandle,
+    close_event: Option<&'static str>,
+    payload_window_label: Option<&'static str>,
+    release_proxy: bool,
+) {
+    let app = app.clone();
+    let close_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            if release_proxy {
+                if let Some(proxy) = app.get_webview_window(INTERACTION_PROXY_WINDOW_LABEL) {
+                    let _ = proxy.set_ignore_cursor_events(true);
+                }
+            }
+
+            if let Some(close_event) = close_event {
+                if let Some(window_label) = payload_window_label {
+                    let _ = app.emit_to(
+                        WIDGET_WINDOW_LABEL,
+                        close_event,
+                        WindowClosePayload { window_label },
+                    );
+                } else {
+                    let _ = app.emit_to(WIDGET_WINDOW_LABEL, close_event, ());
+                }
+            }
+
+            let _ = close_window.hide();
+        }
+    });
 }
