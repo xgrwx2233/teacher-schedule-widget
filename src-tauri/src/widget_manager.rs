@@ -194,7 +194,7 @@ fn default_widget_registry() -> WidgetRegistryState {
             bounds: WidgetBounds {
                 x: 520,
                 y: 52,
-                width: 700,
+                width: 525,
                 height: 760,
             },
             skin_id: "midnight-coral".into(),

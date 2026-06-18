@@ -196,7 +196,7 @@ pub fn ensure_proxy_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .skip_taskbar(true)
     .visible(false)
     .always_on_top(true)
-    .inner_size(700.0, 760.0)
+    .inner_size(525.0, 760.0)
     .build()
     .map_err(|error| error.to_string())?;
 
@@ -591,7 +591,13 @@ fn top_window_kind(
 }
 
 fn is_overlay_window(app: &AppHandle, hwnd: HWND) -> bool {
-    for label in ["settings", "card-settings", "widget-menu", "auth"] {
+    for label in [
+        "settings",
+        "card-settings",
+        "period-card-settings",
+        "widget-menu",
+        "auth",
+    ] {
         if let Some(window) = app.get_webview_window(label) {
             if let Ok(raw) = window.hwnd() {
                 if same_hwnd(hwnd, HWND(raw.0)) {

@@ -12,6 +12,7 @@ import type { WindowMode } from "../windowMode/types";
 
 export const SETTINGS_WINDOW_LABEL = "settings";
 export const CARD_SETTINGS_WINDOW_LABEL = "card-settings";
+export const PERIOD_CARD_SETTINGS_WINDOW_LABEL = "period-card-settings";
 export const WIDGET_MENU_WINDOW_LABEL = "widget-menu";
 export const FLOATING_TOOLBAR_WINDOW_LABEL = "floating-toolbar";
 export const WIDGET_WINDOW_LABEL = "widget";
@@ -106,6 +107,7 @@ export type SettingsWindowStateRequestPayload = {
 };
 
 export type CardSettingsWindowStatePayload = {
+  windowLabel: string;
   selectedCard: SelectedCard;
   draft: CardDraft;
   mergeState: CourseCardMergeState;

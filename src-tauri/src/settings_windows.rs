@@ -1,10 +1,8 @@
-use tauri::{
-    AppHandle, LogicalSize, Manager, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-    WindowEvent,
-};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 const SETTINGS_WINDOW_LABEL: &str = "settings";
 const CARD_SETTINGS_WINDOW_LABEL: &str = "card-settings";
+const PERIOD_CARD_SETTINGS_WINDOW_LABEL: &str = "period-card-settings";
 const WIDGET_MENU_WINDOW_LABEL: &str = "widget-menu";
 const FLOATING_TOOLBAR_WINDOW_LABEL: &str = "floating-toolbar";
 const AUTH_WINDOW_LABEL: &str = "auth";
@@ -15,17 +13,18 @@ pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn open_card_settings_window(app: AppHandle, title: Option<String>) -> Result<(), String> {
-    let window = ensure_card_settings_window(&app)?;
+pub fn open_card_settings_window(
+    app: AppHandle,
+    title: Option<String>,
+    window_label: Option<String>,
+) -> Result<(), String> {
+    let window = if window_label.as_deref() == Some(PERIOD_CARD_SETTINGS_WINDOW_LABEL) {
+        ensure_period_card_settings_window(&app)?
+    } else {
+        ensure_card_settings_window(&app)?
+    };
+
     if let Some(title) = title {
-        let height = if title == "课次卡片设置" {
-            272.0
-        } else {
-            380.0
-        };
-        window
-            .set_size(Size::Logical(LogicalSize::new(270.0, height)))
-            .map_err(|error| error.to_string())?;
         window
             .set_title(&title)
             .map_err(|error| error.to_string())?;
@@ -73,6 +72,7 @@ pub fn create_hidden_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
     create_settings_window(app)?;
     create_widget_menu_window(app)?;
     create_card_settings_window(app)?;
+    create_period_card_settings_window(app)?;
     create_floating_toolbar_window(app)?;
     create_auth_window(app)?;
     Ok(())
@@ -82,6 +82,7 @@ pub fn hide_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
     for label in [
         SETTINGS_WINDOW_LABEL,
         CARD_SETTINGS_WINDOW_LABEL,
+        PERIOD_CARD_SETTINGS_WINDOW_LABEL,
         WIDGET_MENU_WINDOW_LABEL,
         FLOATING_TOOLBAR_WINDOW_LABEL,
         AUTH_WINDOW_LABEL,
@@ -104,6 +105,14 @@ pub fn ensure_widget_menu_window(app: &AppHandle) -> Result<WebviewWindow, Strin
 
 pub fn ensure_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     show_existing_or_create(app, CARD_SETTINGS_WINDOW_LABEL, create_card_settings_window)
+}
+
+pub fn ensure_period_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(
+        app,
+        PERIOD_CARD_SETTINGS_WINDOW_LABEL,
+        create_period_card_settings_window,
+    )
 }
 
 pub fn ensure_floating_toolbar_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -213,6 +222,30 @@ fn create_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String>
     .skip_taskbar(true)
     .visible(false)
     .inner_size(270.0, 380.0)
+    .build()
+    .map_err(|error| error.to_string())
+}
+
+fn create_period_card_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(PERIOD_CARD_SETTINGS_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    WebviewWindowBuilder::new(
+        app,
+        PERIOD_CARD_SETTINGS_WINDOW_LABEL,
+        WebviewUrl::App("index.html#period-card-settings".into()),
+    )
+    .title("课次卡片设置")
+    .devtools(false)
+    .decorations(true)
+    .transparent(false)
+    .resizable(false)
+    .minimizable(false)
+    .maximizable(false)
+    .skip_taskbar(true)
+    .visible(false)
+    .inner_size(270.0, 272.0)
     .build()
     .map_err(|error| error.to_string())
 }

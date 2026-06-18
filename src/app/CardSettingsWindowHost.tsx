@@ -72,6 +72,10 @@ export function CardSettingsWindowHost() {
     const unlistenState = listen<CardSettingsWindowStatePayload>(
       CARD_SETTINGS_WINDOW_STATE_EVENT,
       (event) => {
+        if (event.payload.windowLabel !== currentWindow.label) {
+          return;
+        }
+
         const isCurrentCard = isSameSelectedCard(
           selectedCardRef.current,
           event.payload.selectedCard,

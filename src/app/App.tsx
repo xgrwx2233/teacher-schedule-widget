@@ -56,6 +56,7 @@ import {
   CARD_SETTINGS_WINDOW_STATE_EVENT,
   CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT,
   CARD_SETTINGS_WINDOW_UPDATE_EVENT,
+  PERIOD_CARD_SETTINGS_WINDOW_LABEL,
   SETTINGS_WINDOW_LABEL,
   SETTINGS_WINDOW_CLOSE_EVENT,
   SETTINGS_WINDOW_STATE_EVENT,
@@ -201,6 +202,7 @@ export function App() {
   const [wallpaperVersion, setWallpaperVersion] = useState(0);
   const settingsWindowOpenRef = useRef(false);
   const cardSettingsWindowOpenRef = useRef(false);
+  const activeCardSettingsWindowLabelRef = useRef<string | null>(null);
   const settingsRef = useRef(settings);
   const scheduleRef = useRef(schedule);
   const accountStateRef = useRef(accountState);
@@ -751,12 +753,14 @@ export function App() {
       cardSettingsHasPendingSaveRef.current = false;
     }
     cardSettingsWindowOpenRef.current = false;
+    activeCardSettingsWindowLabelRef.current = null;
     selectedCardRef.current = null;
     cardTitleContextRef.current = undefined;
     setSelectedCard(null);
     setActiveCellId(null);
     await invoke("clear_proxy_active_card");
     await hideWindowByLabel(CARD_SETTINGS_WINDOW_LABEL);
+    await hideWindowByLabel(PERIOD_CARD_SETTINGS_WINDOW_LABEL);
   }, [persistCurrentSchedule]);
 
   const openCardSettings = useCallback(
@@ -792,6 +796,7 @@ export function App() {
           : undefined;
       const temporaryChanges =
         course?.temporaryChanges?.map(toTemporaryChangeDraft) ?? [];
+      const targetWindowLabel = getCardSettingsWindowLabel(card);
       selectedCardRef.current = card;
       cardTitleContextRef.current = titleContext;
       cardDraftRef.current = draft;
@@ -801,14 +806,18 @@ export function App() {
       setMenuOpen(false);
 
       try {
+        await hideWindowByLabel(getOtherCardSettingsWindowLabel(card));
         await invoke("open_card_settings_window", {
           title: buildInitialCardSettingsWindowTitle(card, titleContext, draft),
+          windowLabel: targetWindowLabel,
         });
         cardSettingsWindowOpenRef.current = true;
+        activeCardSettingsWindowLabelRef.current = targetWindowLabel;
         await emitTo<CardSettingsWindowStatePayload>(
-          CARD_SETTINGS_WINDOW_LABEL,
+          targetWindowLabel,
           CARD_SETTINGS_WINDOW_STATE_EVENT,
           {
+            windowLabel: targetWindowLabel,
             selectedCard: card,
             draft,
             mergeState: getCourseCardMergeState(currentSchedule, card),
@@ -926,7 +935,7 @@ export function App() {
             cardDraftRef.current = nextDraft;
             setCardDraft(nextDraft);
             void emitCardSettingsState(
-              CARD_SETTINGS_WINDOW_LABEL,
+              PERIOD_CARD_SETTINGS_WINDOW_LABEL,
               currentCard,
               nextDraft,
               nextSchedule,
@@ -1187,6 +1196,7 @@ export function App() {
           event.payload.windowLabel,
           CARD_SETTINGS_WINDOW_STATE_EVENT,
           {
+            windowLabel: event.payload.windowLabel,
             selectedCard: currentCard,
             draft: cardDraftRef.current,
             mergeState: getCourseCardMergeState(
@@ -1222,18 +1232,30 @@ export function App() {
       },
     );
 
-    const unlistenClose = listen(CARD_SETTINGS_WINDOW_CLOSE_EVENT, () => {
-      if (cardSettingsHasPendingSaveRef.current) {
-        void persistCurrentSchedule("desktop.courseCard.close")
-          .then(() => {
-            cardSettingsHasPendingSaveRef.current = false;
-          })
-          .catch(() => {});
-      }
-      cardSettingsWindowOpenRef.current = false;
-      selectedCardRef.current = null;
-      setSelectedCard(null);
-    });
+    const unlistenClose = listen<{ windowLabel?: string }>(
+      CARD_SETTINGS_WINDOW_CLOSE_EVENT,
+      (event) => {
+        const closedWindowLabel = event.payload?.windowLabel;
+        if (
+          closedWindowLabel &&
+          activeCardSettingsWindowLabelRef.current &&
+          closedWindowLabel !== activeCardSettingsWindowLabelRef.current
+        ) {
+          return;
+        }
+        if (cardSettingsHasPendingSaveRef.current) {
+          void persistCurrentSchedule("desktop.courseCard.close")
+            .then(() => {
+              cardSettingsHasPendingSaveRef.current = false;
+            })
+            .catch(() => {});
+        }
+        cardSettingsWindowOpenRef.current = false;
+        activeCardSettingsWindowLabelRef.current = null;
+        selectedCardRef.current = null;
+        setSelectedCard(null);
+      },
+    );
 
     return () => {
       void unlistenUpdate.then((unlisten) => unlisten());
@@ -2333,6 +2355,18 @@ async function hideWindowByLabel(label: string) {
   await window.hide();
 }
 
+function getCardSettingsWindowLabel(card: SelectedCard): string {
+  return card.type === "period"
+    ? PERIOD_CARD_SETTINGS_WINDOW_LABEL
+    : CARD_SETTINGS_WINDOW_LABEL;
+}
+
+function getOtherCardSettingsWindowLabel(card: SelectedCard): string {
+  return card.type === "period"
+    ? CARD_SETTINGS_WINDOW_LABEL
+    : PERIOD_CARD_SETTINGS_WINDOW_LABEL;
+}
+
 function isSameSelectedCard(left: SelectedCard, right: SelectedCard): boolean {
   switch (left.type) {
     case "course":
@@ -3037,6 +3071,7 @@ function emitCardSettingsState(
     windowLabel,
     CARD_SETTINGS_WINDOW_STATE_EVENT,
     {
+      windowLabel,
       selectedCard,
       draft,
       mergeState: getCourseCardMergeState(schedule, selectedCard),

@@ -9,6 +9,7 @@ import { SettingsWindowHost } from "./app/SettingsWindowHost";
 import { WidgetMenuWindowHost } from "./app/WidgetMenuWindowHost";
 import {
   CARD_SETTINGS_WINDOW_LABEL,
+  PERIOD_CARD_SETTINGS_WINDOW_LABEL,
   AUTH_WINDOW_LABEL,
   FLOATING_TOOLBAR_WINDOW_LABEL,
   SETTINGS_WINDOW_LABEL,
@@ -25,7 +26,8 @@ const RootComponent =
     ? SettingsWindowHost
     : windowLabel === AUTH_WINDOW_LABEL
       ? AuthWindowHost
-    : windowLabel === CARD_SETTINGS_WINDOW_LABEL
+    : windowLabel === CARD_SETTINGS_WINDOW_LABEL ||
+        windowLabel === PERIOD_CARD_SETTINGS_WINDOW_LABEL
         ? CardSettingsWindowHost
         : windowLabel === INTERACTION_PROXY_LABEL
           ? InteractionProxyHost

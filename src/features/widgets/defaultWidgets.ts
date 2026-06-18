@@ -13,7 +13,7 @@ export const defaultWidgetRegistry: WidgetRegistryState = {
       bounds: {
         x: 520,
         y: 52,
-        width: 700,
+        width: 525,
         height: 760,
       },
       skinId: "midnight-coral",

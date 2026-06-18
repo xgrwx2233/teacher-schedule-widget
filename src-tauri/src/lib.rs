@@ -90,7 +90,7 @@ pub fn run() {
                 .get_webview_window("widget")
                 .ok_or("widget window was not created")?;
             window.set_min_size(Some(Size::Logical(tauri::LogicalSize {
-                width: 330.0,
+                width: 248.0,
                 height: 480.0,
             })))?;
             let state = app.state::<AppState>();
