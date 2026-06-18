@@ -69,6 +69,29 @@ npm run tauri:build:win11
 4. 修复 Win10 `attached` 时，不能把普通窗口逻辑改成代理逻辑。
 5. 修复 Win10 残影、黑块、标题栏残影时，不能影响 Win11 的 `attached` 行为。
 
+## 强制审批边界
+
+Win10 会话的默认改动范围只有：
+
+- `src-tauri/src/desktop_layer/win10.rs`
+- 必要时新增的 `src-tauri/src/desktop_layer/win10/*` 专用子模块
+
+如果 Codex 判断必须修改除此之外的文件，必须先停下来征求用户同意，说明：
+
+- 为什么 `win10.rs` 内无法解决。
+- 准备修改哪些文件。
+- 这些文件是否会影响 Win11。
+- 如何验证 Win10 和 Win11 都不回归。
+
+未经用户明确同意，不允许修改：
+
+- 同步和账号相关代码。
+- 课程表业务数据、课程卡片、课次卡片、临时改课、合并拆分逻辑。
+- UI/UX、CSS、组件布局、默认视觉样式。
+- `src-tauri/src/desktop_layer/win11.rs`。
+- 发布配置、打包配置、release profile、asset protocol scope。
+- 通用窗口模式、交互代理、输入转发、辅助窗口生命周期等公共层文件。
+
 ## 不允许改动的区域
 
 除非用户明确要求，不要改以下区域。
@@ -149,7 +172,7 @@ npm run tauri:build:win11
 
 ## 允许优先改动的区域
 
-Win10 attach 问题优先只在以下区域处理。
+Win10 attach 问题默认只在 `src-tauri/src/desktop_layer/win10.rs` 处理。下面列出的“谨慎允许改”区域不是默认可改区域；只有在先征求用户同意后才能修改。
 
 ### Win10 桌面附着层
 
@@ -183,7 +206,7 @@ Win10 attach 问题优先只在以下区域处理。
 - `src-tauri/src/app_state.rs`
 - `src-tauri/src/widget_manager.rs`
 
-仅当 Win10 attach 需要公共状态协调时才改。常见允许改动：
+仅当 Win10 attach 需要公共状态协调，并且已经先征求用户同意后才改。常见允许改动：
 
 - 增加 diagnostics 字段
 - 调整 attached/detached 切换顺序
@@ -200,7 +223,7 @@ Win10 attach 问题优先只在以下区域处理。
 - `src/app/InteractionProxyHost.tsx`
 - `src/features/windowMode/*`
 
-只允许修复 attached 模式代理层的鼠标命中、穿透和释放问题。
+只允许在用户同意后修复 attached 模式代理层的鼠标命中、穿透和释放问题。
 
 不能改：
 
@@ -214,7 +237,7 @@ Win10 attach 问题优先只在以下区域处理。
 
 - `src-tauri/src/input_forwarder.rs`
 
-只允许处理 attached 模式下小挂件接收鼠标移动、点击、离开等基础输入的转发问题。
+只允许在用户同意后处理 attached 模式下小挂件接收鼠标移动、点击、离开等基础输入的转发问题。
 
 不能让它影响 detached 模式或普通辅助窗口。
 
@@ -229,7 +252,7 @@ Win10 attach 问题优先只在以下区域处理。
 - `src/app/WidgetMenuWindowHost.tsx`
 - `src/app/FloatingToolbarWindowHost.tsx`
 
-只允许修复窗口打开/隐藏/关闭状态、权限、路由和代理释放问题。
+只允许在用户同意后修复窗口打开/隐藏/关闭状态、权限、路由和代理释放问题。
 
 不能改 UI 内容和业务字段。
 
@@ -275,8 +298,9 @@ npm run check:rust:win11
 npm run tauri:dev:win10
 ```
 
-4. 只修改 Win10 允许区域。
-5. 每次修复后至少验证：
+4. 默认只修改 `src-tauri/src/desktop_layer/win10.rs`。
+5. 如果必须修改其他文件，先征求用户同意，获得明确同意后再动手。
+6. 每次修复后至少验证：
 
 ```powershell
 npm exec tsc -- --noEmit
@@ -285,7 +309,7 @@ npm run check:rust:win11
 npm run build
 ```
 
-6. 如果改了 Rust 桌面层，必须在 Win10 实机验证：
+7. 如果改了 Rust 桌面层，必须在 Win10 实机验证：
 
 - 启动默认 attached。
 - attached 时小挂件在桌面图标层下、壁纸层上。
@@ -296,7 +320,7 @@ npm run build
 - 退出程序后桌面无残影。
 - 小挂件按钮、课程单元格、课次单元格、菜单、登录窗口、设置窗口都能打开和关闭。
 
-7. 如果有条件，在 Win11 上只做回归验证：
+8. 如果有条件，在 Win11 上只做回归验证：
 
 ```powershell
 npm run tauri:dev:win11
@@ -380,10 +404,10 @@ npm run build
 1. attached 模式的小挂件鼠标交互通过 interaction proxy 单独处理。
 2. detached 模式和所有设置/登录/菜单/卡片设置窗口都是普通桌面窗口。
 3. 不要改同步策略、账号系统、课程表数据模型、UI/UX、课程卡片业务逻辑、Win11 desktop layer。
-4. 优先只改 src-tauri/src/desktop_layer/win10.rs；必要时通过 desktop_layer 抽象增加 Win10 专用函数。
-5. 不允许 attach 失败自动切 detached，要真正修复 Win10 attached。
-6. 每次修改后运行 npm exec tsc -- --noEmit、npm run check:rust:win10、npm run check:rust:win11、npm run build，并提交推送。
+4. 默认只能改 src-tauri/src/desktop_layer/win10.rs，或新增 src-tauri/src/desktop_layer/win10/* 专用子模块。
+5. 如果你认为必须修改 window_mode.rs、interaction_proxy.rs、input_forwarder.rs、settings_windows.rs、App.tsx、CSS、组件、同步、账号、Win11 desktop layer 或发布配置，必须先停下来征求用户同意，说明原因和影响范围，不能直接修改。
+6. 不允许 attach 失败自动切 detached，要真正修复 Win10 attached。
+7. 每次修改后运行 npm exec tsc -- --noEmit、npm run check:rust:win10、npm run check:rust:win11、npm run build，并提交推送。
 
-请先说明你准备修改的文件和理由，再实施。
+请先说明你准备修改的文件和理由。如果只改 win10.rs，可以继续实施；如果涉及其他文件，必须先等用户明确同意。
 ```
-
