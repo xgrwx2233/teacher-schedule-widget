@@ -1,4 +1,6 @@
-use serde::Serialize;
+use std::sync::{Mutex, OnceLock};
+
+use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
@@ -10,17 +12,73 @@ const INTERACTION_PROXY_WINDOW_LABEL: &str = "interaction-proxy";
 const WIDGET_MENU_WINDOW_LABEL: &str = "widget-menu";
 const FLOATING_TOOLBAR_WINDOW_LABEL: &str = "floating-toolbar";
 const AUTH_WINDOW_LABEL: &str = "auth";
+const CHAT_WINDOW_LABEL: &str = "chat";
+const CHAT_HISTORY_WINDOW_LABEL: &str = "chat-history";
+const GROUP_ANNOUNCEMENT_WINDOW_LABEL: &str = "group-announcements";
+const PROFILE_EDIT_WINDOW_LABEL: &str = "profile-edit";
+const FRIEND_PROFILE_WINDOW_LABEL: &str = "friend-profile";
+const PROFILE_SEARCH_WINDOW_LABEL: &str = "profile-search";
+const FRIEND_REQUEST_WINDOW_LABEL: &str = "friend-request";
+const IMAGE_PREVIEW_WINDOW_LABEL: &str = "image-preview";
 const WIDGET_WINDOW_LABEL: &str = "widget";
 
 const SETTINGS_WINDOW_CLOSE_EVENT: &str = "settings-window-close";
 const CARD_SETTINGS_WINDOW_CLOSE_EVENT: &str = "card-settings-window-close";
 const WIDGET_MENU_CLOSE_EVENT: &str = "widget-menu-close";
 const FLOATING_TOOLBAR_CLOSE_EVENT: &str = "floating-toolbar-close";
+const FRIEND_PROFILE_OPEN_EVENT: &str = "friend-profile-open";
+const FRIEND_REQUEST_OPEN_EVENT: &str = "friend-request-open";
+const IMAGE_PREVIEW_OPEN_EVENT: &str = "image-preview-open";
+const CHAT_HISTORY_OPEN_EVENT: &str = "chat-history-open";
+const GROUP_ANNOUNCEMENT_OPEN_EVENT: &str = "group-announcement-open";
+
+static LAST_GROUP_ANNOUNCEMENT_OPEN_PAYLOAD: OnceLock<
+    Mutex<Option<GroupAnnouncementOpenPayload>>,
+> = OnceLock::new();
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WindowClosePayload {
     window_label: &'static str,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FriendProfileOpenPayload {
+    user_id: i64,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImagePreviewItem {
+    id: String,
+    url: Option<String>,
+    file_object_id: Option<String>,
+    file_name: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePreviewOpenPayload {
+    images: Vec<ImagePreviewItem>,
+    active_id: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatHistoryOpenPayload {
+    conversation_id: String,
+    conversation_title: String,
+    current_user_id: Option<i64>,
+    peer_user_id: Option<i64>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupAnnouncementOpenPayload {
+    group_id: String,
+    group_name: String,
+    current_user_role: Option<String>,
 }
 
 #[tauri::command]
@@ -64,6 +122,95 @@ pub fn open_auth_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn open_chat_window(app: AppHandle) -> Result<(), String> {
+    ensure_chat_window(&app).map(|_| ())
+}
+
+#[tauri::command]
+pub fn open_chat_history_window(
+    app: AppHandle,
+    payload: ChatHistoryOpenPayload,
+) -> Result<(), String> {
+    let window = ensure_chat_history_window(&app)?;
+    window
+        .emit(CHAT_HISTORY_OPEN_EVENT, payload)
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_group_announcement_window(
+    app: AppHandle,
+    payload: GroupAnnouncementOpenPayload,
+) -> Result<(), String> {
+    set_last_group_announcement_open_payload(payload.clone())?;
+    let window = ensure_group_announcement_window(&app)?;
+    let _ = app.emit_to(
+        GROUP_ANNOUNCEMENT_WINDOW_LABEL,
+        GROUP_ANNOUNCEMENT_OPEN_EVENT,
+        payload.clone(),
+    );
+    window
+        .emit(GROUP_ANNOUNCEMENT_OPEN_EVENT, payload)
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_group_announcement_open_payload(
+) -> Result<Option<GroupAnnouncementOpenPayload>, String> {
+    get_last_group_announcement_open_payload()
+}
+
+#[tauri::command]
+pub fn open_profile_edit_window(app: AppHandle) -> Result<(), String> {
+    ensure_profile_edit_window(&app).map(|_| ())
+}
+
+#[tauri::command]
+pub fn open_friend_profile_window(app: AppHandle, user_id: Option<i64>) -> Result<(), String> {
+    let window = ensure_friend_profile_window(&app)?;
+    if let Some(user_id) = user_id {
+        window
+            .emit(
+                FRIEND_PROFILE_OPEN_EVENT,
+                FriendProfileOpenPayload { user_id },
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_profile_search_window(app: AppHandle) -> Result<(), String> {
+    ensure_profile_search_window(&app).map(|_| ())
+}
+
+#[tauri::command]
+pub fn open_friend_request_window(app: AppHandle, user_id: i64) -> Result<(), String> {
+    let window = ensure_friend_request_window(&app)?;
+    window
+        .emit(
+            FRIEND_REQUEST_OPEN_EVENT,
+            FriendProfileOpenPayload { user_id },
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_image_preview_window(
+    app: AppHandle,
+    payload: ImagePreviewOpenPayload,
+) -> Result<(), String> {
+    let window = ensure_image_preview_window(&app)?;
+    window
+        .emit(IMAGE_PREVIEW_OPEN_EVENT, payload)
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn hide_auth_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(AUTH_WINDOW_LABEL) {
         window.hide().map_err(|error| error.to_string())?;
@@ -91,6 +238,14 @@ pub fn create_hidden_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
     create_period_card_settings_window(app)?;
     create_floating_toolbar_window(app)?;
     create_auth_window(app)?;
+    create_chat_window(app)?;
+    create_chat_history_window(app)?;
+    create_group_announcement_window(app)?;
+    create_profile_edit_window(app)?;
+    create_friend_profile_window(app)?;
+    create_profile_search_window(app)?;
+    create_friend_request_window(app)?;
+    create_image_preview_window(app)?;
     Ok(())
 }
 
@@ -102,6 +257,13 @@ pub fn hide_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
         WIDGET_MENU_WINDOW_LABEL,
         FLOATING_TOOLBAR_WINDOW_LABEL,
         AUTH_WINDOW_LABEL,
+        CHAT_HISTORY_WINDOW_LABEL,
+        GROUP_ANNOUNCEMENT_WINDOW_LABEL,
+        PROFILE_EDIT_WINDOW_LABEL,
+        FRIEND_PROFILE_WINDOW_LABEL,
+        PROFILE_SEARCH_WINDOW_LABEL,
+        FRIEND_REQUEST_WINDOW_LABEL,
+        IMAGE_PREVIEW_WINDOW_LABEL,
     ] {
         if let Some(window) = app.get_webview_window(label) {
             window.hide().map_err(|error| error.to_string())?;
@@ -143,6 +305,66 @@ pub fn ensure_auth_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     show_existing_or_create(app, AUTH_WINDOW_LABEL, create_auth_window)
 }
 
+pub fn ensure_chat_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(app, CHAT_WINDOW_LABEL, create_chat_window)
+}
+
+pub fn ensure_chat_history_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(
+        app,
+        CHAT_HISTORY_WINDOW_LABEL,
+        create_chat_history_window,
+    )
+}
+
+pub fn ensure_group_announcement_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(
+        app,
+        GROUP_ANNOUNCEMENT_WINDOW_LABEL,
+        create_group_announcement_window,
+    )
+}
+
+pub fn ensure_profile_edit_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(
+        app,
+        PROFILE_EDIT_WINDOW_LABEL,
+        create_profile_edit_window,
+    )
+}
+
+pub fn ensure_friend_profile_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(
+        app,
+        FRIEND_PROFILE_WINDOW_LABEL,
+        create_friend_profile_window,
+    )
+}
+
+pub fn ensure_profile_search_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(
+        app,
+        PROFILE_SEARCH_WINDOW_LABEL,
+        create_profile_search_window,
+    )
+}
+
+pub fn ensure_friend_request_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(
+        app,
+        FRIEND_REQUEST_WINDOW_LABEL,
+        create_friend_request_window,
+    )
+}
+
+pub fn ensure_image_preview_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(
+        app,
+        IMAGE_PREVIEW_WINDOW_LABEL,
+        create_image_preview_window,
+    )
+}
+
 pub fn show_auth_window_if_hidden(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(AUTH_WINDOW_LABEL) {
         if window.is_visible().map_err(|error| error.to_string())? {
@@ -151,6 +373,22 @@ pub fn show_auth_window_if_hidden(app: &AppHandle) -> Result<(), String> {
     }
 
     ensure_auth_window(app).map(|_| ())
+}
+
+fn set_last_group_announcement_open_payload(
+    payload: GroupAnnouncementOpenPayload,
+) -> Result<(), String> {
+    let store = LAST_GROUP_ANNOUNCEMENT_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
+    let mut guard = store.lock().map_err(|error| error.to_string())?;
+    *guard = Some(payload);
+    Ok(())
+}
+
+fn get_last_group_announcement_open_payload(
+) -> Result<Option<GroupAnnouncementOpenPayload>, String> {
+    let store = LAST_GROUP_ANNOUNCEMENT_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
+    let guard = store.lock().map_err(|error| error.to_string())?;
+    Ok(guard.clone())
 }
 
 fn show_existing_or_create(
@@ -363,6 +601,282 @@ fn create_auth_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
             let _ = auth_window.hide();
+        }
+    });
+
+    Ok(window)
+}
+
+fn create_chat_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(CHAT_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        CHAT_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=chat#chat".into()),
+    )
+    .title("教师助手")
+    .devtools(false)
+    .decorations(false)
+    .transparent(false)
+    .resizable(true)
+    .minimizable(true)
+    .maximizable(true)
+    .skip_taskbar(false)
+    .visible(false)
+    .inner_size(960.0, 700.0)
+    .min_inner_size(760.0, 540.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let chat_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = chat_window.hide();
+        }
+    });
+
+    Ok(window)
+}
+
+fn create_chat_history_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(CHAT_HISTORY_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        CHAT_HISTORY_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=chat-history#chat-history".into()),
+    )
+    .title("聊天记录")
+    .devtools(false)
+    .decorations(false)
+    .transparent(false)
+    .resizable(true)
+    .minimizable(true)
+    .maximizable(false)
+    .skip_taskbar(false)
+    .visible(false)
+    .inner_size(560.0, 640.0)
+    .min_inner_size(460.0, 520.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let history_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = history_window.hide();
+        }
+    });
+
+    Ok(window)
+}
+
+fn create_group_announcement_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(GROUP_ANNOUNCEMENT_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        GROUP_ANNOUNCEMENT_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=group-announcements#group-announcements".into()),
+    )
+    .title("群公告")
+    .devtools(false)
+    .decorations(true)
+    .transparent(false)
+    .resizable(true)
+    .minimizable(true)
+    .maximizable(true)
+    .skip_taskbar(false)
+    .visible(false)
+    .inner_size(620.0, 640.0)
+    .min_inner_size(500.0, 460.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let announcement_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = announcement_window.hide();
+        }
+    });
+
+    Ok(window)
+}
+
+fn create_profile_edit_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(PROFILE_EDIT_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        PROFILE_EDIT_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=profile-edit#profile-edit".into()),
+    )
+    .title("个人资料")
+    .devtools(false)
+    .decorations(true)
+    .transparent(false)
+    .resizable(false)
+    .minimizable(false)
+    .maximizable(false)
+    .skip_taskbar(false)
+    .visible(false)
+    .inner_size(420.0, 560.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let profile_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = profile_window.hide();
+        }
+    });
+
+    Ok(window)
+}
+
+fn create_friend_profile_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(FRIEND_PROFILE_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        FRIEND_PROFILE_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=friend-profile#friend-profile".into()),
+    )
+    .title("好友资料")
+    .devtools(false)
+    .decorations(true)
+    .transparent(false)
+    .resizable(false)
+    .minimizable(false)
+    .maximizable(false)
+    .skip_taskbar(false)
+    .visible(false)
+    .inner_size(420.0, 520.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let profile_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = profile_window.hide();
+        }
+    });
+
+    Ok(window)
+}
+
+fn create_profile_search_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(PROFILE_SEARCH_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        PROFILE_SEARCH_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=profile-search#profile-search".into()),
+    )
+    .title("添加好友/群")
+    .devtools(false)
+    .decorations(true)
+    .transparent(false)
+    .resizable(false)
+    .minimizable(false)
+    .maximizable(false)
+    .skip_taskbar(false)
+    .visible(false)
+    .inner_size(720.0, 560.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let profile_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = profile_window.hide();
+        }
+    });
+
+    Ok(window)
+}
+
+fn create_friend_request_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(FRIEND_REQUEST_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        FRIEND_REQUEST_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=friend-request#friend-request".into()),
+    )
+    .title("添加好友")
+    .devtools(false)
+    .decorations(true)
+    .transparent(false)
+    .resizable(false)
+    .minimizable(false)
+    .maximizable(false)
+    .skip_taskbar(false)
+    .visible(false)
+    .inner_size(420.0, 420.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let request_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = request_window.hide();
+        }
+    });
+
+    Ok(window)
+}
+
+fn create_image_preview_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(IMAGE_PREVIEW_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        IMAGE_PREVIEW_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=image-preview#image-preview".into()),
+    )
+    .title("图片预览")
+    .devtools(false)
+    .decorations(false)
+    .transparent(false)
+    .resizable(true)
+    .minimizable(true)
+    .maximizable(true)
+    .skip_taskbar(false)
+    .visible(false)
+    .inner_size(920.0, 680.0)
+    .min_inner_size(640.0, 420.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let preview_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = preview_window.hide();
         }
     });
 

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { emitTo } from "@tauri-apps/api/event";
+import { emit, emitTo } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { defaultLocalAccountState, type LocalAccountState } from "../features/account/types";
@@ -66,6 +66,7 @@ export function AuthWindowHost() {
   const notifyAuthChanged = async (nextState: LocalAccountState) => {
     setAccountState(nextState);
     await emitTo(WIDGET_WINDOW_LABEL, AUTH_STATE_CHANGED_EVENT, nextState);
+    await emit(AUTH_STATE_CHANGED_EVENT, nextState);
   };
 
   const requestCode = () => {

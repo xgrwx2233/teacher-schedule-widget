@@ -37,7 +37,12 @@ export type AppearanceSettings = {
   gridLineWidth: number;
   gridLineOpacity: number;
   axisColorMode: AxisColorMode;
+  axisTextColor: string;
   periodColumnStyle: PeriodColumnStyle;
+  periodCardBackgroundColor: string;
+  periodCardTextColor: string;
+  periodCardFontFamily: string;
+  periodCardFontSize: number;
 };
 
 export type WidgetSettingsState = {
@@ -115,7 +120,12 @@ export const defaultAppearanceSettings: AppearanceSettings = {
   gridLineWidth: 1,
   gridLineOpacity: 18,
   axisColorMode: "auto",
+  axisTextColor: "#0f172a",
   periodColumnStyle: "transparent",
+  periodCardBackgroundColor: "#ffffff",
+  periodCardTextColor: "#0f172a",
+  periodCardFontFamily: "Microsoft YaHei",
+  periodCardFontSize: 12,
 };
 
 export const cardShadowStrengthLabels = [
@@ -193,8 +203,29 @@ export function normalizeAppearanceSettings(
         ? appearance.gridLineOpacity
         : defaultAppearanceSettings.gridLineOpacity,
     axisColorMode: normalizeAxisColorMode(appearance?.axisColorMode),
+    axisTextColor: normalizeColorString(
+      appearance?.axisTextColor,
+      defaultAppearanceSettings.axisTextColor,
+    ),
     periodColumnStyle: normalizePeriodColumnStyle(
       appearance?.periodColumnStyle,
+    ),
+    periodCardBackgroundColor: normalizeColorString(
+      appearance?.periodCardBackgroundColor,
+      defaultAppearanceSettings.periodCardBackgroundColor,
+    ),
+    periodCardTextColor: normalizeColorString(
+      appearance?.periodCardTextColor,
+      appearance?.axisTextColor ?? defaultAppearanceSettings.periodCardTextColor,
+    ),
+    periodCardFontFamily:
+      appearance?.periodCardFontFamily ??
+      defaultAppearanceSettings.periodCardFontFamily,
+    periodCardFontSize: normalizeRange(
+      appearance?.periodCardFontSize,
+      defaultAppearanceSettings.periodCardFontSize,
+      8,
+      16,
     ),
   };
 }
@@ -221,6 +252,17 @@ function normalizePeriodColumnStyle(
 
 function normalizePercent(value: number | undefined, fallback: number): number {
   return normalizeRange(value, fallback, 0, 100);
+}
+
+function normalizeColorString(
+  value: string | undefined,
+  fallback: string,
+): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return fallback;
+  }
+
+  return value;
 }
 
 function normalizeRange(

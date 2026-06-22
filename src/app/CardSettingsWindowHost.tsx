@@ -63,6 +63,7 @@ export function CardSettingsWindowHost() {
   const focusLossTimerRef = useRef<number | null>(null);
   const selectedCardRef = useRef<SelectedCard | null>(null);
   const localDraftSyncGuardUntilRef = useRef(0);
+  const stateRequestTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     selectedCardRef.current = selectedCard;
@@ -74,6 +75,11 @@ export function CardSettingsWindowHost() {
       (event) => {
         if (event.payload.windowLabel !== currentWindow.label) {
           return;
+        }
+
+        if (stateRequestTimerRef.current !== null) {
+          window.clearTimeout(stateRequestTimerRef.current);
+          stateRequestTimerRef.current = null;
         }
 
         const isCurrentCard = isSameSelectedCard(
@@ -111,11 +117,21 @@ export function CardSettingsWindowHost() {
       },
     );
 
-    void emitTo(WIDGET_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT, {
-      windowLabel: currentWindow.label,
-    });
+    stateRequestTimerRef.current = window.setTimeout(() => {
+      if (selectedCardRef.current) {
+        return;
+      }
+
+      void emitTo(WIDGET_WINDOW_LABEL, CARD_SETTINGS_WINDOW_STATE_REQUEST_EVENT, {
+        windowLabel: currentWindow.label,
+      });
+    }, 120);
 
     return () => {
+      if (stateRequestTimerRef.current !== null) {
+        window.clearTimeout(stateRequestTimerRef.current);
+        stateRequestTimerRef.current = null;
+      }
       void unlistenState.then((unlisten) => unlisten());
     };
   }, [currentWindow.label]);

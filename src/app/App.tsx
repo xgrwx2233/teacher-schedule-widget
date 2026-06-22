@@ -155,6 +155,7 @@ const DEFAULT_COURSE_ROW_HEIGHT = 66;
 const DESKTOP_WALLPAPER_CHANGED_EVENT = "desktop-wallpaper-changed";
 const SYNC_SERVER_CHANGE_EVENT = "sync-server-change";
 const WALLPAPER_SIGNATURE_CHECK_MS = 5_000;
+const LOCAL_APPEARANCE_SETTINGS_PREFIX = "teacher-assistant.schedule.appearance.";
 
 export function App() {
   const appWindow = useMemo(() => getCurrentWindow(), []);
@@ -193,8 +194,6 @@ export function App() {
   const [hovered, setHovered] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
-  const [selectedCard, setSelectedCard] = useState<SelectedCard | null>(null);
-  const [cardDraft, setCardDraft] = useState<CardDraft>(defaultCardDraft);
   const [activeSkinId, setActiveSkinId] = useState("midnight-coral");
   const [widgetRegistry, setWidgetRegistry] = useState(defaultWidgetRegistry);
   const [wallpaperInfo, setWallpaperInfo] =
@@ -214,8 +213,8 @@ export function App() {
   const settingsWindowHasPendingScheduleSaveRef = useRef(false);
   const courseRowHeightRef = useRef<number | null>(null);
   const settingsSectionRef = useRef(settingsSection);
-  const selectedCardRef = useRef<SelectedCard | null>(selectedCard);
-  const cardDraftRef = useRef(cardDraft);
+  const selectedCardRef = useRef<SelectedCard | null>(null);
+  const cardDraftRef = useRef<CardDraft>(defaultCardDraft);
   const cardTitleContextRef = useRef<CardSettingsTitleContext | undefined>(
     undefined,
   );
@@ -387,6 +386,20 @@ export function App() {
   }, [settings]);
 
   useEffect(() => {
+    if (!schedulePersistenceReady) {
+      return;
+    }
+    saveLocalAppearanceSettings(
+      accountState.ownerUserId,
+      settings.appearance,
+    );
+  }, [
+    accountState.ownerUserId,
+    schedulePersistenceReady,
+    settings.appearance,
+  ]);
+
+  useEffect(() => {
     scheduleRef.current = schedule;
   }, [schedule]);
 
@@ -447,14 +460,6 @@ export function App() {
     settingsSectionRef.current = settingsSection;
   }, [settingsSection]);
 
-  useEffect(() => {
-    selectedCardRef.current = selectedCard;
-  }, [selectedCard]);
-
-  useEffect(() => {
-    cardDraftRef.current = cardDraft;
-  }, [cardDraft]);
-
   const refreshAccountAndSchedule = useCallback(async (forceRender = false) => {
     setSchedulePersistenceReady(false);
     const nextAccountState = await invoke<LocalAccountState>(
@@ -467,8 +472,14 @@ export function App() {
     setAccountState(nextAccountState);
 
     if (storedSchedule.schedule) {
+      const localAppearance = loadLocalAppearanceSettings(
+        nextAccountState.ownerUserId,
+      );
       const nextSettings = deriveSettingsFromSyncedSchedule(
-        settingsRef.current,
+        {
+          ...defaultSettings,
+          appearance: localAppearance ?? defaultAppearanceSettings,
+        },
         storedSchedule.schedule,
       );
       settingsRef.current = nextSettings;
@@ -488,7 +499,19 @@ export function App() {
       return;
     }
 
-    const fallbackSchedule = scheduleRef.current ?? mockSchedule;
+    const localAppearance = loadLocalAppearanceSettings(
+      nextAccountState.ownerUserId,
+    );
+    const fallbackSchedule = mockSchedule;
+    const fallbackSettings = deriveSettingsFromSyncedSchedule(
+      {
+        ...defaultSettings,
+        appearance: localAppearance ?? defaultAppearanceSettings,
+      },
+      fallbackSchedule,
+    );
+    settingsRef.current = fallbackSettings;
+    setSettings(fallbackSettings);
     scheduleRef.current = fallbackSchedule;
     setSchedule(fallbackSchedule);
     if (forceRender) {
@@ -756,7 +779,6 @@ export function App() {
     activeCardSettingsWindowLabelRef.current = null;
     selectedCardRef.current = null;
     cardTitleContextRef.current = undefined;
-    setSelectedCard(null);
     setActiveCellId(null);
     await invoke("clear_proxy_active_card");
     await hideWindowByLabel(CARD_SETTINGS_WINDOW_LABEL);
@@ -774,12 +796,7 @@ export function App() {
         return;
       }
 
-      const currentSchedule = {
-        ...scheduleRef.current,
-        rows: scheduleRef.current.rows.map((row) => ensureRowCourses(row)),
-      };
-      scheduleRef.current = currentSchedule;
-      setSchedule(currentSchedule);
+      const currentSchedule = scheduleRef.current;
       const draft = createDraftForCard(
         currentSchedule,
         card,
@@ -800,20 +817,14 @@ export function App() {
       selectedCardRef.current = card;
       cardTitleContextRef.current = titleContext;
       cardDraftRef.current = draft;
-      setSelectedCard(card);
-      setCardDraft(draft);
       menuOpenRef.current = false;
       setMenuOpen(false);
 
       try {
-        await hideWindowByLabel(getOtherCardSettingsWindowLabel(card));
-        await invoke("open_card_settings_window", {
-          title: buildInitialCardSettingsWindowTitle(card, titleContext, draft),
-          windowLabel: targetWindowLabel,
-        });
-        cardSettingsWindowOpenRef.current = true;
-        activeCardSettingsWindowLabelRef.current = targetWindowLabel;
-        await emitTo<CardSettingsWindowStatePayload>(
+        const otherWindowHidePromise = hideWindowByLabel(
+          getOtherCardSettingsWindowLabel(card),
+        );
+        void emitTo<CardSettingsWindowStatePayload>(
           targetWindowLabel,
           CARD_SETTINGS_WINDOW_STATE_EVENT,
           {
@@ -827,21 +838,18 @@ export function App() {
             activeTemporaryChangeId: temporaryChanges[0]?.id ?? null,
           },
         );
-        window.setTimeout(() => {
-          void emitCardSettingsState(
-            targetWindowLabel,
-            card,
-            draft,
-            currentSchedule,
-            settingsRef.current.term,
-            titleContext,
-          );
-        }, 80);
+
+        await invoke("open_card_settings_window", {
+          title: buildInitialCardSettingsWindowTitle(card, titleContext, draft),
+          windowLabel: targetWindowLabel,
+        });
+        await otherWindowHidePromise;
+        cardSettingsWindowOpenRef.current = true;
+        activeCardSettingsWindowLabelRef.current = targetWindowLabel;
       } catch {
         cardSettingsWindowOpenRef.current = false;
         activeCardSettingsWindowLabelRef.current = null;
         selectedCardRef.current = null;
-        setSelectedCard(null);
         await invoke("set_proxy_passthrough", { passthrough: true });
         await invoke("clear_proxy_active_card");
       }
@@ -855,25 +863,10 @@ export function App() {
       (event) => {
         const nextSettings = event.payload.settings;
         const previousSettings = settingsRef.current;
-        const previousAppearance = normalizeAppearanceSettings(
-          previousSettings.appearance,
-        );
-        const nextAppearance = normalizeAppearanceSettings(
-          nextSettings.appearance,
-        );
-        const previousAxisColor = buildAxisPalette(
-          previousAppearance.axisColorMode,
-          previousAppearance.backgroundColor,
-        ).main;
-        const nextAxisColor = buildAxisPalette(
-          nextAppearance.axisColorMode,
-          nextAppearance.backgroundColor,
-        ).main;
         const shouldResizeWidget =
           nextSettings.periodCount !== previousSettings.periodCount;
         const shouldMaterializeScheduleGrid =
           nextSettings.workdayMode !== previousSettings.workdayMode;
-        const shouldSyncPeriodTextColor = previousAxisColor !== nextAxisColor;
         const addedWeekdays = getAddedWorkdays(
           previousSettings.workdayMode,
           nextSettings.workdayMode,
@@ -907,11 +900,7 @@ export function App() {
         );
         setSettings(effectiveNextSettings);
 
-        if (
-          shouldMaterializeScheduleGrid ||
-          shouldSyncPeriodTextColor ||
-          shouldApplyPeriodConfig
-        ) {
+        if (shouldMaterializeScheduleGrid || shouldApplyPeriodConfig) {
           let nextSchedule = shouldApplyPeriodConfig
             ? applyPeriodConfigToSchedule(scheduleRef.current, nextPeriods)
             : shouldMaterializeScheduleGrid
@@ -922,13 +911,6 @@ export function App() {
                   ),
                 }
               : scheduleRef.current;
-
-          if (shouldSyncPeriodTextColor) {
-            nextSchedule = applyAxisTextColorToPeriods(
-              nextSchedule,
-              nextAxisColor,
-            );
-          }
 
           scheduleRef.current = nextSchedule;
           suppressNextSchedulePersistenceRef.current =
@@ -950,7 +932,6 @@ export function App() {
               effectiveNextSettings.term,
             );
             cardDraftRef.current = nextDraft;
-            setCardDraft(nextDraft);
             void emitCardSettingsState(
               PERIOD_CARD_SETTINGS_WINDOW_LABEL,
               currentCard,
@@ -1122,8 +1103,8 @@ export function App() {
       (event) => {
         cardSettingsHasPendingSaveRef.current = true;
         suppressNextSchedulePersistenceRef.current = true;
-        setSelectedCard(event.payload.selectedCard);
-        setCardDraft(event.payload.draft);
+        selectedCardRef.current = event.payload.selectedCard;
+        cardDraftRef.current = event.payload.draft;
         setSchedule((current) => {
           const nextSchedule = applyCardDraft(
             current,
@@ -1175,7 +1156,6 @@ export function App() {
         scheduleRef.current = nextSchedule;
         cardDraftRef.current = nextDraft;
         setSchedule(nextSchedule);
-        setCardDraft(nextDraft);
         suppressNextSchedulePersistenceRef.current = true;
         if (shouldPersistImmediately) {
           cardSettingsHasPendingSaveRef.current = false;
@@ -1272,7 +1252,6 @@ export function App() {
         cardSettingsWindowOpenRef.current = false;
         activeCardSettingsWindowLabelRef.current = null;
         selectedCardRef.current = null;
-        setSelectedCard(null);
       },
     );
 
@@ -1487,11 +1466,6 @@ export function App() {
     }
   };
 
-  const updateCardDraft = (nextDraft: CardDraft) => {
-    setCardDraft(nextDraft);
-    setSchedule((current) => applyCardDraft(current, selectedCard, nextDraft));
-  };
-
   const onPointerMove = () => {
     if (mode === "detached") {
       setHovered(true);
@@ -1661,6 +1635,34 @@ function deriveSettingsFromSyncedSchedule(
   };
 }
 
+function loadLocalAppearanceSettings(
+  ownerUserId: string,
+): WidgetSettingsState["appearance"] | null {
+  try {
+    const raw = window.localStorage.getItem(
+      `${LOCAL_APPEARANCE_SETTINGS_PREFIX}${ownerUserId || "default_local"}`,
+    );
+    if (!raw) {
+      return null;
+    }
+    return normalizeAppearanceSettings(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalAppearanceSettings(
+  ownerUserId: string,
+  appearance: WidgetSettingsState["appearance"],
+): void {
+  try {
+    window.localStorage.setItem(
+      `${LOCAL_APPEARANCE_SETTINGS_PREFIX}${ownerUserId || "default_local"}`,
+      JSON.stringify(normalizeAppearanceSettings(appearance)),
+    );
+  } catch {}
+}
+
 function buildVisibleDaysForWeek(
   mode: WorkdayMode,
   termStartDate: string,
@@ -1800,7 +1802,10 @@ function normalizePeriodConfigItems(
       const order = periodOrder(period.id) ?? index + 1;
       return {
         id: period.id || `p${order}`,
-        label: period.label.trim() || `第${order}节`,
+        label:
+          typeof period.label === "string"
+            ? period.label.trim()
+            : `第${order}节`,
         time: normalizePeriodTime(period.time),
       };
     })
@@ -1827,7 +1832,8 @@ function createPeriodConfigRow(
     id: period.id || `p${order}`,
     period: {
       id: period.id || `p${order}`,
-      label: period.label || `第${order}节`,
+      label:
+        typeof period.label === "string" ? period.label : `第${order}节`,
       time: normalizePeriodTime(period.time),
     },
     courses: Object.fromEntries(
@@ -2700,6 +2706,9 @@ function buildWidgetStyle(
   const axisPalette = buildAxisPalette(
     normalizedAppearance.axisColorMode,
     normalizedAppearance.backgroundColor,
+    normalizedAppearance.axisTextColor,
+    normalizedAppearance.periodCardBackgroundColor,
+    normalizedAppearance.periodCardTextColor,
   );
   const deviceScale =
     typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
@@ -2737,6 +2746,10 @@ function buildWidgetStyle(
     "--axis-capsule-border": axisPalette.capsuleBorder,
     "--axis-solid-bg": axisPalette.solidBg,
     "--axis-solid-border": axisPalette.solidBorder,
+    "--period-card-global-bg": normalizedAppearance.periodCardBackgroundColor,
+    "--period-card-global-fg": normalizedAppearance.periodCardTextColor,
+    "--period-card-global-font": normalizedAppearance.periodCardFontFamily,
+    "--period-card-global-font-size": `${normalizedAppearance.periodCardFontSize}px`,
     "--widget-wallpaper-url": buildWallpaperCssImage(wallpaperInfo),
     "--widget-wallpaper-offset-x": wallpaperInfo
       ? `${Math.round((wallpaperInfo.wallpaperLeft - wallpaperInfo.windowLeft) / deviceScale)}px`
@@ -2832,6 +2845,9 @@ function buildGridLineBorder(
 function buildAxisPalette(
   mode: AxisColorMode,
   backgroundColor: string,
+  axisTextColor?: string,
+  periodCardBackgroundColor?: string,
+  periodCardTextColor?: string,
 ): {
   main: string;
   muted: string;
@@ -2840,6 +2856,19 @@ function buildAxisPalette(
   solidBg: string;
   solidBorder: string;
 } {
+  if (axisTextColor) {
+    const textRgb = hexToRgbParts(axisTextColor);
+    const periodBg = periodCardBackgroundColor ?? "rgba(255, 255, 255, 0.62)";
+    return {
+      main: axisTextColor,
+      muted: `rgba(${textRgb.replace(/ /g, ", ")}, 0.66)`,
+      capsuleBg: buildRgbaColor(periodBg, 0.18),
+      capsuleBorder: buildRgbaColor(periodCardTextColor ?? axisTextColor, 0.13),
+      solidBg: periodBg,
+      solidBorder: buildRgbaColor(periodCardTextColor ?? axisTextColor, 0.18),
+    };
+  }
+
   const useLightText =
     mode === "light" ||
     (mode === "auto" && getHexLuminance(backgroundColor) < 138);
@@ -3265,26 +3294,6 @@ function applyGlobalScheduleToSchedule(
           },
         ]),
       ) as Record<Weekday, CourseCell>,
-    })),
-  };
-}
-
-function applyAxisTextColorToPeriods(
-  schedule: Schedule,
-  color: string,
-): Schedule {
-  return {
-    ...schedule,
-    rows: schedule.rows.map((row) => ({
-      ...row,
-      period: {
-        ...row.period,
-        style: {
-          ...row.period.style,
-          color,
-          iconColor: color,
-        },
-      },
     })),
   };
 }

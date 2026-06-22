@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    path::PathBuf,
+    os::windows::ffi::OsStrExt,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -13,13 +14,27 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
+use windows::{
+    core::PCWSTR,
+    Win32::{
+        Foundation::HWND,
+        UI::Shell::ShellExecuteW,
+    },
+};
 
 const DEFAULT_USER_ID: &str = "default_local";
 const CLOUD_API_BASE_URL: &str = "https://api.shiyuetech.com";
 const DEFAULT_TERM_START: &str = "2026-03-05";
 const DEFAULT_TERM_END: &str = "2026-06-30";
 const SYNC_SERVER_CHANGE_EVENT: &str = "sync-server-change";
+const CHAT_MESSAGE_NEW_EVENT: &str = "chat-message-new";
+const CHAT_MESSAGE_REVOKED_EVENT: &str = "chat-message-revoked";
+const CHAT_MESSAGE_DELETED_EVENT: &str = "chat-message-deleted";
+const PROFILE_UPDATED_EVENT: &str = "profile-updated";
+const FRIEND_REQUEST_EVENT: &str = "friend-request-event";
+const CHAT_GROUP_EVENT: &str = "chat-group-event";
 static REALTIME_SYNC_GENERATION: AtomicU64 = AtomicU64::new(0);
+static CHAT_REALTIME_GENERATION: AtomicU64 = AtomicU64::new(0);
 const WEEKDAYS: [&str; 7] = [
     "monday",
     "tuesday",
@@ -221,6 +236,1125 @@ pub fn start_realtime_sync(app: AppHandle) -> Result<(), String> {
 pub fn stop_realtime_sync() -> Result<(), String> {
     REALTIME_SYNC_GENERATION.fetch_add(1, AtomicOrdering::SeqCst);
     Ok(())
+}
+
+#[tauri::command]
+pub fn start_chat_realtime(app: AppHandle) -> Result<(), String> {
+    let generation = CHAT_REALTIME_GENERATION.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    if owner_user_id == DEFAULT_USER_ID {
+        return Ok(());
+    }
+    let token = session_token(&conn, &owner_user_id)?;
+    let device_id = sync_client_id(&conn)?;
+    drop(conn);
+    tauri::async_runtime::spawn(async move {
+        run_chat_realtime_loop(app, token, device_id, generation).await;
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_chat_realtime() -> Result<(), String> {
+    CHAT_REALTIME_GENERATION.fetch_add(1, AtomicOrdering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_chat_conversations(app: AppHandle) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json("/chat/conversations", &token)
+}
+
+#[tauri::command]
+pub fn get_rtc_token(app: AppHandle, channel_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json(
+        &format!("/rtc/token?channelId={}", urlencoding::encode(&channel_id)),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn list_chat_messages(
+    app: AppHandle,
+    conversation_id: String,
+    after_seq: Option<u32>,
+    before_seq: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json(
+        &format!(
+            "/chat/conversations/{}/messages?afterSeq={}&beforeSeq={}&limit={}",
+            urlencoding::encode(&conversation_id),
+            after_seq.unwrap_or(0),
+            before_seq.unwrap_or(0),
+            limit.unwrap_or(50).clamp(1, 100)
+        ),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn search_chat_history_messages(
+    app: AppHandle,
+    conversation_id: String,
+    history_type: Option<String>,
+    query: Option<String>,
+    after_seq: Option<u32>,
+    before_seq: Option<u32>,
+    around_seq: Option<u32>,
+    limit: Option<u32>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    let mut path = format!(
+        "/chat/conversations/{}/history?type={}&query={}&afterSeq={}&beforeSeq={}&aroundSeq={}&limit={}",
+        urlencoding::encode(&conversation_id),
+        urlencoding::encode(history_type.as_deref().unwrap_or("all")),
+        urlencoding::encode(query.as_deref().unwrap_or("")),
+        after_seq.unwrap_or(0),
+        before_seq.unwrap_or(0),
+        around_seq.unwrap_or(0),
+        limit.unwrap_or(80).clamp(1, 200)
+    );
+    if let Some(value) = date_from.as_deref().filter(|value| !value.trim().is_empty()) {
+        path.push_str("&dateFrom=");
+        path.push_str(&urlencoding::encode(value));
+    }
+    if let Some(value) = date_to.as_deref().filter(|value| !value.trim().is_empty()) {
+        path.push_str("&dateTo=");
+        path.push_str(&urlencoding::encode(value));
+    }
+    cloud_get_json(&path, &token)
+}
+
+#[tauri::command]
+pub fn send_chat_message(
+    app: AppHandle,
+    conversation_id: String,
+    client_msg_id: String,
+    message_type: Option<String>,
+    content: String,
+    content_json: Option<Value>,
+    file_object_id: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    let device_id = sync_client_id(&conn)?;
+    cloud_post_json(
+        &format!("/chat/messages?clientId={}", urlencoding::encode(&device_id)),
+        &token,
+        json!({
+            "conversationId": conversation_id,
+            "clientMsgId": client_msg_id,
+            "messageType": message_type.unwrap_or_else(|| "text".to_string()),
+            "content": content,
+            "contentJson": content_json,
+            "fileObjectId": file_object_id,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn revoke_chat_message(app: AppHandle, message_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    let device_id = sync_client_id(&conn)?;
+    cloud_post_json(
+        &format!(
+            "/chat/messages/{}/revoke?clientId={}",
+            urlencoding::encode(&message_id),
+            urlencoding::encode(&device_id)
+        ),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn delete_chat_message_for_me(app: AppHandle, message_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    let device_id = sync_client_id(&conn)?;
+    let response = cloud_delete_json(
+        &format!(
+            "/chat/messages/{}?clientId={}",
+            urlencoding::encode(&message_id),
+            urlencoding::encode(&device_id)
+        ),
+        &token,
+    )?;
+    emit_chat_deleted_payload(&app, response.clone());
+    Ok(response)
+}
+
+#[tauri::command]
+pub fn create_direct_chat_conversation(app: AppHandle, peer_user_id: i64) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        "/chat/conversations/direct",
+        &token,
+        json!({
+            "peerUserId": peer_user_id,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn create_chat_group(
+    app: AppHandle,
+    name: Option<String>,
+    member_user_ids: Vec<i64>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        "/chat/groups",
+        &token,
+        json!({
+            "name": name,
+            "memberUserIds": member_user_ids,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn load_chat_group(app: AppHandle, group_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json(
+        &format!("/chat/groups/{}", urlencoding::encode(&group_id)),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn update_chat_group(
+    app: AppHandle,
+    group_id: String,
+    name: Option<String>,
+    avatar_url: Option<String>,
+    avatar_object_key: Option<String>,
+    description: Option<String>,
+    announcement: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_put_json(
+        &format!("/chat/groups/{}", urlencoding::encode(&group_id)),
+        &token,
+        json!({
+            "name": name,
+            "avatarUrl": avatar_url,
+            "avatarObjectKey": avatar_object_key,
+            "description": description,
+            "announcement": announcement,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn list_chat_group_announcements(app: AppHandle, group_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json(
+        &format!(
+            "/chat/groups/{}/announcements",
+            urlencoding::encode(&group_id)
+        ),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn create_chat_group_announcement(
+    app: AppHandle,
+    group_id: String,
+    content: String,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!(
+            "/chat/groups/{}/announcements",
+            urlencoding::encode(&group_id)
+        ),
+        &token,
+        json!({ "content": content }),
+    )
+}
+
+#[tauri::command]
+pub fn update_chat_group_announcement(
+    app: AppHandle,
+    group_id: String,
+    announcement_id: i64,
+    content: String,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_put_json(
+        &format!(
+            "/chat/groups/{}/announcements/{}",
+            urlencoding::encode(&group_id),
+            announcement_id
+        ),
+        &token,
+        json!({ "content": content }),
+    )
+}
+
+#[tauri::command]
+pub fn delete_chat_group_announcement(
+    app: AppHandle,
+    group_id: String,
+    announcement_id: i64,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_delete_json(
+        &format!(
+            "/chat/groups/{}/announcements/{}",
+            urlencoding::encode(&group_id),
+            announcement_id
+        ),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn list_chat_group_members(app: AppHandle, group_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json(
+        &format!("/chat/groups/{}/members", urlencoding::encode(&group_id)),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn update_my_chat_group_member(
+    app: AppHandle,
+    group_id: String,
+    group_nickname: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_patch_json(
+        &format!(
+            "/chat/groups/{}/members/me",
+            urlencoding::encode(&group_id)
+        ),
+        &token,
+        json!({
+            "groupNickname": group_nickname,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn invite_chat_group_members(
+    app: AppHandle,
+    group_id: String,
+    member_user_ids: Vec<i64>,
+    message: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!(
+            "/chat/groups/{}/members/invite",
+            urlencoding::encode(&group_id)
+        ),
+        &token,
+        json!({
+            "memberUserIds": member_user_ids,
+            "message": message,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn list_chat_group_notifications(app: AppHandle) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json("/chat/groups/notifications", &token)
+}
+
+#[tauri::command]
+pub fn accept_chat_group_join_request(app: AppHandle, request_id: i64) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!("/chat/groups/join-requests/{request_id}/accept"),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn reject_chat_group_join_request(app: AppHandle, request_id: i64) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!("/chat/groups/join-requests/{request_id}/reject"),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn send_chat_group_join_request(
+    app: AppHandle,
+    group_id: String,
+    message: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!(
+            "/chat/groups/{}/join-requests",
+            urlencoding::encode(&group_id)
+        ),
+        &token,
+        json!({
+            "message": message,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn set_chat_group_admin(
+    app: AppHandle,
+    group_id: String,
+    user_id: i64,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!(
+            "/chat/groups/{}/admins/{}",
+            urlencoding::encode(&group_id),
+            user_id
+        ),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn unset_chat_group_admin(
+    app: AppHandle,
+    group_id: String,
+    user_id: i64,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_delete_json(
+        &format!(
+            "/chat/groups/{}/admins/{}",
+            urlencoding::encode(&group_id),
+            user_id
+        ),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn transfer_chat_group_owner(
+    app: AppHandle,
+    group_id: String,
+    user_id: i64,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!(
+            "/chat/groups/{}/transfer-owner",
+            urlencoding::encode(&group_id)
+        ),
+        &token,
+        json!({
+            "userId": user_id,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn remove_chat_group_member(
+    app: AppHandle,
+    group_id: String,
+    user_id: i64,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_delete_json(
+        &format!(
+            "/chat/groups/{}/members/{}",
+            urlencoding::encode(&group_id),
+            user_id
+        ),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn leave_chat_group(app: AppHandle, group_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!("/chat/groups/{}/leave", urlencoding::encode(&group_id)),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn dissolve_chat_group(app: AppHandle, group_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!("/chat/groups/{}/dissolve", urlencoding::encode(&group_id)),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn mark_chat_conversation_read(
+    app: AppHandle,
+    conversation_id: String,
+    conversation_seq: u32,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!("/chat/conversations/{}/read", urlencoding::encode(&conversation_id)),
+        &token,
+        json!({
+            "conversationSeq": conversation_seq,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn set_chat_conversation_pinned(
+    app: AppHandle,
+    conversation_id: String,
+    pinned: bool,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    let action = if pinned { "pin" } else { "unpin" };
+    cloud_post_json(
+        &format!(
+            "/chat/conversations/{}/{}",
+            urlencoding::encode(&conversation_id),
+            action
+        ),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn set_chat_conversation_muted(
+    app: AppHandle,
+    conversation_id: String,
+    muted: bool,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    let action = if muted { "mute" } else { "unmute" };
+    cloud_post_json(
+        &format!(
+            "/chat/conversations/{}/{}",
+            urlencoding::encode(&conversation_id),
+            action
+        ),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn clear_chat_conversation_history(
+    app: AppHandle,
+    conversation_id: String,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!(
+            "/chat/conversations/{}/clear-history",
+            urlencoding::encode(&conversation_id)
+        ),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn archive_chat_conversation(app: AppHandle, conversation_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!("/chat/conversations/{}/archive", urlencoding::encode(&conversation_id)),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn load_my_profile(app: AppHandle) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json("/profile/me", &token)
+}
+
+#[tauri::command]
+pub fn save_my_profile(
+    app: AppHandle,
+    nickname: String,
+    avatar_url: Option<String>,
+    avatar_object_key: Option<String>,
+    bio: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_put_json(
+        "/profile/me",
+        &token,
+        json!({
+            "nickname": nickname,
+            "avatarUrl": avatar_url,
+            "avatarObjectKey": avatar_object_key,
+            "bio": bio,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn load_user_profile(app: AppHandle, user_id: i64) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json(&format!("/profile/users/{user_id}"), &token)
+}
+
+#[tauri::command]
+pub fn search_profiles(app: AppHandle, keyword: String, scope: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json(
+        &format!(
+            "/profile/search?keyword={}&scope={}",
+            urlencoding::encode(&keyword),
+            urlencoding::encode(&scope)
+        ),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn upload_profile_avatar(app: AppHandle, file_path: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_upload_file("/files/upload?file_type=avatar", &token, &file_path)
+}
+
+#[tauri::command]
+pub fn upload_profile_avatar_bytes(
+    app: AppHandle,
+    filename: String,
+    content_type: Option<String>,
+    bytes: Vec<u8>,
+) -> Result<Value, String> {
+    if bytes.is_empty() {
+        return Err("empty file".to_string());
+    }
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_upload_bytes(
+        "/files/upload?file_type=avatar",
+        &token,
+        &filename,
+        content_type.as_deref(),
+        bytes,
+    )
+}
+
+#[tauri::command]
+pub fn upload_chat_file_bytes(
+    app: AppHandle,
+    filename: String,
+    content_type: Option<String>,
+    bytes: Vec<u8>,
+    file_type: String,
+) -> Result<Value, String> {
+    if bytes.is_empty() {
+        return Err("empty file".to_string());
+    }
+    let upload_type = match file_type.as_str() {
+        "image" => "image",
+        "file" => "file",
+        "sticker" => "sticker",
+        _ => return Err("unsupported chat upload type".to_string()),
+    };
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_upload_bytes(
+        &format!("/files/upload?file_type={upload_type}"),
+        &token,
+        &filename,
+        content_type.as_deref(),
+        bytes,
+    )
+}
+
+#[tauri::command]
+pub fn reupload_cached_chat_file(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+    content_type: Option<String>,
+    file_type: String,
+) -> Result<Value, String> {
+    if file_object_id.trim().is_empty() {
+        return Err("missing file object id".to_string());
+    }
+    let upload_type = match file_type.as_str() {
+        "image" => "image",
+        "file" => "file",
+        "sticker" => "sticker",
+        _ => return Err("unsupported chat upload type".to_string()),
+    };
+    let filename = safe_download_filename(&file_name);
+    let extension = Path::new(&filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("bin");
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("chat_cache")
+        .join("media");
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let stable_id = safe_cache_segment(&file_object_id);
+    let path = dir.join(format!("{stable_id}.{extension}"));
+    if !path.exists() {
+        download_chat_file_to_path(&app, &file_object_id, &path)?;
+    }
+    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    if bytes.is_empty() {
+        return Err("empty file".to_string());
+    }
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_upload_bytes(
+        &format!("/files/upload?file_type={upload_type}"),
+        &token,
+        &filename,
+        content_type.as_deref(),
+        bytes,
+    )
+}
+
+#[tauri::command]
+pub fn get_chat_file_signed_url(app: AppHandle, file_object_id: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json(
+        &format!("/files/{}/signed-url", urlencoding::encode(&file_object_id)),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn download_chat_file(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+) -> Result<Value, String> {
+    let default_dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().app_data_dir())
+        .map_err(|error| error.to_string())?;
+    let Some(download_root) = rfd::FileDialog::new()
+        .set_title("选择下载文件夹")
+        .set_directory(&default_dir)
+        .pick_folder()
+    else {
+        return Ok(json!({ "cancelled": true }));
+    };
+    fs::create_dir_all(&download_root).map_err(|error| error.to_string())?;
+    let filename = safe_download_filename(&file_name);
+    let target = unique_download_path(&download_root, &filename);
+    download_chat_file_to_path(&app, &file_object_id, &target)?;
+    Ok(json!({ "path": target.to_string_lossy(), "cancelled": false }))
+}
+
+#[tauri::command]
+pub fn cache_chat_file(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+) -> Result<Value, String> {
+    if file_object_id.trim().is_empty() {
+        return Err("missing file object id".to_string());
+    }
+    let filename = safe_download_filename(&file_name);
+    let extension = Path::new(&filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("bin");
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("chat_cache")
+        .join("media");
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let stable_id = safe_cache_segment(&file_object_id);
+    let path = dir.join(format!("{stable_id}.{extension}"));
+    if !path.exists() {
+        download_chat_file_to_path(&app, &file_object_id, &path)?;
+    }
+    Ok(json!({ "path": path.to_string_lossy() }))
+}
+
+#[tauri::command]
+pub fn open_cached_chat_file(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+) -> Result<Value, String> {
+    let cached = cache_chat_file(app, file_object_id, file_name)?;
+    let path = cached
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "missing cached file path".to_string())?;
+    open_path_with_default_app(Path::new(path))?;
+    Ok(json!({ "path": path }))
+}
+
+fn download_chat_file_to_path(
+    app: &AppHandle,
+    file_object_id: &str,
+    target: &Path,
+) -> Result<(), String> {
+    if file_object_id.trim().is_empty() {
+        return Err("missing file object id".to_string());
+    }
+    let conn = open_db(app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    let signed = cloud_get_json(
+        &format!("/files/{}/signed-url", urlencoding::encode(file_object_id)),
+        &token,
+    )?;
+    let url = signed
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "missing signed download url".to_string())?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    download_url_to_path(url, target, "download")
+}
+
+fn open_path_with_default_app(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Err("file does not exist".to_string());
+    }
+    let wide_path: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let operation: Vec<u16> = "open".encode_utf16().chain(std::iter::once(0)).collect();
+    let result = unsafe {
+        ShellExecuteW(
+            Some(HWND::default()),
+            PCWSTR(operation.as_ptr()),
+            PCWSTR(wide_path.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+        )
+    };
+    if result.0 as isize <= 32 {
+        return Err(format!("failed to open file: {}", result.0 as isize));
+    }
+    Ok(())
+}
+
+fn download_url_to_path(url: &str, target: &Path, label: &str) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let client = Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|error| format!("{label} client failed: {error}"))?;
+    let response = client
+        .get(url)
+        .send()
+        .map_err(|error| format!("{label} failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("{label} failed: HTTP {status}"));
+    }
+    let bytes = response
+        .bytes()
+        .map_err(|error| format!("{label} failed: {error}"))?;
+    fs::write(target, bytes).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn file_id_from_file_reference(value: &str) -> Option<String> {
+    let filename = value
+        .split('?')
+        .next()
+        .unwrap_or(value)
+        .rsplit('/')
+        .next()
+        .unwrap_or(value);
+    let stem = filename.split('.').next().unwrap_or(filename).trim();
+    if stem.starts_with("file_") && stem.len() > "file_".len() {
+        Some(stem.to_string())
+    } else {
+        None
+    }
+}
+
+#[tauri::command]
+pub fn cache_profile_avatar(
+    app: AppHandle,
+    account_key: String,
+    avatar_key: String,
+    avatar_url: String,
+) -> Result<Value, String> {
+    let account = safe_cache_segment(&account_key);
+    let source = avatar_url.trim();
+    if account.is_empty() || avatar_key.trim().is_empty() || source.is_empty() {
+        return Err("invalid avatar cache input".to_string());
+    }
+    if source.starts_with("asset:") || Path::new(source).exists() {
+        return Ok(json!({ "path": source }));
+    }
+
+    let extension = avatar_extension(if source.contains('.') {
+        source
+    } else {
+        avatar_key.trim()
+    });
+    let mut stable_key = safe_cache_segment(&avatar_key);
+    if stable_key.is_empty() {
+        stable_key = "avatar".to_string();
+    }
+    let filename = format!("{stable_key}.{extension}");
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("chat_cache")
+        .join(account)
+        .join("avatars");
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join(filename);
+    if !path.exists() {
+        let mut last_error = None;
+        if source.starts_with("http://") || source.starts_with("https://") {
+            if let Err(error) = download_url_to_path(source, &path, "avatar") {
+                last_error = Some(error);
+            }
+        }
+        if !path.exists() {
+            for reference in [avatar_key.trim(), source] {
+                if let Some(file_id) = file_id_from_file_reference(reference) {
+                    match download_chat_file_to_path(&app, &file_id, &path) {
+                        Ok(()) => {
+                            last_error = None;
+                            break;
+                        }
+                        Err(error) => {
+                            last_error = Some(error);
+                        }
+                    }
+                }
+            }
+        }
+        if !path.exists() {
+            return Err(last_error.unwrap_or_else(|| "avatar download failed".to_string()));
+        }
+    }
+
+    Ok(json!({ "path": path.to_string_lossy().to_string() }))
+}
+
+#[tauri::command]
+pub fn send_friend_request(
+    app: AppHandle,
+    to_user_id: i64,
+    message: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        "/friends/requests",
+        &token,
+        json!({
+            "toUserId": to_user_id,
+            "message": message.unwrap_or_default(),
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn list_friend_requests(app: AppHandle) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json("/friends/requests", &token)
+}
+
+#[tauri::command]
+pub fn accept_friend_request(app: AppHandle, request_id: i64) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!("/friends/requests/{request_id}/accept"),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn reject_friend_request(app: AppHandle, request_id: i64) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!("/friends/requests/{request_id}/reject"),
+        &token,
+        json!({}),
+    )
+}
+
+#[tauri::command]
+pub fn list_friends(app: AppHandle) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json("/friends", &token)
 }
 
 #[tauri::command]
@@ -441,6 +1575,38 @@ fn cloud_post_json(path: &str, token: &str, body: Value) -> Result<Value, String
     read_cloud_json(response)
 }
 
+fn cloud_put_json(path: &str, token: &str, body: Value) -> Result<Value, String> {
+    let client = cloud_client()?;
+    let response = client
+        .put(cloud_url(path))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .map_err(|error| format!("cloud request failed: {error}"))?;
+    read_cloud_json(response)
+}
+
+fn cloud_patch_json(path: &str, token: &str, body: Value) -> Result<Value, String> {
+    let client = cloud_client()?;
+    let response = client
+        .patch(cloud_url(path))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .map_err(|error| format!("cloud request failed: {error}"))?;
+    read_cloud_json(response)
+}
+
+fn cloud_delete_json(path: &str, token: &str) -> Result<Value, String> {
+    let client = cloud_client()?;
+    let response = client
+        .delete(cloud_url(path))
+        .bearer_auth(token)
+        .send()
+        .map_err(|error| format!("cloud request failed: {error}"))?;
+    read_cloud_json(response)
+}
+
 fn cloud_get_json(path: &str, token: &str) -> Result<Value, String> {
     let client = cloud_client()?;
     let response = client
@@ -448,6 +1614,50 @@ fn cloud_get_json(path: &str, token: &str) -> Result<Value, String> {
         .bearer_auth(token)
         .send()
         .map_err(|error| format!("cloud request failed: {error}"))?;
+    read_cloud_json(response)
+}
+
+fn cloud_upload_file(path: &str, token: &str, file_path: &str) -> Result<Value, String> {
+    let client = cloud_client()?;
+    let file_name = PathBuf::from(file_path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("avatar")
+        .to_string();
+    let form = reqwest::blocking::multipart::Form::new()
+        .file("file", file_path)
+        .map_err(|error| format!("cloud upload failed: {error}"))?
+        .text("filename", file_name);
+    let response = client
+        .post(cloud_url(path))
+        .bearer_auth(token)
+        .multipart(form)
+        .send()
+        .map_err(|error| format!("cloud upload failed: {error}"))?;
+    read_cloud_json(response)
+}
+
+fn cloud_upload_bytes(
+    path: &str,
+    token: &str,
+    filename: &str,
+    content_type: Option<&str>,
+    bytes: Vec<u8>,
+) -> Result<Value, String> {
+    let client = cloud_client()?;
+    let mut part = reqwest::blocking::multipart::Part::bytes(bytes).file_name(filename.to_string());
+    if let Some(content_type) = content_type {
+        part = part
+            .mime_str(content_type)
+            .map_err(|error| format!("cloud upload failed: {error}"))?;
+    }
+    let form = reqwest::blocking::multipart::Form::new().part("file", part);
+    let response = client
+        .post(cloud_url(path))
+        .bearer_auth(token)
+        .multipart(form)
+        .send()
+        .map_err(|error| format!("cloud upload failed: {error}"))?;
     read_cloud_json(response)
 }
 
@@ -460,6 +1670,83 @@ fn cloud_client() -> Result<Client, String> {
 
 fn cloud_url(path: &str) -> String {
     format!("{CLOUD_API_BASE_URL}{path}")
+}
+
+fn safe_cache_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string()
+}
+
+fn safe_download_filename(value: &str) -> String {
+    let name = value
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+            {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect::<String>()
+        .trim_matches([' ', '.'])
+        .to_string();
+    if name.is_empty() {
+        "download".to_string()
+    } else {
+        name
+    }
+}
+
+fn unique_download_path(dir: &Path, filename: &str) -> PathBuf {
+    let initial = dir.join(filename);
+    if !initial.exists() {
+        return initial;
+    }
+    let path = Path::new(filename);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("download");
+    let extension = path.extension().and_then(|value| value.to_str());
+    for index in 1..1000 {
+        let candidate_name = match extension {
+            Some(extension) if !extension.is_empty() => {
+                format!("{stem} ({index}).{extension}")
+            }
+            _ => format!("{stem} ({index})"),
+        };
+        let candidate = dir.join(candidate_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{stem}-{}", now_string()))
+}
+
+fn avatar_extension(value: &str) -> &'static str {
+    let path = value.split('?').next().unwrap_or(value).to_ascii_lowercase();
+    if path.ends_with(".png") {
+        "png"
+    } else if path.ends_with(".webp") {
+        "webp"
+    } else if path.ends_with(".gif") {
+        "gif"
+    } else {
+        "jpg"
+    }
 }
 
 fn read_cloud_json<T: DeserializeOwned>(response: Response) -> Result<T, String> {
@@ -1511,6 +2798,177 @@ async fn run_blocking_apply_pushed_change(
             println!("sync pushed change task failed serverSeq={server_seq} error={error}");
         }
     }
+}
+
+async fn run_chat_realtime_loop(
+    app: AppHandle,
+    token: String,
+    device_id: String,
+    generation: u64,
+) {
+    use futures_util::StreamExt;
+    use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+    let mut attempt = 0usize;
+    loop {
+        if CHAT_REALTIME_GENERATION.load(AtomicOrdering::SeqCst) != generation {
+            return;
+        }
+
+        let url = format!(
+            "{}/ws/chat?token={}&clientId={}",
+            CLOUD_API_BASE_URL
+                .replace("https://", "wss://")
+                .replace("http://", "ws://"),
+            urlencoding::encode(&token),
+            urlencoding::encode(&device_id)
+        );
+
+        match connect_async(&url).await {
+            Ok((mut stream, response)) => {
+                println!(
+                    "chat websocket connected client_id={device_id} status={}",
+                    response.status()
+                );
+                attempt = 0;
+                while let Some(message) = stream.next().await {
+                    if CHAT_REALTIME_GENERATION.load(AtomicOrdering::SeqCst) != generation {
+                        return;
+                    }
+                    let Ok(message) = message else {
+                        break;
+                    };
+                    match message {
+                        Message::Text(text) => {
+                            let Ok(value) = serde_json::from_str::<Value>(&text) else {
+                                continue;
+                            };
+                            match value.get("event").and_then(Value::as_str) {
+                                Some("message.new") => emit_chat_event(&app, value),
+                                Some("message.revoked") => emit_chat_revoked_event(&app, value),
+                                Some("message.deleted") => emit_chat_deleted_event(&app, value),
+                                Some("profile.updated") => emit_profile_event(&app, value),
+                                Some("friend.request.created")
+                                | Some("friend.request.accepted")
+                                | Some("friend.request.rejected") => {
+                                    emit_friend_request_event(&app, value)
+                                }
+                                Some("group.created")
+                                | Some("group.updated")
+                                | Some("group.announcement.updated")
+                                | Some("group.member.added")
+                                | Some("group.member.removed")
+                                | Some("group.member.role_changed")
+                                | Some("group.join_request.created")
+                                | Some("group.join_request.handled")
+                                | Some("group.dissolved") => emit_group_event(&app, value),
+                                _ => {}
+                            }
+                        }
+                        Message::Close(frame) => {
+                            println!("chat websocket close frame={frame:?}");
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                println!("chat websocket disconnected client_id={device_id}");
+            }
+            Err(error) => {
+                println!("chat websocket connect failed: {error}");
+            }
+        }
+
+        let delay = realtime_retry_delay(attempt);
+        attempt = attempt.saturating_add(1);
+        tokio::time::sleep(delay).await;
+    }
+}
+
+fn emit_chat_event(app: &AppHandle, payload: Value) {
+    if let Some(window) = app.get_webview_window("chat") {
+        let _ = window.emit(CHAT_MESSAGE_NEW_EVENT, payload.clone());
+    }
+    let _ = app.emit(CHAT_MESSAGE_NEW_EVENT, payload);
+}
+
+fn emit_chat_revoked_event(app: &AppHandle, payload: Value) {
+    if let Some(window) = app.get_webview_window("chat") {
+        let _ = window.emit(CHAT_MESSAGE_REVOKED_EVENT, payload.clone());
+    }
+    let _ = app.emit(CHAT_MESSAGE_REVOKED_EVENT, payload);
+}
+
+fn emit_chat_deleted_event(app: &AppHandle, value: Value) {
+    let payload = value.get("payload").cloned().unwrap_or_else(|| json!({}));
+    emit_chat_deleted_payload(app, payload);
+}
+
+fn emit_chat_deleted_payload(app: &AppHandle, payload: Value) {
+    if let Some(window) = app.get_webview_window("chat") {
+        let _ = window.emit(CHAT_MESSAGE_DELETED_EVENT, payload.clone());
+    }
+    if let Some(window) = app.get_webview_window("chat-history") {
+        let _ = window.emit(CHAT_MESSAGE_DELETED_EVENT, payload.clone());
+    }
+    let _ = app.emit(CHAT_MESSAGE_DELETED_EVENT, payload);
+}
+
+fn emit_profile_event(app: &AppHandle, value: Value) {
+    let payload = value.get("payload").cloned().unwrap_or_else(|| json!({}));
+    if let Some(window) = app.get_webview_window("chat") {
+        let _ = window.emit(PROFILE_UPDATED_EVENT, payload.clone());
+    }
+    if let Some(window) = app.get_webview_window("profile-edit") {
+        let _ = window.emit(PROFILE_UPDATED_EVENT, payload.clone());
+    }
+    if let Some(window) = app.get_webview_window("friend-profile") {
+        let _ = window.emit(PROFILE_UPDATED_EVENT, payload.clone());
+    }
+    let _ = app.emit(PROFILE_UPDATED_EVENT, payload);
+}
+
+fn emit_friend_request_event(app: &AppHandle, value: Value) {
+    let event_name = value
+        .get("event")
+        .and_then(Value::as_str)
+        .unwrap_or("friend.request.updated")
+        .to_string();
+    let payload = value.get("payload").cloned().unwrap_or_else(|| json!({}));
+    let event_payload = json!({
+        "event": event_name,
+        "payload": payload,
+    });
+    if let Some(window) = app.get_webview_window("chat") {
+        let _ = window.emit(FRIEND_REQUEST_EVENT, event_payload.clone());
+    }
+    if let Some(window) = app.get_webview_window("profile-search") {
+        let _ = window.emit(FRIEND_REQUEST_EVENT, event_payload.clone());
+    }
+    if let Some(window) = app.get_webview_window("friend-profile") {
+        let _ = window.emit(FRIEND_REQUEST_EVENT, event_payload.clone());
+    }
+    let _ = app.emit(FRIEND_REQUEST_EVENT, event_payload);
+}
+
+fn emit_group_event(app: &AppHandle, value: Value) {
+    let event_name = value
+        .get("event")
+        .and_then(Value::as_str)
+        .unwrap_or("group.updated")
+        .to_string();
+    let payload = value.get("payload").cloned().unwrap_or_else(|| json!({}));
+    let event_payload = json!({
+        "event": event_name,
+        "payload": payload,
+    });
+    if let Some(window) = app.get_webview_window("chat") {
+        let _ = window.emit(CHAT_GROUP_EVENT, event_payload.clone());
+    }
+    if let Some(window) = app.get_webview_window("group-announcements") {
+        let _ = window.emit(CHAT_GROUP_EVENT, event_payload.clone());
+    }
+    let _ = app.emit(CHAT_GROUP_EVENT, event_payload);
 }
 
 fn realtime_retry_delay(attempt: usize) -> Duration {
@@ -2585,7 +4043,7 @@ fn apply_cloud_course_card(
         .unwrap_or_else(|| {
             cloud_color_id_to_hex(get_str_any(values, "colorId", "color_id"), &HashMap::new())
         });
-    let style = cloud_style_from_color_id(
+    let default_style = cloud_style_from_color_id(
         Some(&argb_color_to_cloud_id(&hex_color_to_argb(&color_value))),
         &HashMap::new(),
     );
@@ -2606,7 +4064,6 @@ fn apply_cloud_course_card(
            hidden = excluded.hidden,
            schedule_rule_json = excluded.schedule_rule_json,
            base_color = excluded.base_color,
-           style_json = excluded.style_json,
            updated_at = excluded.updated_at,
            deleted_at = NULL",
         params![
@@ -2619,7 +4076,7 @@ fn apply_cloud_course_card(
             if hidden { 1 } else { 0 },
             serde_json::to_string(&rule).map_err(|error| error.to_string())?,
             color_value,
-            serde_json::to_string(&style).map_err(|error| error.to_string())?,
+            serde_json::to_string(&default_style).map_err(|error| error.to_string())?,
             now,
         ],
     )

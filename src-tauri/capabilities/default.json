@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capability for the teacher schedule widget window.",
-  "windows": ["widget", "settings", "card-settings", "period-card-settings", "interaction-proxy", "widget-menu", "floating-toolbar", "auth"],
+  "windows": ["widget", "settings", "card-settings", "period-card-settings", "interaction-proxy", "widget-menu", "floating-toolbar", "auth", "chat", "chat-history", "profile-edit", "friend-profile", "profile-search", "friend-request", "image-preview"],
   "permissions": [
     "core:default",
     "core:event:default",
@@ -16,6 +16,12 @@
     "core:window:allow-set-size",
     "core:window:allow-set-title",
     "core:window:allow-set-ignore-cursor-events",
-    "core:window:allow-set-skip-taskbar"
+    "core:window:allow-set-skip-taskbar",
+    "core:window:allow-set-focus",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized"
   ]
 }

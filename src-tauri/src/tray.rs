@@ -9,6 +9,7 @@ use crate::{app_state::AppState, interaction_proxy, settings_windows};
 const TRAY_ID: &str = "teacher-schedule-widget";
 const TOGGLE_SCHEDULE_ID: &str = "toggle-schedule-widget";
 const SHOW_CALENDAR_ID: &str = "show-calendar-widget";
+const OPEN_CHAT_ID: &str = "open-chat";
 const OPEN_AUTH_ID: &str = "open-auth";
 const OPEN_SETTINGS_ID: &str = "open-settings";
 const EXIT_APP_ID: &str = "exit-app";
@@ -17,12 +18,15 @@ pub fn create_tray(app: &AppHandle) -> Result<(), String> {
     let menu = build_tray_menu(app, true)?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip("教师课程表挂件")
+        .tooltip("教师助手")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().0.as_str() {
             TOGGLE_SCHEDULE_ID => {
                 let _ = toggle_schedule_widget(app);
+            }
+            OPEN_CHAT_ID => {
+                let _ = settings_windows::ensure_chat_window(app);
             }
             OPEN_AUTH_ID => {
                 let _ = settings_windows::show_auth_window_if_hidden(app);
@@ -52,6 +56,7 @@ fn build_tray_menu(app: &AppHandle, widget_visible: bool) -> Result<Menu<Wry>, S
     let show_calendar = MenuItemBuilder::with_id(SHOW_CALENDAR_ID, "校历挂件（稍后）")
         .enabled(false)
         .build(app);
+    let open_chat = MenuItemBuilder::with_id(OPEN_CHAT_ID, "打开聊天面板").build(app);
     let open_auth = MenuItemBuilder::with_id(OPEN_AUTH_ID, "登录 / 账号").build(app);
     let open_settings = MenuItemBuilder::with_id(OPEN_SETTINGS_ID, "设置").build(app);
     let exit_item = MenuItemBuilder::with_id(EXIT_APP_ID, "退出程序").build(app);
@@ -59,6 +64,8 @@ fn build_tray_menu(app: &AppHandle, widget_visible: bool) -> Result<Menu<Wry>, S
     MenuBuilder::new(app)
         .item(&toggle_schedule.map_err(|error| error.to_string())?)
         .item(&show_calendar.map_err(|error| error.to_string())?)
+        .separator()
+        .item(&open_chat.map_err(|error| error.to_string())?)
         .separator()
         .item(&open_auth.map_err(|error| error.to_string())?)
         .item(&open_settings.map_err(|error| error.to_string())?)

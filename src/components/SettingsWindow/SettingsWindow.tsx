@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { WorkdayMode } from "../../features/schedule/types";
 import type {
-  AxisColorMode,
   PeriodConfigItem,
   PeriodColumnStyle,
   SettingsSection,
@@ -221,7 +220,7 @@ function PeriodsPanel({
         </div>
         <button type="button" className="period-add-button" onClick={addPeriod}>
           <Icon name="plus" />
-          <span>在最下方添加课次</span>
+          <span>添加课次</span>
         </button>
       </header>
 
@@ -231,9 +230,9 @@ function PeriodsPanel({
           return (
             <section className="period-config-row" key={period.id}>
               <label className="period-name-field">
-                <span>课次名</span>
                 <input
                   type="text"
+                  aria-label="课次名"
                   value={period.label}
                   maxLength={12}
                   onChange={(event) =>
@@ -244,9 +243,9 @@ function PeriodsPanel({
                 />
               </label>
               <label className="period-time-field">
-                <span>开始</span>
                 <input
                   type="time"
+                  aria-label="开始时间"
                   value={startTime}
                   onChange={(event) =>
                     updatePeriod(period.id, {
@@ -256,9 +255,9 @@ function PeriodsPanel({
                 />
               </label>
               <label className="period-time-field">
-                <span>结束</span>
                 <input
                   type="time"
+                  aria-label="结束时间"
                   value={endTime}
                   onChange={(event) =>
                     updatePeriod(period.id, {
@@ -359,6 +358,9 @@ function AppearancePanel({
 
   const isBlurMode = appearance.backgroundMode === "blur";
   const allowBlurMode = windowMode === "attached";
+  const periodCardBackgroundEnabled =
+    appearance.periodColumnStyle === "soft" ||
+    appearance.periodColumnStyle === "solid";
 
   return (
     <section className="settings-panel-section appearance-panel-static">
@@ -569,32 +571,29 @@ function AppearancePanel({
           title="时间日期样式"
           tooltip="提升工具栏、日期栏和时间日期列在复杂背景下的可读性。"
           expanded={expandedSections.axis}
-          summary={`${axisColorModeLabels[appearance.axisColorMode]} · ${periodColumnStyleLabels[appearance.periodColumnStyle]}`}
+          summary={`${periodColumnStyleLabels[appearance.periodColumnStyle]} · ${appearance.periodCardFontSize}px`}
           onToggle={() => toggleSection("axis")}
         >
-          <StaticSettingRow title="文字模式">
-            <select
-              className="appearance-combobox axis-mode-select"
-              value={appearance.axisColorMode}
-              aria-label="时间日期文字模式"
-              onChange={(event) =>
+          <StaticSettingRow title="文字颜色">
+            <StaticColorPalette
+              previewColor={appearance.axisTextColor}
+              swatches={["#0f172a", "#f8fafc", "#4f46e5"]}
+              onPick={(axisTextColor) =>
                 onSettingsChange({
                   ...settings,
                   appearance: {
                     ...appearance,
-                    axisColorMode: event.currentTarget.value as AxisColorMode,
+                    axisTextColor,
+                    periodCardTextColor:
+                      appearance.periodCardTextColor === appearance.axisTextColor
+                        ? axisTextColor
+                        : appearance.periodCardTextColor,
                   },
                 })
               }
-            >
-              {axisColorModeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            />
           </StaticSettingRow>
-          <StaticSettingRow title="卡片背景色">
+          <StaticSettingRow title="卡片背景">
             <div
               className="appearance-segmented appearance-segmented-pill axis-period-options"
               aria-label="时间日期背景色"
@@ -623,35 +622,102 @@ function AppearancePanel({
               ))}
             </div>
           </StaticSettingRow>
+          <StaticSettingRow title="课次背景色">
+            <div
+              className={
+                periodCardBackgroundEnabled
+                  ? "appearance-control-enabled"
+                  : "appearance-control-disabled"
+              }
+            >
+              <StaticColorPalette
+                previewColor={appearance.periodCardBackgroundColor}
+                swatches={["#ffffff", "#dbe7ef", "#eef0ff"]}
+                onPick={
+                  periodCardBackgroundEnabled
+                    ? (periodCardBackgroundColor) =>
+                        onSettingsChange({
+                          ...settings,
+                          appearance: {
+                            ...appearance,
+                            periodCardBackgroundColor,
+                          },
+                        })
+                    : undefined
+                }
+              />
+            </div>
+          </StaticSettingRow>
+          <StaticSettingRow title="课次文字色">
+            <StaticColorPalette
+              previewColor={appearance.periodCardTextColor}
+              swatches={["#0f172a", "#f8fafc", "#4f46e5"]}
+              onPick={(periodCardTextColor) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: {
+                    ...appearance,
+                    periodCardTextColor,
+                  },
+                })
+              }
+            />
+          </StaticSettingRow>
+          <StaticSettingRow title="课次字体">
+            <select
+              className="appearance-combobox axis-font-select"
+              value={appearance.periodCardFontFamily}
+              aria-label="课次卡片字体"
+              onChange={(event) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: {
+                    ...appearance,
+                    periodCardFontFamily: event.currentTarget.value,
+                  },
+                })
+              }
+            >
+              <option value="Microsoft YaHei">微软雅黑</option>
+              <option value="Segoe UI">Segoe UI</option>
+              <option value="SimSun">宋体</option>
+              <option value="KaiTi">楷体</option>
+            </select>
+          </StaticSettingRow>
+          <StaticSettingRow title="课次字号">
+            <StaticSlider
+              value={appearance.periodCardFontSize}
+              suffix="px"
+              min={8}
+              max={16}
+              onChange={(periodCardFontSize) =>
+                onSettingsChange({
+                  ...settings,
+                  appearance: {
+                    ...appearance,
+                    periodCardFontSize,
+                  },
+                })
+              }
+            />
+          </StaticSettingRow>
         </AppearanceAccordionCard>
       </div>
     </section>
   );
 }
 
-const axisColorModeOptions: Array<{ value: AxisColorMode; label: string }> = [
-  { value: "auto", label: "自动对比" },
-  { value: "light", label: "浅色文字" },
-  { value: "dark", label: "深色文字" },
-];
-
-const axisColorModeLabels: Record<AxisColorMode, string> = {
-  auto: "自动对比",
-  light: "浅色文字",
-  dark: "深色文字",
-};
-
 const periodColumnStyleOptions: Array<{
   value: PeriodColumnStyle;
   label: string;
 }> = [
-  { value: "soft", label: "柔和底卡" },
+  { value: "soft", label: "柔和" },
   { value: "transparent", label: "透明" },
   { value: "solid", label: "实底" },
 ];
 
 const periodColumnStyleLabels: Record<PeriodColumnStyle, string> = {
-  soft: "柔和底卡",
+  soft: "柔和",
   transparent: "透明",
   solid: "实底",
 };
@@ -834,7 +900,8 @@ function normalizePeriodItems(periods: PeriodConfigItem[]): PeriodConfigItem[] {
       const [start, end] = splitPeriodTime(period.time);
       return {
         id: period.id || `p${order}`,
-        label: period.label || `第${order}节`,
+        label:
+          typeof period.label === "string" ? period.label : `第${order}节`,
         time: `${start}-${end}`,
       };
     })

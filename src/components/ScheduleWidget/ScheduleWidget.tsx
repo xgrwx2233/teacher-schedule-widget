@@ -620,44 +620,19 @@ function toCardCssVars(style?: CardStyle, courseMetrics?: CourseCardDisplayMetri
 
 function toPeriodCardCssVars(style: CardStyle | undefined, periodColumnStyle: PeriodColumnStyle): CSSProperties {
   const cssVars = toCardCssVars(style) as CSSProperties & Record<string, string | undefined>;
-  const baseColor = style?.baseColor ?? style?.backgroundColor;
-  cssVars["--card-font-size"] = style?.fontSize ? `${clampNumber(style.fontSize, 8, 16)}px` : undefined;
-
-  if (!baseColor) {
-    return cssVars;
-  }
+  cssVars["--card-bg"] = "var(--period-card-global-bg)";
+  cssVars["--card-fg"] = "var(--period-card-global-fg)";
+  cssVars["--card-icon"] = "var(--period-card-global-fg)";
+  cssVars["--card-font"] = "var(--period-card-global-font)";
+  cssVars["--card-font-size"] = "var(--period-card-global-font-size)";
 
   if (periodColumnStyle === "soft") {
-    cssVars["--card-bg"] = buildSoftPeriodBackground(baseColor);
+    cssVars["--card-bg"] = "var(--axis-capsule-bg)";
   }
 
   if (periodColumnStyle === "solid") {
-    cssVars["--card-bg"] = baseColor;
+    cssVars["--card-bg"] = "var(--axis-solid-bg)";
   }
 
   return cssVars;
-}
-
-function buildSoftPeriodBackground(value: string): string {
-  const rgb = parseHexColor(value);
-  if (!rgb) {
-    return value;
-  }
-
-  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.18)`;
-}
-
-function parseHexColor(value: string): { r: number; g: number; b: number } | null {
-  const normalized = value.trim().replace(/^#/, "");
-  const expanded = normalized.length === 3 ? normalized.split("").map((item) => item + item).join("") : normalized;
-  const match = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(expanded);
-  if (!match) {
-    return null;
-  }
-
-  return {
-    r: Number.parseInt(match[1], 16),
-    g: Number.parseInt(match[2], 16),
-    b: Number.parseInt(match[3], 16),
-  };
 }

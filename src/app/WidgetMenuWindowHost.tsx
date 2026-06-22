@@ -21,24 +21,29 @@ export function WidgetMenuWindowHost() {
       setMode(state.mode);
     });
 
-    const unlistenWindowState = listen<WidgetMenuStatePayload>(WIDGET_MENU_STATE_EVENT, (event) => {
-      setMode(event.payload.mode);
-    });
+    const unlistenWindowState = listen<WidgetMenuStatePayload>(
+      WIDGET_MENU_STATE_EVENT,
+      (event) => {
+        setMode(event.payload.mode);
+      },
+    );
     const unlistenClose = currentWindow.onCloseRequested(async (event) => {
       event.preventDefault();
       await invoke("clear_proxy_menu_open");
       await emitTo(WIDGET_WINDOW_LABEL, WIDGET_MENU_CLOSE_EVENT);
       await currentWindow.hide();
     });
-    const unlistenFocus = currentWindow.onFocusChanged(async ({ payload: focused }) => {
-      if (focused) {
-        return;
-      }
+    const unlistenFocus = currentWindow.onFocusChanged(
+      async ({ payload: focused }) => {
+        if (focused) {
+          return;
+        }
 
-      await invoke("clear_proxy_menu_open");
-      await emitTo(WIDGET_WINDOW_LABEL, WIDGET_MENU_CLOSE_EVENT);
-      await currentWindow.hide();
-    });
+        await invoke("clear_proxy_menu_open");
+        await emitTo(WIDGET_WINDOW_LABEL, WIDGET_MENU_CLOSE_EVENT);
+        await currentWindow.hide();
+      },
+    );
 
     return () => {
       void unlistenWindowState.then((unlisten) => unlisten());
@@ -56,19 +61,31 @@ export function WidgetMenuWindowHost() {
 
   return (
     <main className="widget-menu-window-root">
-      <button type="button" className="menu-item" onClick={() => runAction("settings")}>
+      <button
+        type="button"
+        className="menu-item"
+        onClick={() => runAction("settings")}
+      >
         <span className="menu-icon" aria-hidden="true">
           ⚙
         </span>
         <span>设置</span>
       </button>
-      <button type="button" className="menu-item" onClick={() => runAction("mode")}>
+      <button
+        type="button"
+        className="menu-item"
+        onClick={() => runAction("mode")}
+      >
         <span className="menu-icon" aria-hidden="true">
-          {mode === "attached" ? "⟐" : "◫"}
+          {mode === "attached" ? "↗" : "◉"}
         </span>
         <span>{mode === "attached" ? "浮起" : "贴靠"}</span>
       </button>
-      <button type="button" className="menu-item menu-close-item" onClick={() => runAction("hide")}>
+      <button
+        type="button"
+        className="menu-item menu-close-item"
+        onClick={() => runAction("hide")}
+      >
         <span className="menu-icon menu-close-icon" aria-hidden="true">
           ×
         </span>
