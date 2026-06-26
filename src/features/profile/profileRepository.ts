@@ -1,5 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type {
+  ClassAccountApplyResult,
   FriendRequest,
   ProfileSearchResult,
   UploadedFile,
@@ -38,6 +39,22 @@ export async function searchProfiles(
   scope: "all" | "users" | "groups",
 ): Promise<ProfileSearchResult> {
   return invoke<ProfileSearchResult>("search_profiles", { keyword, scope });
+}
+
+export async function applyClassAccount(input: {
+  nickname: string;
+  avatarUrl?: string | null;
+  avatarObjectKey?: string | null;
+  bio?: string | null;
+  linkedPhone: string;
+}): Promise<ClassAccountApplyResult> {
+  return invoke<ClassAccountApplyResult>("apply_class_account", {
+    nickname: input.nickname,
+    avatarUrl: input.avatarUrl ?? null,
+    avatarObjectKey: input.avatarObjectKey ?? null,
+    bio: input.bio ?? null,
+    linkedPhone: input.linkedPhone,
+  });
 }
 
 export async function uploadProfileAvatarBytes(input: {
@@ -112,6 +129,10 @@ export async function rejectFriendRequest(requestId: number): Promise<FriendRequ
 export async function listFriends(): Promise<UserProfile[]> {
   const response = await invoke<{ friends: UserProfile[] }>("list_friends");
   return response.friends;
+}
+
+export async function deleteFriend(friendUserId: number): Promise<void> {
+  await invoke("delete_friend", { friendUserId });
 }
 
 export function profileInitial(profile: UserProfile | null | undefined): string {

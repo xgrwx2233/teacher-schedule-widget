@@ -24,6 +24,13 @@ import type {
 } from "../features/chat/types";
 import { IMAGE_PREVIEW_OPEN_EVENT } from "../features/settings/windowEvents";
 
+function imageAccessSource(image: ImagePreviewItem) {
+  return image.sourceMessageId
+    && image.sourceMessageId.startsWith("msg_")
+    ? { source: "chat" as const, messageId: image.sourceMessageId }
+    : undefined;
+}
+
 export function ImagePreviewWindowHost() {
   const [images, setImages] = useState<ImagePreviewItem[]>([]);
   const [activeId, setActiveId] = useState("");
@@ -103,7 +110,11 @@ export function ImagePreviewWindowHost() {
       return;
     }
     let disposed = false;
-    void cacheChatFile(activeImage.fileObjectId, activeImage.fileName || "图片")
+    void cacheChatFile(
+      activeImage.fileObjectId,
+      activeImage.fileName || "图片",
+      imageAccessSource(activeImage),
+    )
       .then((url) => {
         if (!disposed) {
           setUrlMap((current) => ({ ...current, [activeImage.id]: url }));
@@ -154,6 +165,7 @@ export function ImagePreviewWindowHost() {
       const result = await downloadChatFile(
         activeImage.fileObjectId,
         activeImage.fileName || "图片",
+        imageAccessSource(activeImage),
       );
       if (result.cancelled) {
         setStatusText("");
@@ -538,7 +550,7 @@ async function forwardActiveImageToConversation(
   }
 
   const sourceUrl = image.fileObjectId
-    ? await cacheChatFile(image.fileObjectId, fileName)
+    ? await cacheChatFile(image.fileObjectId, fileName, imageAccessSource(image))
     : image.url;
   if (!sourceUrl) {
     throw new Error("当前图片缺少文件信息，暂不能转发");

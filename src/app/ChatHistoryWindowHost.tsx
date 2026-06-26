@@ -26,16 +26,23 @@ import {
 } from "../features/chat/chatLocalCache";
 import {
   contentTypeFromMessage,
+  chatFileAccessReason,
+  chatFileCloudAvailable,
+  chatMessageFileAccessSource,
   fileNameFromMessage,
   fileObjectIdFromMessage,
   fileUrlFromMessage,
   formatBytes,
-  imagePreviewItemFromMessage,
+  isMediaMessage,
+  isVideoMessage,
+  mediaViewerItemFromMessage,
   messagePreview,
+  normalizeFileObjectId,
+  quoteMetaFromMessage,
   sizeBytesFromMessage,
 } from "../features/chat/chatMessageUtils";
 import type { LocalAccountState } from "../features/account/types";
-import type { ChatConversation, ChatMessage, ImagePreviewItem } from "../features/chat/types";
+import type { ChatConversation, ChatMessage, MediaViewerItem } from "../features/chat/types";
 import {
   AUTH_STATE_CHANGED_EVENT,
   CHAT_LOCATE_MESSAGE_EVENT,
@@ -380,12 +387,13 @@ export function ChatHistoryWindowHost() {
         : applyHistoryFilter(messages, filter, query),
     [messages, filter, query, serverHistoryMode],
   );
-  const mediaMessages = useMemo(
+  const mediaItems = useMemo(
     () =>
       messages
         .filter(isMediaMessage)
-        .map(imagePreviewItemFromMessage)
-        .filter(Boolean) as ImagePreviewItem[],
+        .map((message) => mediaViewerItemFromMessage(message, senderLabel(message)))
+        .filter((item): item is MediaViewerItem => Boolean(item))
+        .sort(compareMediaViewerItems),
     [messages],
   );
 
@@ -459,16 +467,20 @@ export function ChatHistoryWindowHost() {
     }
   };
 
-  const openImagePreview = (message: ChatMessage) => {
-    const activeItem = imagePreviewItemFromMessage(message);
-    const images = mediaMessages.length > 0 ? mediaMessages : activeItem ? [activeItem] : [];
-    if (!activeItem || images.length === 0) {
+  const openMediaViewer = (message: ChatMessage) => {
+    const activeItem = mediaViewerItemFromMessage(message, senderLabel(message));
+    const items = mediaItems.length > 0 ? mediaItems : activeItem ? [activeItem] : [];
+    if (!activeItem || items.length === 0 || !context?.conversationId) {
       return;
     }
-    void invoke("open_image_preview_window", {
+    const currentIndex = Math.max(0, items.findIndex((item) => item.id === activeItem.id));
+    void invoke("open_media_viewer_window", {
       payload: {
-        images,
+        conversationId: context.conversationId,
+        conversationTitle: context.conversationTitle,
         activeId: activeItem.id,
+        currentIndex,
+        mediaList: items,
       },
     });
   };
@@ -479,10 +491,15 @@ export function ChatHistoryWindowHost() {
       setError("当前记录缺少云端文件信息，暂不能下载");
       return;
     }
+    if (!chatFileCloudAvailable(message)) {
+      setError(chatFileAccessReason(message));
+      return;
+    }
     try {
       const result = await downloadChatFile(
         fileObjectId,
         fileNameFromMessage(message, "文件"),
+        chatMessageFileAccessSource(message),
       );
       if (!result.cancelled && result.path) {
         setError(`已下载到 ${result.path}`);
@@ -498,8 +515,16 @@ export function ChatHistoryWindowHost() {
       setError("当前记录缺少云端文件信息，暂不能打开");
       return;
     }
+    if (!chatFileCloudAvailable(message)) {
+      setError(chatFileAccessReason(message));
+      return;
+    }
     try {
-      await openCachedChatFile(fileObjectId, fileNameFromMessage(message, "文件"));
+      await openCachedChatFile(
+        fileObjectId,
+        fileNameFromMessage(message, "文件"),
+        chatMessageFileAccessSource(message),
+      );
     } catch (nextError) {
       setError(String(nextError));
     }
@@ -541,6 +566,9 @@ export function ChatHistoryWindowHost() {
     setForwardSendingId(targetConversation.id);
     setForwardError(null);
     try {
+      if (fileObjectIdFromMessage(source) && !chatFileCloudAvailable(source)) {
+        throw new Error(chatFileAccessReason(source));
+      }
       await forwardChatMessage(source, targetConversation.id);
       setForwardState(null);
     } catch (nextError) {
@@ -559,6 +587,7 @@ export function ChatHistoryWindowHost() {
     await emit(CHAT_QUOTE_MESSAGE_EVENT, {
       conversationId: context.conversationId,
       messageId: message.id,
+      quoteMeta: quoteMetaFromMessage(message, senderLabel(message)),
       senderLabel: senderLabel(message),
       preview: messagePreview(message),
     });
@@ -687,14 +716,14 @@ export function ChatHistoryWindowHost() {
         ) : filter === "media" ? (
           <HistoryMediaGrid
             messages={filteredMessages}
-            onOpenPreview={openImagePreview}
+            onOpenPreview={openMediaViewer}
             onDownload={downloadFile}
             onOpenContextMenu={openHistoryContextMenu}
           />
         ) : (
           <HistoryTimeline
             messages={filteredMessages}
-            onOpenPreview={openImagePreview}
+            onOpenPreview={openMediaViewer}
             onDownload={downloadFile}
             onOpenFile={openFile}
             onOpenContextMenu={openHistoryContextMenu}
@@ -776,6 +805,12 @@ function HistoryTimeline({
               </div>
               {message.kind === "image" ? (
                 <HistoryImageThumb
+                  message={message}
+                  onOpenPreview={onOpenPreview}
+                  onOpenContextMenu={onOpenContextMenu}
+                />
+              ) : isVideoMessage(message) ? (
+                <HistoryVideoThumb
                   message={message}
                   onOpenPreview={onOpenPreview}
                   onOpenContextMenu={onOpenContextMenu}
@@ -898,7 +933,7 @@ function HistoryMediaGrid({
           <HistoryVideoThumb
             key={message.id}
             message={message}
-            onDownload={onDownload}
+            onOpenPreview={onOpenPreview}
             onOpenContextMenu={onOpenContextMenu}
           />
         ),
@@ -909,22 +944,74 @@ function HistoryMediaGrid({
 
 function HistoryVideoThumb({
   message,
-  onDownload,
+  onOpenPreview,
   onOpenContextMenu,
 }: {
   message: ChatMessage;
-  onDownload: (message: ChatMessage) => void;
+  onOpenPreview: (message: ChatMessage) => void;
   onOpenContextMenu?: (event: MouseEvent<HTMLElement>, message: ChatMessage) => void;
 }) {
+  const directUrl =
+    stringPayload(message.contentJson?.thumbnailUrl) ||
+    stringPayload(message.contentJson?.thumbUrl) ||
+    stringPayload(message.contentJson?.previewUrl) ||
+    stringPayload(message.contentJson?.posterUrl);
+  const posterObjectId =
+    normalizeFileObjectId(message.contentJson?.thumbnailObjectId) ||
+    normalizeFileObjectId(message.contentJson?.thumbnailFileObjectId) ||
+    normalizeFileObjectId(message.contentJson?.thumbObjectId) ||
+    normalizeFileObjectId(message.contentJson?.posterObjectId);
+  const [url, setUrl] = useState(directUrl);
+
+  useEffect(() => {
+    setUrl(directUrl);
+  }, [directUrl]);
+
+  useEffect(() => {
+    if (url || !posterObjectId || !chatFileCloudAvailable(message)) {
+      return;
+    }
+    let disposed = false;
+    let promise = thumbnailCachePromises.get(posterObjectId);
+    if (!promise) {
+      promise = cacheChatFile(
+        posterObjectId,
+        `${fileNameFromMessage(message, "视频")}.jpg`,
+        chatMessageFileAccessSource(message),
+      );
+      thumbnailCachePromises.set(posterObjectId, promise);
+    }
+    void promise
+      .then((nextUrl) => {
+        if (!disposed) {
+          setUrl(nextUrl);
+        }
+      })
+      .catch(() => {
+        thumbnailCachePromises.delete(posterObjectId);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [message, posterObjectId, url]);
+
   return (
     <button
       type="button"
-      className="chat-history-video-thumb"
-      onClick={() => onDownload(message)}
+      className={`chat-history-video-thumb ${url ? "has-poster" : ""}`}
+      onClick={() => {
+        if (chatFileCloudAvailable(message)) {
+          onOpenPreview(message);
+        }
+      }}
       onContextMenu={(event) => onOpenContextMenu?.(event, message)}
-      title="下载视频文件"
+      title="打开视频"
     >
-      <span className="chat-history-video-play">▶</span>
+      {url ? <img src={url} alt="" /> : null}
+      <span className="chat-history-video-mask" aria-hidden="true" />
+      <span className="chat-history-video-play">
+        {chatFileCloudAvailable(message) ? "▶" : "过期"}
+      </span>
       <strong>{fileNameFromMessage(message, "视频")}</strong>
       <em>
         {senderLabel(message)}
@@ -956,13 +1043,22 @@ function HistoryImageThumb({
       setUrl(fileUrlFromMessage(message));
       return;
     }
+    if (!chatFileCloudAvailable(message)) {
+      setUrl("");
+      setFailed(false);
+      return;
+    }
     if (url) {
       return;
     }
     let disposed = false;
     let promise = thumbnailCachePromises.get(fileObjectId);
     if (!promise) {
-      promise = cacheChatFile(fileObjectId, fileNameFromMessage(message, "图片"));
+      promise = cacheChatFile(
+        fileObjectId,
+        fileNameFromMessage(message, "图片"),
+        chatMessageFileAccessSource(message),
+      );
       thumbnailCachePromises.set(fileObjectId, promise);
     }
     void promise
@@ -986,11 +1082,17 @@ function HistoryImageThumb({
     <button
       type="button"
       className={`chat-history-image-thumb ${showMeta ? "has-meta" : ""}`}
-      onClick={() => onOpenPreview(message)}
+      onClick={() => {
+        if (chatFileCloudAvailable(message)) {
+          onOpenPreview(message);
+        }
+      }}
       onContextMenu={(event) => onOpenContextMenu?.(event, message)}
     >
       {url ? (
         <img src={url} alt={fileNameFromMessage(message, "图片")} />
+      ) : !chatFileCloudAvailable(message) ? (
+        <span>图片已过期</span>
       ) : failed ? (
         <span>图片加载失败</span>
       ) : (
@@ -1044,17 +1146,21 @@ function HistoryContextMenuView({
   ) => void;
 }) {
   const canDownload =
-    message.kind === "image" || message.kind === "file" || isMediaMessage(message);
-  const canOpen = message.kind === "file";
+    chatFileCloudAvailable(message) &&
+    (message.kind === "image" || message.kind === "file" || isMediaMessage(message));
+  const canOpen = message.kind === "file" && chatFileCloudAvailable(message);
+  const canForward = !fileObjectIdFromMessage(message) || chatFileCloudAvailable(message);
   return (
     <div
       className="message-context-menu chat-history-context-menu"
       style={{ left: menu.x, top: menu.y }}
       onClick={(event) => event.stopPropagation()}
     >
-      <button type="button" onClick={() => onAction("forward", message)}>
-        转发
-      </button>
+      {canForward ? (
+        <button type="button" onClick={() => onAction("forward", message)}>
+          转发
+        </button>
+      ) : null}
       <button type="button" onClick={() => onAction("quote", message)}>
         引用
       </button>
@@ -1274,15 +1380,18 @@ function compareHistoryMessages(left: ChatMessage, right: ChatMessage): number {
   return left.id.localeCompare(right.id);
 }
 
-function isMediaMessage(message: ChatMessage): boolean {
-  if (message.kind === "image") {
-    return true;
+function compareMediaViewerItems(left: MediaViewerItem, right: MediaViewerItem): number {
+  const leftSeq = left.seq ?? Number.MAX_SAFE_INTEGER;
+  const rightSeq = right.seq ?? Number.MAX_SAFE_INTEGER;
+  if (leftSeq !== rightSeq) {
+    return leftSeq - rightSeq;
   }
-  if (message.kind !== "file") {
-    return false;
+  const leftTime = left.sentAt ? new Date(left.sentAt).getTime() : Number.MAX_SAFE_INTEGER;
+  const rightTime = right.sentAt ? new Date(right.sentAt).getTime() : Number.MAX_SAFE_INTEGER;
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
   }
-  const contentType = contentTypeFromMessage(message).toLowerCase();
-  return contentType.startsWith("video/");
+  return left.id.localeCompare(right.id);
 }
 
 function senderLabel(message: ChatMessage): string {
@@ -1290,6 +1399,10 @@ function senderLabel(message: ChatMessage): string {
     return "我";
   }
   return "对方";
+}
+
+function stringPayload(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function fileTypeLabel(message: ChatMessage): string {

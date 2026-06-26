@@ -1,10 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::Read,
     os::windows::ffi::OsStrExt,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::{
+        atomic::{AtomicU64, Ordering as AtomicOrdering},
+        Mutex, OnceLock,
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use rand::{distributions::Alphanumeric, Rng};
@@ -33,8 +37,11 @@ const CHAT_MESSAGE_DELETED_EVENT: &str = "chat-message-deleted";
 const PROFILE_UPDATED_EVENT: &str = "profile-updated";
 const FRIEND_REQUEST_EVENT: &str = "friend-request-event";
 const CHAT_GROUP_EVENT: &str = "chat-group-event";
+const CHAT_TRANSFER_EVENT: &str = "chat-transfer-event";
 static REALTIME_SYNC_GENERATION: AtomicU64 = AtomicU64::new(0);
 static CHAT_REALTIME_GENERATION: AtomicU64 = AtomicU64::new(0);
+static CHAT_UPLOAD_CONTROLS: OnceLock<Mutex<HashMap<String, TransferControlState>>> =
+    OnceLock::new();
 const WEEKDAYS: [&str; 7] = [
     "monday",
     "tuesday",
@@ -44,6 +51,22 @@ const WEEKDAYS: [&str; 7] = [
     "saturday",
     "sunday",
 ];
+
+#[derive(Clone, Debug)]
+struct TransferControlState {
+    paused: bool,
+    canceled: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickedLocalFile {
+    path: String,
+    name: String,
+    size_bytes: u64,
+    content_type: String,
+    file_type: String,
+}
 
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
@@ -353,6 +376,7 @@ pub fn send_chat_message(
     message_type: Option<String>,
     content: String,
     content_json: Option<Value>,
+    quote_meta: Option<Value>,
     file_object_id: Option<String>,
 ) -> Result<Value, String> {
     let conn = open_db(&app)?;
@@ -369,6 +393,7 @@ pub fn send_chat_message(
             "messageType": message_type.unwrap_or_else(|| "text".to_string()),
             "content": content,
             "contentJson": content_json,
+            "quoteMeta": quote_meta,
             "fileObjectId": file_object_id,
         }),
     )
@@ -431,6 +456,7 @@ pub fn create_chat_group(
     app: AppHandle,
     name: Option<String>,
     member_user_ids: Vec<i64>,
+    group_type: Option<String>,
 ) -> Result<Value, String> {
     let conn = open_db(&app)?;
     ensure_default_user(&conn)?;
@@ -442,6 +468,33 @@ pub fn create_chat_group(
         json!({
             "name": name,
             "memberUserIds": member_user_ids,
+            "groupType": group_type.unwrap_or_else(|| "normal".to_string()),
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn apply_class_account(
+    app: AppHandle,
+    nickname: String,
+    avatar_url: Option<String>,
+    avatar_object_key: Option<String>,
+    bio: Option<String>,
+    linked_phone: String,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        "/class-accounts",
+        &token,
+        json!({
+            "nickname": nickname,
+            "avatarUrl": avatar_url,
+            "avatarObjectKey": avatar_object_key,
+            "bio": bio,
+            "linkedPhone": linked_phone,
         }),
     )
 }
@@ -673,6 +726,61 @@ pub fn send_chat_group_join_request(
         &token,
         json!({
             "message": message,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn create_chat_group_invite(
+    app: AppHandle,
+    group_id: String,
+    scene: Option<String>,
+    expire_type: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!(
+            "/chat/groups/{}/invites",
+            urlencoding::encode(&group_id)
+        ),
+        &token,
+        json!({
+            "scene": scene.unwrap_or_else(|| "qr_modal".to_string()),
+            "expireType": expire_type.unwrap_or_else(|| "default".to_string()),
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn get_chat_group_invite(app: AppHandle, invite_token: String) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_get_json(
+        &format!("/chat/group-invites/{}", urlencoding::encode(&invite_token)),
+        &token,
+    )
+}
+
+#[tauri::command]
+pub fn apply_chat_group_invite(
+    app: AppHandle,
+    invite_token: String,
+    reason: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        &format!("/chat/group-invites/{}/apply", urlencoding::encode(&invite_token)),
+        &token,
+        json!({
+            "reason": reason,
         }),
     )
 }
@@ -984,6 +1092,7 @@ pub fn upload_chat_file_bytes(
     }
     let upload_type = match file_type.as_str() {
         "image" => "image",
+        "video" => "video",
         "file" => "file",
         "sticker" => "sticker",
         _ => return Err("unsupported chat upload type".to_string()),
@@ -1014,6 +1123,7 @@ pub fn reupload_cached_chat_file(
     }
     let upload_type = match file_type.as_str() {
         "image" => "image",
+        "video" => "video",
         "file" => "file",
         "sticker" => "sticker",
         _ => return Err("unsupported chat upload type".to_string()),
@@ -1024,17 +1134,12 @@ pub fn reupload_cached_chat_file(
         .and_then(|value| value.to_str())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("bin");
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("chat_cache")
-        .join("media");
+    let dir = chat_media_cache_dir(&app)?;
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let stable_id = safe_cache_segment(&file_object_id);
     let path = dir.join(format!("{stable_id}.{extension}"));
     if !path.exists() {
-        download_chat_file_to_path(&app, &file_object_id, &path)?;
+        download_chat_file_to_path(&app, &file_object_id, &path, None, None, None)?;
     }
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
     if bytes.is_empty() {
@@ -1054,22 +1159,579 @@ pub fn reupload_cached_chat_file(
 }
 
 #[tauri::command]
-pub fn get_chat_file_signed_url(app: AppHandle, file_object_id: String) -> Result<Value, String> {
+pub fn pick_chat_upload_files(kind: Option<String>, multiple: Option<bool>) -> Result<Value, String> {
+    let upload_kind = kind.unwrap_or_else(|| "file".to_string());
+    let mut dialog = rfd::FileDialog::new().set_title("选择要发送的文件");
+    dialog = match upload_kind.as_str() {
+        "media" => dialog.add_filter("图片和视频", &["png", "jpg", "jpeg", "webp", "gif", "bmp", "mp4", "mov", "webm", "avi", "mkv"]),
+        "image" => dialog.add_filter("图片", &["png", "jpg", "jpeg", "webp", "gif", "bmp"]),
+        "video" => dialog.add_filter("视频", &["mp4", "mov", "webm", "avi", "mkv"]),
+        _ => dialog,
+    };
+    let paths = if multiple.unwrap_or(true) {
+        dialog.pick_files().unwrap_or_default()
+    } else {
+        dialog.pick_file().map(|path| vec![path]).unwrap_or_default()
+    };
+    let files: Vec<PickedLocalFile> = paths
+        .into_iter()
+        .filter_map(|path| picked_local_file(path).ok())
+        .collect();
+    Ok(json!({ "files": files }))
+}
+
+pub fn picked_chat_upload_files_from_paths(paths: Vec<PathBuf>) -> Value {
+    let files: Vec<PickedLocalFile> = paths
+        .into_iter()
+        .filter_map(|path| picked_local_file(path).ok())
+        .collect();
+    json!({ "files": files })
+}
+
+#[tauri::command]
+pub fn inspect_chat_upload_files(paths: Vec<String>) -> Result<Value, String> {
+    let file_paths = paths.into_iter().map(PathBuf::from).collect();
+    Ok(picked_chat_upload_files_from_paths(file_paths))
+}
+
+#[tauri::command]
+pub async fn upload_chat_file_path_chunked(
+    app: AppHandle,
+    file_path: String,
+    file_type: String,
+    content_type: Option<String>,
+    chunk_size: Option<u64>,
+    task_id: Option<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        upload_chat_file_path_chunked_blocking(
+            app,
+            file_path,
+            file_type,
+            content_type,
+            chunk_size,
+            task_id,
+        )
+    })
+    .await
+    .map_err(|error| format!("upload task failed: {error}"))?
+}
+
+fn upload_chat_file_path_chunked_blocking(
+    app: AppHandle,
+    file_path: String,
+    file_type: String,
+    content_type: Option<String>,
+    chunk_size: Option<u64>,
+    task_id: Option<String>,
+) -> Result<Value, String> {
+    let path = PathBuf::from(&file_path);
+    if !path.exists() || !path.is_file() {
+        return Err("file does not exist".to_string());
+    }
+    let upload_type = match file_type.as_str() {
+        "image" => "image",
+        "video" => "video",
+        "file" => "file",
+        "sticker" => "sticker",
+        _ => return Err("unsupported chat upload type".to_string()),
+    };
+    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    if metadata.len() == 0 {
+        return Err("empty file".to_string());
+    }
+    let task_id = task_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("transfer-{}-{}", now_millis(), random_token(6)));
+    let filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let sha256 = sha256_file(&path)?;
+    let requested_chunk_size =
+        chunk_size.unwrap_or(4 * 1024 * 1024).clamp(512 * 1024, 16 * 1024 * 1024);
+
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    register_transfer_control(&task_id);
+    emit_transfer_event(
+        &app,
+        &task_id,
+        json!({
+            "status": "hashing",
+            "fileName": filename,
+            "fileSize": metadata.len(),
+            "uploadedBytes": 0,
+        }),
+    );
+    let created = cloud_post_json(
+        "/files/upload-sessions",
+        &token,
+        json!({
+            "filename": filename,
+            "sizeBytes": metadata.len(),
+            "sha256": sha256,
+            "fileType": upload_type,
+            "contentType": content_type,
+            "chunkSize": requested_chunk_size,
+        }),
+    )?;
+    let upload = created
+        .get("upload")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "missing upload session".to_string())?;
+    if upload.get("instant").and_then(Value::as_bool).unwrap_or(false) {
+        unregister_transfer_control(&task_id);
+        emit_transfer_event(
+            &app,
+            &task_id,
+            json!({
+                "status": "instant_completed",
+                "uploadedBytes": metadata.len(),
+                "fileSize": metadata.len(),
+                "file": upload.get("file").cloned().unwrap_or(Value::Null),
+            }),
+        );
+        return upload
+            .get("file")
+            .cloned()
+            .map(|file| json!({ "file": file }))
+            .ok_or_else(|| "missing instant file".to_string());
+    }
+    let upload_id = upload
+        .get("uploadId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "missing upload id".to_string())?
+        .to_string();
+    let chunk_size = upload
+        .get("chunkSize")
+        .and_then(Value::as_u64)
+        .unwrap_or(requested_chunk_size)
+        .clamp(512 * 1024, 16 * 1024 * 1024);
+    let total_chunks = upload
+        .get("totalChunks")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| (metadata.len() + chunk_size - 1) / chunk_size);
+    let completed_chunks: HashSet<u64> = upload
+        .get("uploadedChunks")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_u64).collect())
+        .unwrap_or_default();
+    let mut file = fs::File::open(&path).map_err(|error| error.to_string())?;
+    let mut buffer = vec![0u8; chunk_size as usize];
+    let mut uploaded_bytes = completed_chunks.len() as u64 * chunk_size;
+    if uploaded_bytes > metadata.len() {
+        uploaded_bytes = metadata.len();
+    }
+    let started_at = now_millis();
+    emit_transfer_event(
+        &app,
+        &task_id,
+        json!({
+            "status": "uploading",
+            "uploadId": upload_id,
+            "uploadedBytes": uploaded_bytes,
+            "fileSize": metadata.len(),
+            "totalChunks": total_chunks,
+        }),
+    );
+    for chunk_index in 0..total_chunks {
+        let read = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        if completed_chunks.contains(&chunk_index) {
+            continue;
+        }
+        wait_for_transfer_resume(&app, &task_id, &filename, metadata.len(), uploaded_bytes)?;
+        cloud_upload_chunk(
+            &format!(
+                "/files/upload-sessions/{}/chunks/{}",
+                urlencoding::encode(&upload_id),
+                chunk_index,
+            ),
+            &token,
+            &filename,
+            content_type.as_deref(),
+            buffer[..read].to_vec(),
+        )?;
+        uploaded_bytes = (uploaded_bytes + read as u64).min(metadata.len());
+        let elapsed_ms = now_millis().saturating_sub(started_at).max(1);
+        let speed = (uploaded_bytes as f64 / (elapsed_ms as f64 / 1000.0)) as u64;
+        let remaining_seconds = if speed > 0 {
+            Some(((metadata.len().saturating_sub(uploaded_bytes)) / speed).max(0))
+        } else {
+            None
+        };
+        emit_transfer_event(
+            &app,
+            &task_id,
+            json!({
+                "status": "uploading",
+                "uploadId": upload_id,
+                "uploadedBytes": uploaded_bytes,
+                "fileSize": metadata.len(),
+                "speedBytes": speed,
+                "remainingSeconds": remaining_seconds,
+                "chunkIndex": chunk_index,
+                "totalChunks": total_chunks,
+            }),
+        );
+    }
+    let completed = cloud_post_json(
+        &format!("/files/upload-sessions/{}/complete", urlencoding::encode(&upload_id)),
+        &token,
+        json!({}),
+    );
+    match &completed {
+        Ok(value) => {
+            unregister_transfer_control(&task_id);
+            emit_transfer_event(
+                &app,
+                &task_id,
+                json!({
+                    "status": "completed",
+                    "uploadedBytes": metadata.len(),
+                    "fileSize": metadata.len(),
+                    "file": value.get("file").cloned().unwrap_or(Value::Null),
+                }),
+            );
+        }
+        Err(error) => {
+            unregister_transfer_control(&task_id);
+            emit_transfer_event(
+                &app,
+                &task_id,
+                json!({
+                    "status": "failed",
+                    "uploadedBytes": uploaded_bytes,
+                    "fileSize": metadata.len(),
+                    "errorMessage": error,
+                }),
+            );
+        }
+    }
+    completed
+}
+
+#[tauri::command]
+pub fn control_chat_upload_task(task_id: String, action: String) -> Result<Value, String> {
+    let mut controls = chat_upload_controls()
+        .lock()
+        .map_err(|_| "upload control lock poisoned".to_string())?;
+    let state = controls
+        .entry(task_id.clone())
+        .or_insert(TransferControlState {
+            paused: false,
+            canceled: false,
+        });
+    match action.as_str() {
+        "pause" => state.paused = true,
+        "resume" => {
+            state.paused = false;
+            state.canceled = false;
+        }
+        "cancel" => state.canceled = true,
+        _ => return Err("unsupported upload control action".to_string()),
+    }
+    Ok(json!({
+        "taskId": task_id,
+        "paused": state.paused,
+        "canceled": state.canceled,
+    }))
+}
+
+#[tauri::command]
+pub async fn get_chat_file_signed_url(
+    app: AppHandle,
+    file_object_id: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        get_chat_file_signed_url_blocking(app, file_object_id, source, message_id, drive_node_id)
+    })
+    .await
+    .map_err(|error| format!("signed url task failed: {error}"))?
+}
+
+fn get_chat_file_signed_url_blocking(
+    app: AppHandle,
+    file_object_id: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
+) -> Result<Value, String> {
     let conn = open_db(&app)?;
     ensure_default_user(&conn)?;
     let owner_user_id = active_user_id(&conn)?;
     let token = session_token(&conn, &owner_user_id)?;
     cloud_get_json(
-        &format!("/files/{}/signed-url", urlencoding::encode(&file_object_id)),
+        &signed_url_path(&file_object_id, source.as_deref(), message_id.as_deref(), drive_node_id.as_deref()),
         &token,
     )
 }
 
 #[tauri::command]
-pub fn download_chat_file(
+pub fn media_debug_log(label: String, payload: Value) -> Result<(), String> {
+    println!("[media-debug] {label} {}", payload);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resolve_media_access(
+    app: AppHandle,
+    action: String,
+    source: String,
+    source_id: String,
+    file_object_id: String,
+) -> Result<Value, String> {
+    println!(
+        "[media-rust] resolve_media_access command start action={} source={} sourceId={} fileObjectId={}",
+        action, source, source_id, file_object_id
+    );
+    tauri::async_runtime::spawn_blocking(move || {
+        let started_at = Instant::now();
+        let result = resolve_media_access_blocking(app, action, source, source_id, file_object_id);
+        match &result {
+            Ok(value) => println!(
+                "[media-rust] resolve_media_access command end elapsedMs={} status={} message={}",
+                started_at.elapsed().as_millis(),
+                value.get("status").and_then(Value::as_str).unwrap_or(""),
+                value.get("message").and_then(Value::as_str).unwrap_or("")
+            ),
+            Err(error) => eprintln!(
+                "[media-rust] resolve_media_access command error elapsedMs={} error={}",
+                started_at.elapsed().as_millis(),
+                error
+            ),
+        }
+        result
+    })
+    .await
+    .map_err(|error| format!("media access task failed: {error}"))?
+}
+
+fn resolve_media_access_blocking(
+    app: AppHandle,
+    action: String,
+    source: String,
+    source_id: String,
+    file_object_id: String,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    println!(
+        "[media-rust] resolve_media_access http request action={} source={} sourceId={} fileObjectId={}",
+        action, source, source_id, file_object_id
+    );
+    cloud_post_json(
+        "/media/access/resolve",
+        &token,
+        json!({
+            "action": action,
+            "source": source,
+            "sourceId": source_id,
+            "fileObjectId": file_object_id,
+        }),
+    )
+}
+
+#[tauri::command]
+pub async fn cache_resolved_media_file(
     app: AppHandle,
     file_object_id: String,
     file_name: String,
+    action: String,
+    source: String,
+    source_id: String,
+) -> Result<Value, String> {
+    println!(
+        "[media-rust] cache_resolved_media_file command start action={} source={} sourceId={} fileObjectId={} fileName={}",
+        action, source, source_id, file_object_id, file_name
+    );
+    tauri::async_runtime::spawn_blocking(move || {
+        let started_at = Instant::now();
+        let result = cache_resolved_media_file_blocking(app, file_object_id, file_name, action, source, source_id);
+        match &result {
+            Ok(value) => println!(
+                "[media-rust] cache_resolved_media_file command end elapsedMs={} path={}",
+                started_at.elapsed().as_millis(),
+                value.get("path").and_then(Value::as_str).unwrap_or("")
+            ),
+            Err(error) => eprintln!(
+                "[media-rust] cache_resolved_media_file command error elapsedMs={} error={}",
+                started_at.elapsed().as_millis(),
+                error
+            ),
+        }
+        result
+    })
+    .await
+    .map_err(|error| format!("media cache task failed: {error}"))?
+}
+
+fn cache_resolved_media_file_blocking(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+    action: String,
+    source: String,
+    source_id: String,
+) -> Result<Value, String> {
+    if file_object_id.trim().is_empty() {
+        return Err("missing file object id".to_string());
+    }
+    println!(
+        "[media-rust] cache_resolved_media_file resolve start source={} sourceId={} fileObjectId={}",
+        source, source_id, file_object_id
+    );
+    let resolved = resolve_media_access_blocking(
+        app.clone(),
+        action,
+        source,
+        source_id,
+        file_object_id.clone(),
+    )?;
+    let status = resolved
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("failed");
+    if status != "allowed" {
+        let message = resolved
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("media access denied");
+        return Err(message.to_string());
+    }
+    let url = resolved
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "missing resolved media url".to_string())?;
+    let path = media_cache_path(&app, &file_object_id, &file_name)?;
+    if !path.exists() {
+        println!(
+            "[media-rust] cache_resolved_media_file download start target={}",
+            path.to_string_lossy()
+        );
+        download_url_to_path(url, &path, "media cache")?;
+    } else {
+        println!(
+            "[media-rust] cache_resolved_media_file cache hit target={}",
+            path.to_string_lossy()
+        );
+    }
+    Ok(json!({ "path": path.to_string_lossy(), "access": resolved }))
+}
+
+#[tauri::command]
+pub fn validate_local_media_file(path: String) -> Result<Value, String> {
+    println!("[media-rust] validate_local_media_file command start path={}", path);
+    let candidate = PathBuf::from(path.trim());
+    if candidate.as_os_str().is_empty() {
+        eprintln!("[media-rust] validate_local_media_file command error missing path");
+        return Err("missing local media path".to_string());
+    }
+    if !candidate.is_file() {
+        eprintln!(
+            "[media-rust] validate_local_media_file command error missing file path={}",
+            candidate.to_string_lossy()
+        );
+        return Err("local media file does not exist".to_string());
+    }
+    println!(
+        "[media-rust] validate_local_media_file command end path={}",
+        candidate.to_string_lossy()
+    );
+    Ok(json!({ "path": candidate.to_string_lossy() }))
+}
+
+#[tauri::command]
+pub fn save_chat_video_poster(
+    app: AppHandle,
+    key: String,
+    bytes: Vec<u8>,
+) -> Result<Value, String> {
+    if bytes.is_empty() {
+        return Err("empty video poster".to_string());
+    }
+    let mut stable_key = safe_cache_segment(&key);
+    if stable_key.is_empty() {
+        stable_key = format!("poster_{}", now_millis());
+    }
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| error.to_string())?
+        .join("chat_cache")
+        .join("posters");
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join(format!("{stable_key}.jpg"));
+    fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    Ok(json!({ "path": path.to_string_lossy() }))
+}
+
+#[tauri::command]
+pub fn open_local_media_folder(path: String) -> Result<Value, String> {
+    let candidate = PathBuf::from(path.trim());
+    if !candidate.exists() {
+        return Err("local media file does not exist".to_string());
+    }
+    let target = candidate.parent().unwrap_or_else(|| Path::new(&candidate));
+    open_path_with_default_app(target)?;
+    Ok(json!({ "path": target.to_string_lossy() }))
+}
+
+#[tauri::command]
+pub async fn download_chat_file(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
+) -> Result<Value, String> {
+    println!(
+        "[media-rust] download_chat_file command start source={:?} messageId={:?} driveNodeId={:?} fileObjectId={} fileName={}",
+        source, message_id, drive_node_id, file_object_id, file_name
+    );
+    tauri::async_runtime::spawn_blocking(move || {
+        let started_at = Instant::now();
+        let result = download_chat_file_blocking(app, file_object_id, file_name, source, message_id, drive_node_id);
+        match &result {
+            Ok(value) => println!(
+                "[media-rust] download_chat_file command end elapsedMs={} path={} cancelled={}",
+                started_at.elapsed().as_millis(),
+                value.get("path").and_then(Value::as_str).unwrap_or(""),
+                value.get("cancelled").and_then(Value::as_bool).unwrap_or(false)
+            ),
+            Err(error) => eprintln!(
+                "[media-rust] download_chat_file command error elapsedMs={} error={}",
+                started_at.elapsed().as_millis(),
+                error
+            ),
+        }
+        result
+    })
+    .await
+    .map_err(|error| format!("download task failed: {error}"))?
+}
+
+fn download_chat_file_blocking(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
 ) -> Result<Value, String> {
     let default_dir = app
         .path()
@@ -1081,52 +1743,89 @@ pub fn download_chat_file(
         .set_directory(&default_dir)
         .pick_folder()
     else {
+        println!("[media-rust] download_chat_file folder picker cancelled");
         return Ok(json!({ "cancelled": true }));
     };
     fs::create_dir_all(&download_root).map_err(|error| error.to_string())?;
     let filename = safe_download_filename(&file_name);
     let target = unique_download_path(&download_root, &filename);
-    download_chat_file_to_path(&app, &file_object_id, &target)?;
+    download_chat_file_to_path(
+        &app,
+        &file_object_id,
+        &target,
+        source.as_deref(),
+        message_id.as_deref(),
+        drive_node_id.as_deref(),
+    )?;
     Ok(json!({ "path": target.to_string_lossy(), "cancelled": false }))
 }
 
 #[tauri::command]
-pub fn cache_chat_file(
+pub async fn cache_chat_file(
     app: AppHandle,
     file_object_id: String,
     file_name: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        cache_chat_file_blocking(app, file_object_id, file_name, source, message_id, drive_node_id)
+    })
+    .await
+    .map_err(|error| format!("chat file cache task failed: {error}"))?
+}
+
+fn cache_chat_file_blocking(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
 ) -> Result<Value, String> {
     if file_object_id.trim().is_empty() {
         return Err("missing file object id".to_string());
     }
-    let filename = safe_download_filename(&file_name);
-    let extension = Path::new(&filename)
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("bin");
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("chat_cache")
-        .join("media");
-    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    let stable_id = safe_cache_segment(&file_object_id);
-    let path = dir.join(format!("{stable_id}.{extension}"));
+    let path = media_cache_path(&app, &file_object_id, &file_name)?;
     if !path.exists() {
-        download_chat_file_to_path(&app, &file_object_id, &path)?;
+        download_chat_file_to_path(
+            &app,
+            &file_object_id,
+            &path,
+            source.as_deref(),
+            message_id.as_deref(),
+            drive_node_id.as_deref(),
+        )?;
     }
     Ok(json!({ "path": path.to_string_lossy() }))
 }
 
 #[tauri::command]
-pub fn open_cached_chat_file(
+pub async fn open_cached_chat_file(
     app: AppHandle,
     file_object_id: String,
     file_name: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
 ) -> Result<Value, String> {
-    let cached = cache_chat_file(app, file_object_id, file_name)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        open_cached_chat_file_blocking(app, file_object_id, file_name, source, message_id, drive_node_id)
+    })
+    .await
+    .map_err(|error| format!("open cached file task failed: {error}"))?
+}
+
+fn open_cached_chat_file_blocking(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
+) -> Result<Value, String> {
+    let cached = cache_chat_file_blocking(app, file_object_id, file_name, source, message_id, drive_node_id)?;
     let path = cached
         .get("path")
         .and_then(Value::as_str)
@@ -1136,10 +1835,124 @@ pub fn open_cached_chat_file(
     Ok(json!({ "path": path }))
 }
 
+#[tauri::command]
+pub fn list_drive_nodes(
+    app: AppHandle,
+    drive_type: String,
+    group_id: Option<String>,
+    parent_id: Option<String>,
+    keyword: Option<String>,
+    file_type: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    let mut path = format!(
+        "/files/drive/nodes?driveType={}&keyword={}&fileType={}",
+        urlencoding::encode(&drive_type),
+        urlencoding::encode(keyword.as_deref().unwrap_or("")),
+        urlencoding::encode(file_type.as_deref().unwrap_or("all"))
+    );
+    if let Some(value) = group_id.as_deref().filter(|value| !value.trim().is_empty()) {
+        path.push_str("&groupId=");
+        path.push_str(&urlencoding::encode(value));
+    }
+    if let Some(value) = parent_id.as_deref().filter(|value| !value.trim().is_empty()) {
+        path.push_str("&parentId=");
+        path.push_str(&urlencoding::encode(value));
+    }
+    cloud_get_json(&path, &token)
+}
+
+#[tauri::command]
+pub fn create_drive_folder(
+    app: AppHandle,
+    drive_type: String,
+    group_id: Option<String>,
+    parent_id: Option<String>,
+    name: String,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        "/files/drive/folders",
+        &token,
+        json!({
+            "driveType": drive_type,
+            "groupId": group_id,
+            "parentId": parent_id,
+            "name": name,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn save_file_to_drive(
+    app: AppHandle,
+    drive_type: String,
+    group_id: Option<String>,
+    parent_id: Option<String>,
+    file_object_id: String,
+    source_message_id: Option<String>,
+    name: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_post_json(
+        "/files/drive/files",
+        &token,
+        json!({
+            "driveType": drive_type,
+            "groupId": group_id,
+            "parentId": parent_id,
+            "fileObjectId": file_object_id,
+            "sourceMessageId": source_message_id,
+            "name": name,
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn forward_drive_node_to_chat(
+    app: AppHandle,
+    node_id: String,
+    conversation_id: String,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    let device_id = sync_client_id(&conn)?;
+    cloud_post_json(
+        &format!(
+            "/chat/drive-nodes/{}/forward?clientId={}",
+            urlencoding::encode(&node_id),
+            urlencoding::encode(&device_id),
+        ),
+        &token,
+        json!({
+            "conversationId": conversation_id,
+            "clientMsgId": format!("desktop-{}-{}", now_millis(), random_token(8)),
+            "messageType": "file",
+            "content": "",
+            "contentJson": {},
+            "fileObjectId": null,
+        }),
+    )
+}
+
 fn download_chat_file_to_path(
     app: &AppHandle,
     file_object_id: &str,
     target: &Path,
+    source: Option<&str>,
+    message_id: Option<&str>,
+    drive_node_id: Option<&str>,
 ) -> Result<(), String> {
     if file_object_id.trim().is_empty() {
         return Err("missing file object id".to_string());
@@ -1148,8 +1961,10 @@ fn download_chat_file_to_path(
     ensure_default_user(&conn)?;
     let owner_user_id = active_user_id(&conn)?;
     let token = session_token(&conn, &owner_user_id)?;
+    let signed_path = signed_url_path(file_object_id, source, message_id, drive_node_id);
+    println!("[media-rust] download_chat_file_to_path signed-url request path={signed_path}");
     let signed = cloud_get_json(
-        &format!("/files/{}/signed-url", urlencoding::encode(file_object_id)),
+        &signed_path,
         &token,
     )?;
     let url = signed
@@ -1161,6 +1976,51 @@ fn download_chat_file_to_path(
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     download_url_to_path(url, target, "download")
+}
+
+fn signed_url_path(
+    file_object_id: &str,
+    source: Option<&str>,
+    message_id: Option<&str>,
+    drive_node_id: Option<&str>,
+) -> String {
+    let mut path = format!("/files/{}/signed-url", urlencoding::encode(file_object_id));
+    let normalized_source = source
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("legacy");
+    path.push_str("?source=");
+    path.push_str(&urlencoding::encode(normalized_source));
+    if let Some(value) = message_id.map(str::trim).filter(|value| !value.is_empty()) {
+        path.push_str("&messageId=");
+        path.push_str(&urlencoding::encode(value));
+    }
+    if let Some(value) = drive_node_id.map(str::trim).filter(|value| !value.is_empty()) {
+        path.push_str("&driveNodeId=");
+        path.push_str(&urlencoding::encode(value));
+    }
+    println!("[media-rust] signed_url_path built path={path}");
+    path
+}
+
+fn media_cache_path(app: &AppHandle, file_object_id: &str, file_name: &str) -> Result<PathBuf, String> {
+    let filename = safe_download_filename(file_name);
+    let extension = Path::new(&filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("bin");
+    let dir = chat_media_cache_dir(app)?;
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let stable_id = safe_cache_segment(file_object_id);
+    Ok(dir.join(format!("{stable_id}.{extension}")))
+}
+
+fn chat_media_cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_cache_dir()
+        .map_err(|error| error.to_string())
+        .map(|path| path.join("chat_cache").join("media"))
 }
 
 fn open_path_with_default_app(path: &Path) -> Result<(), String> {
@@ -1190,6 +2050,12 @@ fn open_path_with_default_app(path: &Path) -> Result<(), String> {
 }
 
 fn download_url_to_path(url: &str, target: &Path, label: &str) -> Result<(), String> {
+    let started_at = Instant::now();
+    println!(
+        "[media-rust] download_url_to_path start label={} target={}",
+        label,
+        target.to_string_lossy()
+    );
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -1202,6 +2068,12 @@ fn download_url_to_path(url: &str, target: &Path, label: &str) -> Result<(), Str
         .send()
         .map_err(|error| format!("{label} failed: {error}"))?;
     let status = response.status();
+    println!(
+        "[media-rust] download_url_to_path response label={} status={} elapsedMs={}",
+        label,
+        status,
+        started_at.elapsed().as_millis()
+    );
     if !status.is_success() {
         return Err(format!("{label} failed: HTTP {status}"));
     }
@@ -1209,6 +2081,12 @@ fn download_url_to_path(url: &str, target: &Path, label: &str) -> Result<(), Str
         .bytes()
         .map_err(|error| format!("{label} failed: {error}"))?;
     fs::write(target, bytes).map_err(|error| error.to_string())?;
+    println!(
+        "[media-rust] download_url_to_path end label={} elapsedMs={} target={}",
+        label,
+        started_at.elapsed().as_millis(),
+        target.to_string_lossy()
+    );
     Ok(())
 }
 
@@ -1273,7 +2151,7 @@ pub fn cache_profile_avatar(
         if !path.exists() {
             for reference in [avatar_key.trim(), source] {
                 if let Some(file_id) = file_id_from_file_reference(reference) {
-                    match download_chat_file_to_path(&app, &file_id, &path) {
+                    match download_chat_file_to_path(&app, &file_id, &path, None, None, None) {
                         Ok(()) => {
                             last_error = None;
                             break;
@@ -1355,6 +2233,15 @@ pub fn list_friends(app: AppHandle) -> Result<Value, String> {
     let owner_user_id = active_user_id(&conn)?;
     let token = session_token(&conn, &owner_user_id)?;
     cloud_get_json("/friends", &token)
+}
+
+#[tauri::command]
+pub fn delete_friend(app: AppHandle, friend_user_id: i64) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let token = session_token(&conn, &owner_user_id)?;
+    cloud_delete_json(&format!("/friends/{friend_user_id}"), &token)
 }
 
 #[tauri::command]
@@ -1496,6 +2383,65 @@ pub fn login_with_code(
 }
 
 #[tauri::command]
+pub fn request_class_login_code(class_no: String) -> Result<Value, String> {
+    let clean_class_no = normalize_class_no(&class_no)?;
+    let client = cloud_client()?;
+    let response = client
+        .post(cloud_url("/auth/class/request_code"))
+        .json(&json!({ "classNo": clean_class_no }))
+        .send()
+        .map_err(|error| format!("cloud request failed: {error}"))?;
+    read_cloud_json(response)
+}
+
+#[tauri::command]
+pub fn login_class_with_code(
+    app: AppHandle,
+    class_no: String,
+    code: String,
+) -> Result<LocalAccountState, String> {
+    let clean_class_no = normalize_class_no(&class_no)?;
+    let token = cloud_login_class_code(&clean_class_no, code.trim())?;
+    let cloud_user_id = fetch_cloud_user_id(&token)?;
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let local_phone = format!("class:{clean_class_no}");
+
+    let user_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM local_users WHERE phone = ?1 AND deleted_at IS NULL",
+            params![local_phone],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let now = now_string();
+    let user_id = if let Some(user_id) = user_id {
+        conn.execute(
+            "UPDATE local_users SET cloud_user_id = ?2, updated_at = ?3 WHERE id = ?1",
+            params![user_id, cloud_user_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+        user_id
+    } else {
+        let user_id = format!("local_user_{}", random_token(16));
+        conn.execute(
+            "INSERT INTO local_users (id, phone, password_hash, password_salt, cloud_user_id, created_at, updated_at)
+             VALUES (?1, ?2, NULL, NULL, ?3, ?4, ?4)",
+            params![user_id, local_phone, cloud_user_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+        user_id
+    };
+
+    save_session_token(&conn, &user_id, &token)?;
+    upsert_sync_meta_cloud_user(&conn, &user_id, &cloud_user_id)?;
+    let _ = sync_current_user_with_cloud(&conn, &user_id, &token);
+    activate_user(&conn, &user_id)?;
+    load_account_state_from_conn(&conn)
+}
+
+#[tauri::command]
 pub fn logout_local_account(app: AppHandle) -> Result<LocalAccountState, String> {
     let conn = open_db(&app)?;
     ensure_default_user(&conn)?;
@@ -1537,6 +2483,25 @@ fn cloud_login_code(phone: &str, code: &str) -> Result<String, String> {
             "code": code,
         }),
     )
+}
+
+fn cloud_login_class_code(class_no: &str, code: &str) -> Result<String, String> {
+    post_cloud_token(
+        "/auth/class/login_code",
+        json!({
+            "classNo": class_no,
+            "code": code,
+        }),
+    )
+}
+
+fn normalize_class_no(value: &str) -> Result<String, String> {
+    let class_no = value.trim();
+    if class_no.len() == 8 && class_no.chars().all(|item| item.is_ascii_digit()) {
+        Ok(class_no.to_string())
+    } else {
+        Err("class number must be 8 digits".to_string())
+    }
 }
 
 fn fetch_cloud_user_id(token: &str) -> Result<String, String> {
@@ -1661,6 +2626,193 @@ fn cloud_upload_bytes(
     read_cloud_json(response)
 }
 
+fn cloud_upload_chunk(
+    path: &str,
+    token: &str,
+    filename: &str,
+    content_type: Option<&str>,
+    bytes: Vec<u8>,
+) -> Result<Value, String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|error| format!("cloud upload client failed: {error}"))?;
+    let mut part = reqwest::blocking::multipart::Part::bytes(bytes).file_name(filename.to_string());
+    if let Some(content_type) = content_type {
+        part = part
+            .mime_str(content_type)
+            .map_err(|error| format!("cloud upload failed: {error}"))?;
+    }
+    let form = reqwest::blocking::multipart::Form::new().part("file", part);
+    let response = client
+        .post(cloud_url(path))
+        .bearer_auth(token)
+        .multipart(form)
+        .send()
+        .map_err(|error| format!("cloud upload failed: {error}"))?;
+    read_cloud_json(response)
+}
+
+fn picked_local_file(path: PathBuf) -> Result<PickedLocalFile, String> {
+    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("not a file".to_string());
+    }
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let content_type = infer_content_type_from_path(&path);
+    let file_type = infer_chat_file_type(&name, &content_type);
+    Ok(PickedLocalFile {
+        path: path.to_string_lossy().to_string(),
+        name,
+        size_bytes: metadata.len(),
+        content_type,
+        file_type,
+    })
+}
+
+fn infer_content_type_from_path(path: &Path) -> String {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "mp4" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "avi" => "video/x-msvideo",
+        "mkv" => "video/x-matroska",
+        "pdf" => "application/pdf",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "txt" => "text/plain",
+        "zip" => "application/zip",
+        "rar" => "application/vnd.rar",
+        "7z" => "application/x-7z-compressed",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+fn infer_chat_file_type(name: &str, content_type: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    if content_type.starts_with("image/")
+        || lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".bmp")
+    {
+        return "image".to_string();
+    }
+    if content_type.starts_with("video/")
+        || lower.ends_with(".mp4")
+        || lower.ends_with(".mov")
+        || lower.ends_with(".webm")
+        || lower.ends_with(".avi")
+        || lower.ends_with(".mkv")
+    {
+        return "video".to_string();
+    }
+    "file".to_string()
+}
+
+fn chat_upload_controls() -> &'static Mutex<HashMap<String, TransferControlState>> {
+    CHAT_UPLOAD_CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn register_transfer_control(task_id: &str) {
+    if let Ok(mut controls) = chat_upload_controls().lock() {
+        controls.insert(
+            task_id.to_string(),
+            TransferControlState {
+                paused: false,
+                canceled: false,
+            },
+        );
+    }
+}
+
+fn unregister_transfer_control(task_id: &str) {
+    if let Ok(mut controls) = chat_upload_controls().lock() {
+        controls.remove(task_id);
+    }
+}
+
+fn transfer_control_state(task_id: &str) -> TransferControlState {
+    chat_upload_controls()
+        .lock()
+        .ok()
+        .and_then(|controls| controls.get(task_id).cloned())
+        .unwrap_or(TransferControlState {
+            paused: false,
+            canceled: false,
+        })
+}
+
+fn wait_for_transfer_resume(
+    app: &AppHandle,
+    task_id: &str,
+    file_name: &str,
+    file_size: u64,
+    uploaded_bytes: u64,
+) -> Result<(), String> {
+    loop {
+        let state = transfer_control_state(task_id);
+        if state.canceled {
+            emit_transfer_event(
+                app,
+                task_id,
+                json!({
+                    "status": "canceled",
+                    "fileName": file_name,
+                    "fileSize": file_size,
+                    "uploadedBytes": uploaded_bytes,
+                }),
+            );
+            unregister_transfer_control(task_id);
+            return Err("upload canceled".to_string());
+        }
+        if !state.paused {
+            return Ok(());
+        }
+        emit_transfer_event(
+            app,
+            task_id,
+            json!({
+                "status": "paused",
+                "fileName": file_name,
+                "fileSize": file_size,
+                "uploadedBytes": uploaded_bytes,
+            }),
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+fn emit_transfer_event(app: &AppHandle, task_id: &str, payload: Value) {
+    let mut event_payload = match payload {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    event_payload.insert("taskId".to_string(), Value::String(task_id.to_string()));
+    let _ = app.emit(CHAT_TRANSFER_EVENT, Value::Object(event_payload));
+}
+
 fn cloud_client() -> Result<Client, String> {
     Client::builder()
         .timeout(Duration::from_secs(15))
@@ -1670,6 +2822,27 @@ fn cloud_client() -> Result<Client, String> {
 
 fn cloud_url(path: &str) -> String {
     format!("{CLOUD_API_BASE_URL}{path}")
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 256 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 fn safe_cache_segment(value: &str) -> String {

@@ -241,7 +241,7 @@ export function ProfileSearchWindowHost() {
           <input
             value={keyword}
             autoFocus
-            placeholder="手机号 / 昵称"
+            placeholder="手机号 / 昵称 / 班级号 / 群号"
             onChange={(event) => setKeyword(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -282,7 +282,12 @@ export function ProfileSearchWindowHost() {
             >
               <ProfileResultAvatar profile={profile} />
               <span className="profile-result-main">
-                <strong>{profile.nickname}</strong>
+                <strong>
+                  {profile.nickname}
+                  {profile.accountType === "class" ? (
+                    <SearchTypeBadge label="班级账号" />
+                  ) : null}
+                </strong>
                 <span>{profile.bio || "暂无简介"}</span>
               </span>
               <FriendActionButton
@@ -385,9 +390,13 @@ function GroupResultCard({
     <article className="profile-result-card group-result-card">
       <GroupResultAvatar group={group} />
       <span className="profile-result-main">
-        <strong>{group.name}</strong>
+        <strong>
+          {group.name}
+          {group.groupType === "class" ? <SearchTypeBadge label="班级群" /> : null}
+        </strong>
         <span>{group.description || group.announcement || "暂无群简介"}</span>
         <em>
+          {group.groupNo ? `群号 ${group.groupNo} · ` : ""}
           {group.memberCount}/{group.memberLimit || 500}
         </em>
       </span>
@@ -433,6 +442,10 @@ function GroupResultAvatar({ group }: { group: GroupSearchResult }) {
       {group.avatarUrl ? "" : group.name.slice(0, 1)}
     </span>
   );
+}
+
+function SearchTypeBadge({ label }: { label: string }) {
+  return <i className="class-type-badge profile-search-type-badge">{label}</i>;
 }
 
 function JoinGroupDialog({

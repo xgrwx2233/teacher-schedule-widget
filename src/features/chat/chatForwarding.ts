@@ -5,6 +5,8 @@ import {
 } from "./chatRepository";
 import {
   blobToBytes,
+  chatFileAccessReason,
+  chatFileCloudAvailable,
   contentTypeFromFilename,
   extensionFromContentType,
   fileContentJsonFromObject,
@@ -26,19 +28,34 @@ export async function forwardChatMessage(
 ): Promise<ChatMessage> {
   const fileType = fileTypeFromMessage(source);
   if (!fileType) {
+    const messageType =
+      source.kind === "text" ||
+      source.kind === "contact_card" ||
+      source.kind === "group_card" ||
+      source.kind === "group_share_card"
+        ? source.kind
+        : "text";
     return postTypedChatMessage({
       conversationId: targetConversationId,
-      messageType: "text",
+      messageType,
       content:
         source.kind === "text"
           ? source.content
-          : `${messagePreview(source)} ${source.content || ""}`.trim(),
+          : source.kind === "contact_card" ||
+              source.kind === "group_card" ||
+              source.kind === "group_share_card"
+            ? source.content || messagePreview(source)
+            : `${messagePreview(source)} ${source.content || ""}`.trim(),
       contentJson: source.contentJson ?? null,
     });
   }
 
   const fileObjectId = fileObjectIdFromMessage(source);
+  const canUseCloudReference = !fileObjectId || chatFileCloudAvailable(source);
   if (fileObjectId) {
+    if (!canUseCloudReference) {
+      throw new Error(chatFileAccessReason(source));
+    }
     try {
       return await postTypedChatMessage({
         conversationId: targetConversationId,
@@ -81,7 +98,7 @@ async function reuploadMessageFile(source: ChatMessage, fileObjectId: string) {
         ? "image/webp"
         : "application/octet-stream";
   const contentType = contentTypeFromFilename(fileName, fallbackContentType);
-  if (fileObjectId) {
+  if (fileObjectId && chatFileCloudAvailable(source)) {
     try {
       return await reuploadCachedChatFile({
         fileObjectId,

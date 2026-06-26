@@ -14,10 +14,12 @@ import {
 
 type FriendRequestOpenPayload = {
   userId?: number;
+  user_id?: number;
 };
 
 export function FriendRequestWindowHost() {
   const [userId, setUserId] = useState<number | null>(null);
+  const [openSeq, setOpenSeq] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [message, setMessage] = useState("你好，我想添加你为好友");
   const [tip, setTip] = useState("");
@@ -38,11 +40,13 @@ export function FriendRequestWindowHost() {
       unlisten = await listen<FriendRequestOpenPayload>(
         FRIEND_REQUEST_OPEN_EVENT,
         (event) => {
-          if (!disposed && event.payload.userId) {
+          const nextUserId = friendRequestPayloadUserId(event.payload);
+          if (!disposed && nextUserId) {
             setProfile(null);
             setTip("");
             setMessage("你好，我想添加你为好友");
-            setUserId(event.payload.userId);
+            setUserId(nextUserId);
+            setOpenSeq((current) => current + 1);
           }
         },
       );
@@ -82,7 +86,7 @@ export function FriendRequestWindowHost() {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, openSeq]);
 
   const submit = async () => {
     if (!profile) {
@@ -146,4 +150,11 @@ export function FriendRequestWindowHost() {
       )}
     </main>
   );
+}
+
+function friendRequestPayloadUserId(
+  payload: FriendRequestOpenPayload | null | undefined,
+): number | null {
+  const value = payload?.userId ?? payload?.user_id;
+  return Number.isInteger(value) && value && value > 0 ? value : null;
 }

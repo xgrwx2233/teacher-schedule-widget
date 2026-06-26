@@ -15,7 +15,7 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/**", "$PICTURE/**", "$DESKTOP/**", "$DOWNLOAD/**"]
+        "scope": ["$HOME/**", "$PICTURE/**", "$DESKTOP/**", "$DOWNLOAD/**", "$APPCACHE/**"]
       }
     },
     "windows": [

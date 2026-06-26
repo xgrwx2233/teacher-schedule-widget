@@ -18,8 +18,10 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
+    "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-react": "^5.1.0",
     "aliyun-rtc-sdk": "^7.2.10",
+    "qrcode": "^1.5.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "typescript": "^5.9.3",

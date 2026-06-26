@@ -4,6 +4,9 @@ export type UserProfile = {
   avatarUrl?: string | null;
   avatarObjectKey?: string | null;
   bio?: string | null;
+  accountType?: "normal" | "class" | string;
+  classNo?: string | null;
+  linkedPhone?: string | null;
   online: boolean;
   friendStatus: "self" | "none" | "friend" | "pending" | "rejected" | "unknown";
   createdAt?: string | null;
@@ -15,9 +18,28 @@ export type ProfileSearchResult = {
   groups: GroupSearchResult[];
 };
 
+export type ClassAccount = {
+  id: number;
+  classNo: string;
+  userId: number;
+  ownerUserId: number;
+  linkedPhone: string;
+  status: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type ClassAccountApplyResult = {
+  classAccount: ClassAccount;
+  profile: UserProfile;
+  conversation: import("../chat/types").ChatConversation;
+};
+
 export type GroupSearchResult = {
   id: string;
   conversationId: string;
+  groupNo?: string | null;
+  groupType?: "normal" | "class" | string;
   name: string;
   avatarUrl?: string | null;
   avatarObjectKey?: string | null;

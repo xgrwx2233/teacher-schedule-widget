@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { defaultLocalAccountState, type LocalAccountState } from "../features/account/types";
 import { AUTH_STATE_CHANGED_EVENT, AUTH_WINDOW_CLOSED_EVENT, WIDGET_WINDOW_LABEL } from "../features/settings/windowEvents";
 
-type AuthView = "password-login" | "code-login" | "register";
+type AuthView = "password-login" | "code-login" | "class-code-login" | "register";
 
 const AUTH_WINDOW_WIDTH = 380;
 const AUTH_LOGIN_HEIGHT = 420;
@@ -17,13 +17,15 @@ export function AuthWindowHost() {
   const [accountState, setAccountState] = useState<LocalAccountState>(defaultLocalAccountState);
   const [view, setView] = useState<AuthView>("password-login");
   const [phone, setPhone] = useState("");
+  const [classNo, setClassNo] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [repeatPassword, setRepeatPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const isRegister = view === "register";
-  const isCodeView = view === "code-login" || isRegister;
+  const isClassLogin = view === "class-code-login";
+  const isCodeView = view === "code-login" || isClassLogin || isRegister;
   const primaryLabel = isRegister ? "注册并登录" : "登录";
   const windowTitle = accountState.loggedIn ? "账号" : isRegister ? "创建账号" : "登录";
 
@@ -69,7 +71,23 @@ export function AuthWindowHost() {
     await emit(AUTH_STATE_CHANGED_EVENT, nextState);
   };
 
-  const requestCode = () => {
+  const requestCode = async () => {
+    if (isClassLogin) {
+      try {
+        setBusy(true);
+        const response = await invoke<{ phone?: string; code?: string }>(
+          "request_class_login_code",
+          { classNo },
+        );
+        setCode(response.code ?? "1234");
+        setMessage(response.phone ? `验证码已发送至 ${response.phone}` : "验证码已发送");
+      } catch (error) {
+        setMessage(String(error));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setCode("1234");
     setMessage("验证码已发送");
   };
@@ -87,6 +105,8 @@ export function AuthWindowHost() {
         ? await invoke<LocalAccountState>("register_local_account", { phone, code, password })
         : view === "code-login"
           ? await invoke<LocalAccountState>("login_with_code", { phone, code })
+          : view === "class-code-login"
+            ? await invoke<LocalAccountState>("login_class_with_code", { classNo, code })
           : await invoke<LocalAccountState>("login_with_password", { phone, password });
 
       await notifyAuthChanged(nextState);
@@ -152,6 +172,9 @@ export function AuthWindowHost() {
                   <button type="button" className={view === "code-login" ? "is-active" : ""} onClick={() => switchView("code-login")}>
                     验证码登录
                   </button>
+                  <button type="button" className={view === "class-code-login" ? "is-active" : ""} onClick={() => switchView("class-code-login")}>
+                    班级号登录
+                  </button>
                 </nav>
               ) : null}
 
@@ -162,24 +185,31 @@ export function AuthWindowHost() {
                   void runAuthAction();
                 }}
               >
-                <label className="auth-field">
-                  <span>手机号</span>
-                  <input value={phone} inputMode="tel" maxLength={11} autoComplete="tel" onChange={(event) => setPhone(event.currentTarget.value)} />
-                </label>
+                {isClassLogin ? (
+                  <label className="auth-field">
+                    <span>班级号</span>
+                    <input value={classNo} inputMode="numeric" maxLength={8} autoComplete="off" onChange={(event) => setClassNo(event.currentTarget.value)} />
+                  </label>
+                ) : (
+                  <label className="auth-field">
+                    <span>手机号</span>
+                    <input value={phone} inputMode="tel" maxLength={11} autoComplete="tel" onChange={(event) => setPhone(event.currentTarget.value)} />
+                  </label>
+                )}
 
                 {isCodeView ? (
                   <label className="auth-field">
                     <span>验证码</span>
                     <div className="auth-code-row">
                       <input value={code} inputMode="numeric" maxLength={6} autoComplete="one-time-code" onChange={(event) => setCode(event.currentTarget.value)} />
-                      <button type="button" onClick={requestCode}>
+                      <button type="button" disabled={busy} onClick={() => void requestCode()}>
                         获取验证码
                       </button>
                     </div>
                   </label>
                 ) : null}
 
-                {!isCodeView || isRegister ? (
+                {(!isCodeView || isRegister) && !isClassLogin ? (
                   <label className="auth-field">
                     <span>密码</span>
                     <input value={password} type="password" autoComplete={isRegister ? "new-password" : "current-password"} onChange={(event) => setPassword(event.currentTarget.value)} />
@@ -226,6 +256,9 @@ export function AuthWindowHost() {
 function formatPhone(phone: string | null | undefined): string {
   if (!phone) {
     return "本地账号";
+  }
+  if (phone.startsWith("class:")) {
+    return `班级号 ${phone.slice("class:".length)}`;
   }
 
   return `${phone.slice(0, 3)} ${phone.slice(3, 7)} ${phone.slice(7)}`;

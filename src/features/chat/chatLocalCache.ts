@@ -25,10 +25,17 @@ export type ChatAccountCache = {
   stickers: ChatSticker[];
   history?: Record<string, ChatHistoryConversationCache>;
   ui: {
-    activeSection: "messages" | "contacts";
+    activeSection: "messages" | "contacts" | "drive";
     activeConversationId: string;
     activeContactUserId: number | null;
-    contactDetailView: "empty" | "friend" | "friend-requests" | "group-requests";
+    activeContactGroupId?: string | null;
+    contactListTab?: "friends" | "groups";
+    contactDetailView:
+      | "empty"
+      | "friend"
+      | "group"
+      | "friend-requests"
+      | "group-requests";
   };
 };
 

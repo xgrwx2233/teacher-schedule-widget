@@ -5,12 +5,19 @@ import type {
   ChatConversation,
   ChatGroup,
   ChatGroupAnnouncement,
+  ChatGroupInvite,
+  ChatGroupInviteApplyResult,
   ChatGroupJoinRequest,
   ChatGroupMember,
+  ChatTransferEvent,
   ChatFileDownloadResult,
   ChatMessage,
   ChatMessageKind,
   ConversationKind,
+  DriveNode,
+  LocalUploadFile,
+  MediaAccessSource,
+  MediaAllowedActions,
   UploadedChatFile,
 } from "./types";
 import type { FriendRequest } from "../profile/types";
@@ -22,8 +29,12 @@ type ApiConversation = {
   peerUserId?: number | null;
   currentUserId?: number | null;
   groupId?: string | null;
+  groupType?: "normal" | "class" | string | null;
   groupMemberCount?: number | null;
   groupAvatarUrl?: string | null;
+  groupAvatarObjectKey?: string | null;
+  peerAccountType?: "normal" | "class" | string | null;
+  peerClassNo?: string | null;
   deviceId?: string | null;
   lastMessagePreview?: string | null;
   lastMessageAt?: string | null;
@@ -43,7 +54,9 @@ type ApiMessage = {
   messageType: string;
   content: string;
   contentJson?: Record<string, unknown> | null;
+  quoteMeta?: ChatMessage["quoteMeta"] | null;
   fileObjectId?: string | null;
+  fileAccess?: ChatMessage["fileAccess"] | null;
   clientMsgId: string;
   serverSeq: number;
   conversationSeq: number;
@@ -182,6 +195,7 @@ export async function postTypedChatMessage(input: {
   content: string;
   messageType: ChatMessageKind;
   contentJson?: Record<string, unknown> | null;
+  quoteMeta?: ChatMessage["quoteMeta"] | null;
   fileObjectId?: string | null;
 }): Promise<ChatMessage> {
   const response = await invoke<{ message: ApiMessage }>("send_chat_message", {
@@ -190,6 +204,8 @@ export async function postTypedChatMessage(input: {
     messageType: input.messageType,
     content: input.content,
     contentJson: input.contentJson ?? null,
+    quoteMeta: input.quoteMeta ?? null,
+    quote_meta: input.quoteMeta ?? null,
     fileObjectId: input.fileObjectId ?? null,
   });
   return mapMessage(response.message, "outgoing");
@@ -199,7 +215,7 @@ export async function uploadChatFileBytes(input: {
   filename: string;
   contentType?: string | null;
   bytes: number[];
-  fileType: "image" | "file" | "sticker";
+  fileType: "image" | "video" | "file" | "sticker";
 }): Promise<UploadedChatFile> {
   const response = await invoke<{ file: UploadedChatFile }>("upload_chat_file_bytes", {
     filename: input.filename,
@@ -210,11 +226,35 @@ export async function uploadChatFileBytes(input: {
   return response.file;
 }
 
+export async function pickChatUploadFiles(input: {
+  kind?: "file" | "media" | "image" | "video";
+  multiple?: boolean;
+} = {}): Promise<LocalUploadFile[]> {
+  const response = await invoke<{ files: LocalUploadFile[] }>(
+    "pick_chat_upload_files",
+    {
+      kind: input.kind ?? "file",
+      multiple: input.multiple ?? true,
+    },
+  );
+  return response.files ?? [];
+}
+
+export async function inspectChatUploadFiles(
+  paths: string[],
+): Promise<LocalUploadFile[]> {
+  const response = await invoke<{ files: LocalUploadFile[] }>(
+    "inspect_chat_upload_files",
+    { paths },
+  );
+  return response.files ?? [];
+}
+
 export async function reuploadCachedChatFile(input: {
   fileObjectId: string;
   fileName: string;
   contentType?: string | null;
-  fileType: "image" | "file" | "sticker";
+  fileType: "image" | "video" | "file" | "sticker";
 }): Promise<UploadedChatFile> {
   const response = await invoke<{ file: UploadedChatFile }>("reupload_cached_chat_file", {
     fileObjectId: input.fileObjectId,
@@ -225,9 +265,184 @@ export async function reuploadCachedChatFile(input: {
   return response.file;
 }
 
-export async function getChatFileSignedUrl(fileObjectId: string): Promise<string> {
+export async function uploadChatFilePathChunked(input: {
+  filePath: string;
+  fileType: "image" | "video" | "file" | "sticker";
+  contentType?: string | null;
+  chunkSize?: number;
+  taskId?: string;
+}): Promise<UploadedChatFile> {
+  const response = await invoke<{ file: UploadedChatFile }>(
+    "upload_chat_file_path_chunked",
+    {
+      filePath: input.filePath,
+      fileType: input.fileType,
+      contentType: input.contentType ?? null,
+      chunkSize: input.chunkSize ?? null,
+      taskId: input.taskId ?? null,
+    },
+  );
+  return response.file;
+}
+
+export async function controlChatUploadTask(
+  taskId: string,
+  action: "pause" | "resume" | "cancel",
+): Promise<void> {
+  await invoke("control_chat_upload_task", { taskId, action });
+}
+
+export async function listDriveNodes(input: {
+  driveType: "personal" | "group";
+  groupId?: string | null;
+  parentId?: string | null;
+  keyword?: string;
+  fileType?: string;
+}): Promise<DriveNode[]> {
+  const response = await invoke<{ nodes: DriveNode[] }>("list_drive_nodes", {
+    driveType: input.driveType,
+    groupId: input.groupId ?? null,
+    parentId: input.parentId ?? null,
+    keyword: input.keyword ?? "",
+    fileType: input.fileType ?? "all",
+  });
+  return response.nodes;
+}
+
+export async function createDriveFolder(input: {
+  driveType: "personal" | "group";
+  groupId?: string | null;
+  parentId?: string | null;
+  name: string;
+}): Promise<DriveNode> {
+  const response = await invoke<{ node: DriveNode }>("create_drive_folder", {
+    driveType: input.driveType,
+    groupId: input.groupId ?? null,
+    parentId: input.parentId ?? null,
+    name: input.name,
+  });
+  return response.node;
+}
+
+export async function saveFileToDrive(input: {
+  driveType: "personal" | "group";
+  groupId?: string | null;
+  parentId?: string | null;
+  fileObjectId: string;
+  sourceMessageId?: string | null;
+  name?: string | null;
+}): Promise<DriveNode> {
+  const response = await invoke<{ node: DriveNode }>("save_file_to_drive", {
+    driveType: input.driveType,
+    groupId: input.groupId ?? null,
+    parentId: input.parentId ?? null,
+    fileObjectId: input.fileObjectId,
+    sourceMessageId: input.sourceMessageId ?? null,
+    name: input.name ?? null,
+  });
+  return response.node;
+}
+
+export async function forwardDriveNodeToChat(
+  nodeId: string,
+  conversationId: string,
+): Promise<ChatMessage> {
+  const response = await invoke<{ message: ApiMessage }>("forward_drive_node_to_chat", {
+    nodeId,
+    conversationId,
+  });
+  return mapMessage(response.message, "outgoing");
+}
+
+export type ChatFileAccessSource =
+  | { source?: "legacy"; messageId?: null; driveNodeId?: null }
+  | { source: "chat"; messageId: string; driveNodeId?: null }
+  | { source: "drive"; driveNodeId: string; messageId?: null };
+
+export type MediaAccessResolveResult = {
+  status: "allowed" | "expired" | "no_permission" | "deleted" | "blocked" | "not_uploaded" | "failed" | string;
+  url?: string | null;
+  urlExpiresAt?: string | null;
+  fileName?: string | null;
+  fileSize?: number | null;
+  mimeType?: string | null;
+  allowedActions: MediaAllowedActions;
+  fallback?: {
+    personalDriveNodeId?: string | null;
+    groupDriveNodeId?: string | null;
+  } | null;
+  message?: string | null;
+};
+
+export async function resolveMediaAccess(input: {
+  action: "preview" | "download" | "forward" | "save_to_drive";
+  source: Exclude<MediaAccessSource, "local_pending">;
+  sourceId: string;
+  fileObjectId: string;
+}): Promise<MediaAccessResolveResult> {
+  return invoke<MediaAccessResolveResult>("resolve_media_access", {
+    action: input.action,
+    source: input.source,
+    sourceId: input.sourceId,
+    fileObjectId: input.fileObjectId,
+  });
+}
+
+export async function cacheResolvedMediaFile(input: {
+  action: "preview" | "download";
+  source: Exclude<MediaAccessSource, "local_pending">;
+  sourceId: string;
+  fileObjectId: string;
+  fileName: string;
+}): Promise<{ path: string; url: string; access: MediaAccessResolveResult }> {
+  const response = await invoke<{ path: string; access: MediaAccessResolveResult }>(
+    "cache_resolved_media_file",
+    {
+      action: input.action,
+      source: input.source,
+      sourceId: input.sourceId,
+      fileObjectId: input.fileObjectId,
+      fileName: input.fileName,
+    },
+  );
+  return {
+    ...response,
+    url: convertFileSrc(response.path),
+  };
+}
+
+export async function validateLocalMediaFile(path: string): Promise<string> {
+  const response = await invoke<{ path: string }>("validate_local_media_file", { path });
+  return convertFileSrc(response.path);
+}
+
+export async function saveChatVideoPoster(input: {
+  key: string;
+  bytes: number[];
+}): Promise<{ path: string; url: string }> {
+  const response = await invoke<{ path: string }>("save_chat_video_poster", {
+    key: input.key,
+    bytes: input.bytes,
+  });
+  return {
+    path: response.path,
+    url: convertFileSrc(response.path),
+  };
+}
+
+export async function openLocalMediaFolder(path: string): Promise<void> {
+  await invoke("open_local_media_folder", { path });
+}
+
+export async function getChatFileSignedUrl(
+  fileObjectId: string,
+  access?: ChatFileAccessSource,
+): Promise<string> {
   const response = await invoke<{ url: string }>("get_chat_file_signed_url", {
     fileObjectId,
+    source: access?.source ?? "legacy",
+    messageId: access?.source === "chat" ? access.messageId : null,
+    driveNodeId: access?.source === "drive" ? access.driveNodeId : null,
   });
   return response.url;
 }
@@ -235,20 +450,28 @@ export async function getChatFileSignedUrl(fileObjectId: string): Promise<string
 export async function downloadChatFile(
   fileObjectId: string,
   fileName: string,
+  access?: ChatFileAccessSource,
 ): Promise<ChatFileDownloadResult> {
   return invoke<ChatFileDownloadResult>("download_chat_file", {
     fileObjectId,
     fileName,
+    source: access?.source ?? "legacy",
+    messageId: access?.source === "chat" ? access.messageId : null,
+    driveNodeId: access?.source === "drive" ? access.driveNodeId : null,
   });
 }
 
 export async function cacheChatFile(
   fileObjectId: string,
   fileName: string,
+  access?: ChatFileAccessSource,
 ): Promise<string> {
   const response = await invoke<{ path: string }>("cache_chat_file", {
     fileObjectId,
     fileName,
+    source: access?.source ?? "legacy",
+    messageId: access?.source === "chat" ? access.messageId : null,
+    driveNodeId: access?.source === "drive" ? access.driveNodeId : null,
   });
   return convertFileSrc(response.path);
 }
@@ -256,10 +479,14 @@ export async function cacheChatFile(
 export async function openCachedChatFile(
   fileObjectId: string,
   fileName: string,
+  access?: ChatFileAccessSource,
 ): Promise<string> {
   const response = await invoke<{ path: string }>("open_cached_chat_file", {
     fileObjectId,
     fileName,
+    source: access?.source ?? "legacy",
+    messageId: access?.source === "chat" ? access.messageId : null,
+    driveNodeId: access?.source === "drive" ? access.driveNodeId : null,
   });
   return response.path;
 }
@@ -292,10 +519,12 @@ export async function createDirectConversation(
 export async function createChatGroup(input: {
   name?: string | null;
   memberUserIds: number[];
+  groupType?: "normal" | "class";
 }): Promise<{ group: ChatGroup; conversation: ChatConversation }> {
   const response = await invoke<GroupResponse>("create_chat_group", {
     name: input.name ?? null,
     memberUserIds: input.memberUserIds,
+    groupType: input.groupType ?? "normal",
   });
   return {
     group: response.group,
@@ -490,6 +719,42 @@ export async function sendChatGroupJoinRequest(input: {
     },
   );
   return response.request;
+}
+
+export async function createChatGroupInvite(input: {
+  groupId: string;
+  scene?: string;
+  expireType?: string;
+}): Promise<ChatGroupInvite> {
+  const response = await invoke<{ invite: ChatGroupInvite }>(
+    "create_chat_group_invite",
+    {
+      groupId: input.groupId,
+      scene: input.scene ?? "qr_modal",
+      expireType: input.expireType ?? "default",
+    },
+  );
+  return response.invite;
+}
+
+export async function getChatGroupInvite(
+  inviteToken: string,
+): Promise<ChatGroupInvite> {
+  const response = await invoke<{ invite: ChatGroupInvite }>(
+    "get_chat_group_invite",
+    { inviteToken },
+  );
+  return response.invite;
+}
+
+export async function applyChatGroupInvite(input: {
+  inviteToken: string;
+  reason?: string | null;
+}): Promise<ChatGroupInviteApplyResult> {
+  return invoke<ChatGroupInviteApplyResult>("apply_chat_group_invite", {
+    inviteToken: input.inviteToken,
+    reason: input.reason ?? null,
+  });
 }
 
 export async function setChatGroupAdmin(input: {
@@ -696,6 +961,16 @@ export async function listenForGroupEvents(
   });
 }
 
+export async function listenForChatTransferEvents(
+  onEvent: (event: ChatTransferEvent) => void,
+): Promise<() => void> {
+  return listen<ChatTransferEvent>("chat-transfer-event", (event) => {
+    if (event.payload?.taskId) {
+      onEvent(event.payload);
+    }
+  });
+}
+
 function mapConversation(item: ApiConversation): ChatConversation {
   const kind = normalizeKind(item.type);
   const title = item.title || "未命名会话";
@@ -709,8 +984,10 @@ function mapConversation(item: ApiConversation): ChatConversation {
     pinned: Boolean(item.pinned),
     muted: Boolean(item.muted),
     groupId: item.groupId ?? null,
+    groupType: item.groupType ?? null,
     groupMemberCount: item.groupMemberCount ?? null,
     groupAvatarUrl: item.groupAvatarUrl ?? null,
+    groupAvatarObjectKey: item.groupAvatarObjectKey ?? null,
     currentUserId: item.currentUserId ?? null,
     participant: {
       id: String(item.peerUserId ?? item.groupId ?? item.deviceId ?? item.id),
@@ -718,6 +995,8 @@ function mapConversation(item: ApiConversation): ChatConversation {
       team: kind === "group" ? "群聊" : kind === "device" ? "设备" : "联系人",
       avatar: title.slice(0, 1).toUpperCase(),
       avatarUrl: kind === "group" ? item.groupAvatarUrl ?? null : null,
+      accountType: kind === "direct" ? item.peerAccountType ?? "normal" : null,
+      classNo: kind === "direct" ? item.peerClassNo ?? null : null,
       presence: "offline",
       presenceLabel:
         kind === "group"
@@ -742,7 +1021,11 @@ function mapMessage(
     direction: kind === "system" ? undefined : fallbackDirection,
     content: item.content,
     contentJson: item.contentJson ?? null,
+    quoteMeta: item.quoteMeta ?? null,
     fileObjectId: item.fileObjectId ?? null,
+    fileAccess:
+      item.fileAccess ??
+      ((item.contentJson?.fileAccess as ChatMessage["fileAccess"] | undefined) ?? null),
     timeLabel: formatTimeLabel(item.createdAt),
     createdAt: item.createdAt ?? null,
     senderId: item.senderId,
@@ -758,10 +1041,14 @@ function normalizeMessageKind(messageType: string, status?: string): ChatMessage
   }
   if (
     messageType === "image" ||
+    messageType === "video" ||
     messageType === "file" ||
     messageType === "sticker" ||
     messageType === "system" ||
-    messageType === "call_event"
+    messageType === "call_event" ||
+    messageType === "contact_card" ||
+    messageType === "group_card" ||
+    messageType === "group_share_card"
   ) {
     return messageType;
   }

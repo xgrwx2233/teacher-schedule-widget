@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capability for the teacher schedule widget window.",
-  "windows": ["widget", "settings", "card-settings", "period-card-settings", "interaction-proxy", "widget-menu", "floating-toolbar", "auth", "chat", "chat-history", "profile-edit", "friend-profile", "profile-search", "friend-request", "image-preview"],
+  "windows": ["widget", "settings", "card-settings", "period-card-settings", "interaction-proxy", "widget-menu", "floating-toolbar", "auth", "chat", "chat-history", "profile-edit", "class-account-edit", "friend-profile", "profile-search", "friend-request", "image-preview", "media-viewer", "screenshot"],
   "permissions": [
     "core:default",
     "core:event:default",
@@ -22,6 +22,8 @@
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-toggle-maximize",
-    "core:window:allow-is-maximized"
+    "core:window:allow-is-maximized",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen"
   ]
 }
