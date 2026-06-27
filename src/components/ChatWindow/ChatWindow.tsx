@@ -4859,20 +4859,28 @@ export function ChatWindow() {
       return;
     }
     const groupTitle = groupMapRef.current[conversation.groupId]?.name || conversation.title;
-    setDrivePanel((current) => ({
-      ...current,
-      mode: "group",
-      groupId: conversation.groupId ?? null,
-      title: `${groupTitle} · 群网盘`,
-      open: true,
-      breadcrumb: [],
-      selectedIds: [],
-      error: null,
-    }));
-    void refreshDrivePanel({
-      mode: "group",
-      groupId: conversation.groupId,
-      breadcrumb: [],
+    void invoke("open_drive_window", {
+      payload: {
+        mode: "group",
+        groupId: conversation.groupId,
+        title: `${groupTitle} · 群网盘`,
+        canManage: canManageGroupDrive(groupMapRef.current[conversation.groupId] ?? null),
+      },
+    }).catch((error) => {
+      setDataSource((current) => ({ ...current, error: friendlyError(String(error)) }));
+    });
+  };
+
+  const openPersonalDriveWindow = () => {
+    void invoke("open_drive_window", {
+      payload: {
+        mode: "personal",
+        groupId: null,
+        title: "我的网盘",
+        canManage: true,
+      },
+    }).catch((error) => {
+      setDataSource((current) => ({ ...current, error: friendlyError(String(error)) }));
     });
   };
 
@@ -6381,11 +6389,7 @@ export function ChatWindow() {
   return (
     <main className="chat-window-root" onClick={closeContextMenus}>
       <ChatTitleBar />
-      <section
-        className={`chat-shell ${activeSection === "drive" ? "is-drive-mode" : ""}`}
-        ref={chatShellRef}
-        style={chatShellStyle}
-      >
+      <section className="chat-shell" ref={chatShellRef} style={chatShellStyle}>
         <aside className="chat-nav">
           <button
             type="button"
@@ -6439,12 +6443,12 @@ export function ChatWindow() {
             ) : null}
           </button>
           <button
-            className={`chat-nav-item ${activeSection === "drive" ? "is-active" : ""}`}
+            className="chat-nav-item"
             type="button"
             title="网盘"
             onClick={(event) => {
               event.stopPropagation();
-              switchSection("drive");
+              openPersonalDriveWindow();
             }}
           >
             <ChatIcon name="folder" className="nav-symbol" />
@@ -6474,8 +6478,6 @@ export function ChatWindow() {
           </div>
         </aside>
 
-        {activeSection !== "drive" ? (
-          <>
         <aside className="chat-list-panel" ref={chatListPanelRef}>
           <ChatDataSourceBanner
             dataSource={dataSource}
@@ -6690,8 +6692,6 @@ export function ChatWindow() {
           aria-label="调整中间栏宽度"
           onPointerDown={startChatListResize}
         />
-          </>
-        ) : null}
 
         {activeSection === "messages" ? (
           displayedActiveConversation ? (
@@ -7079,41 +7079,7 @@ export function ChatWindow() {
               }
             />
           </section>
-        ) : (
-          <section className="chat-main-panel drive-main-panel" ref={chatMainPanelRef}>
-            <DrivePanelView
-              state={{ ...drivePanel, mode: "personal", title: "我的网盘", open: true }}
-              conversations={sortedConversations.map((conversation) =>
-                withProfile(conversation, profileMap),
-              )}
-              canManage
-              onClose={() => setActiveSection("messages")}
-              onRefresh={() => void refreshDrivePanel({ mode: "personal", groupId: null })}
-              onSearch={(search) => {
-                setDrivePanel((current) => ({ ...current, search }));
-                void refreshDrivePanel({ search, mode: "personal", groupId: null });
-              }}
-              onFilter={(filter) => {
-                setDrivePanel((current) => ({ ...current, filter }));
-                void refreshDrivePanel({ filter, mode: "personal", groupId: null });
-              }}
-              onSort={(sortMode) =>
-                setDrivePanel((current) => ({ ...current, sortMode }))
-              }
-              onViewMode={(viewMode) =>
-                setDrivePanel((current) => ({ ...current, viewMode }))
-              }
-              onCreateFolder={() => void createFolderInDrive()}
-              onUpload={() => void uploadFilesToDrive()}
-              onOpenNode={(node) => void openDriveNode(node)}
-              onDownloadNode={(node) => void downloadDriveNode(node)}
-              onForwardNode={(node) =>
-                setDriveForwardPicker({ nodeId: node.id, nodeName: node.name })
-              }
-              onBreadcrumb={(index) => void navigateDriveBreadcrumb(index)}
-            />
-          </section>
-        )}
+        ) : null}
       </section>
 
       {profileCard ? (
@@ -7265,7 +7231,7 @@ export function ChatWindow() {
 
       {transferDrawerOpen ? (
         <TransferDrawer
-          tasks={transferTasks}
+          tasks={activeTransferTasks}
           activeTab={transferTab}
           onChangeTab={setTransferTab}
           onClose={() => setTransferDrawerOpen(false)}
@@ -7274,44 +7240,6 @@ export function ChatWindow() {
           onCancel={(taskId) => void controlChatUploadTask(taskId, "cancel")}
           onRetry={(task) => void retryTransferTask(task)}
         />
-      ) : null}
-
-      {drivePanel.open && drivePanel.mode === "group" ? (
-        <div className="drive-drawer-backdrop" onClick={() => setDrivePanel((current) => ({ ...current, open: false }))}>
-          <aside className="drive-drawer" onClick={(event) => event.stopPropagation()}>
-            <DrivePanelView
-              state={drivePanel}
-              conversations={sortedConversations.map((conversation) =>
-                withProfile(conversation, profileMap),
-              )}
-              canManage={canManageGroupDrive(activeGroup)}
-              onClose={() => setDrivePanel((current) => ({ ...current, open: false }))}
-              onRefresh={() => void refreshDrivePanel()}
-              onSearch={(search) => {
-                setDrivePanel((current) => ({ ...current, search }));
-                void refreshDrivePanel({ search });
-              }}
-              onFilter={(filter) => {
-                setDrivePanel((current) => ({ ...current, filter }));
-                void refreshDrivePanel({ filter });
-              }}
-              onSort={(sortMode) =>
-                setDrivePanel((current) => ({ ...current, sortMode }))
-              }
-              onViewMode={(viewMode) =>
-                setDrivePanel((current) => ({ ...current, viewMode }))
-              }
-              onCreateFolder={() => void createFolderInDrive()}
-              onUpload={() => void uploadFilesToDrive()}
-              onOpenNode={(node) => void openDriveNode(node)}
-              onDownloadNode={(node) => void downloadDriveNode(node)}
-              onForwardNode={(node) =>
-                setDriveForwardPicker({ nodeId: node.id, nodeName: node.name })
-              }
-              onBreadcrumb={(index) => void navigateDriveBreadcrumb(index)}
-            />
-          </aside>
-        </div>
       ) : null}
 
       {driveSaveNotice ? (
@@ -8418,7 +8346,7 @@ function TransferDrawer({
             );
           })
         ) : (
-          <p className="transfer-empty">暂无传输任务</p>
+          <p className="transfer-empty">当前会话暂无传输任务</p>
         )}
       </div>
     </aside>

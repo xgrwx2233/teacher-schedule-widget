@@ -28,6 +28,7 @@ export const MEDIA_VIEWER_WINDOW_LABEL = "media-viewer";
 export const SCREENSHOT_WINDOW_LABEL = "screenshot";
 export const CHAT_HISTORY_WINDOW_LABEL = "chat-history";
 export const GROUP_ANNOUNCEMENT_WINDOW_LABEL = "group-announcements";
+export const DRIVE_WINDOW_LABEL = "drive";
 
 export const SETTINGS_WINDOW_STATE_EVENT = "settings-window-state";
 export const SETTINGS_WINDOW_STATE_REQUEST_EVENT =
@@ -56,6 +57,7 @@ export const IMAGE_PREVIEW_OPEN_EVENT = "image-preview-open";
 export const MEDIA_VIEWER_OPEN_EVENT = "media-viewer-open";
 export const CHAT_HISTORY_OPEN_EVENT = "chat-history-open";
 export const GROUP_ANNOUNCEMENT_OPEN_EVENT = "group-announcement-open";
+export const DRIVE_OPEN_EVENT = "drive-open";
 export const SCREENSHOT_OPEN_EVENT = "screenshot-open";
 export const FRIEND_REQUEST_SENT_EVENT = "friend-request-sent";
 export const FRIEND_REQUEST_EVENT = "friend-request-event";

@@ -71,6 +71,8 @@ pub fn run() {
             settings_windows::open_chat_history_window,
             settings_windows::open_group_announcement_window,
             settings_windows::get_group_announcement_open_payload,
+            settings_windows::open_drive_window,
+            settings_windows::get_drive_open_payload,
             settings_windows::open_profile_edit_window,
             settings_windows::open_class_account_edit_window,
             settings_windows::open_friend_profile_window,

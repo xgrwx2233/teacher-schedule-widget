@@ -4933,6 +4933,20 @@ button {
   color: #1f2937;
 }
 
+.drive-window-root {
+  width: 100vw;
+  height: 100vh;
+  min-width: 720px;
+  min-height: 520px;
+  box-sizing: border-box;
+  padding: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(58, 141, 255, 0.1), transparent 30%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
+  color: #1f2937;
+}
+
 .chat-titlebar {
   height: 34px;
   display: flex;
@@ -13245,20 +13259,6 @@ body.is-chat-composer-resizing .chat-composer-resizer::before {
 .chat-history-footer button:disabled {
   cursor: default;
   opacity: 0.58;
-}
-
-.chat-shell.is-drive-mode {
-  grid-template-columns: var(--chat-nav-width) minmax(0, 1fr);
-}
-
-.chat-shell.is-drive-mode .chat-column-resizer {
-  display: none;
-}
-
-.drive-main-panel {
-  background:
-    radial-gradient(circle at 18% 8%, rgba(58, 141, 255, 0.1), transparent 30%),
-    linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
 }
 
 .chat-transfer-icon {

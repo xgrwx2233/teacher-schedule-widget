@@ -6,6 +6,7 @@ import { CardSettingsWindowHost } from "./app/CardSettingsWindowHost";
 import { ChatHistoryWindowHost } from "./app/ChatHistoryWindowHost";
 import { ChatWindowHost } from "./app/ChatWindowHost";
 import { ClassAccountEditWindowHost } from "./app/ClassAccountEditWindowHost";
+import { DriveWindowHost } from "./app/DriveWindowHost";
 import { FriendProfileWindowHost } from "./app/FriendProfileWindowHost";
 import { FriendRequestWindowHost } from "./app/FriendRequestWindowHost";
 import { FloatingToolbarWindowHost } from "./app/FloatingToolbarWindowHost";
@@ -25,6 +26,7 @@ import {
   CHAT_HISTORY_WINDOW_LABEL,
   CHAT_WINDOW_LABEL,
   CLASS_ACCOUNT_EDIT_WINDOW_LABEL,
+  DRIVE_WINDOW_LABEL,
   FRIEND_PROFILE_WINDOW_LABEL,
   FRIEND_REQUEST_WINDOW_LABEL,
   FLOATING_TOOLBAR_WINDOW_LABEL,
@@ -48,6 +50,7 @@ function resolveRootComponent() {
   if (windowLabel === SETTINGS_WINDOW_LABEL) return SettingsWindowHost;
   if (windowLabel === AUTH_WINDOW_LABEL) return AuthWindowHost;
   if (windowLabel === CHAT_WINDOW_LABEL) return ChatWindowHost;
+  if (windowLabel === DRIVE_WINDOW_LABEL) return DriveWindowHost;
   if (windowLabel === CHAT_HISTORY_WINDOW_LABEL) return ChatHistoryWindowHost;
   if (windowLabel === GROUP_ANNOUNCEMENT_WINDOW_LABEL) return GroupAnnouncementWindowHost;
   if (windowLabel === PROFILE_EDIT_WINDOW_LABEL) return ProfileEditWindowHost;

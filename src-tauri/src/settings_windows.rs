@@ -29,6 +29,7 @@ const PROFILE_SEARCH_WINDOW_LABEL: &str = "profile-search";
 const FRIEND_REQUEST_WINDOW_LABEL: &str = "friend-request";
 const IMAGE_PREVIEW_WINDOW_LABEL: &str = "image-preview";
 const MEDIA_VIEWER_WINDOW_LABEL: &str = "media-viewer";
+const DRIVE_WINDOW_LABEL: &str = "drive";
 const SCREENSHOT_WINDOW_LABEL: &str = "screenshot";
 const WIDGET_WINDOW_LABEL: &str = "widget";
 
@@ -42,6 +43,7 @@ const IMAGE_PREVIEW_OPEN_EVENT: &str = "image-preview-open";
 const MEDIA_VIEWER_OPEN_EVENT: &str = "media-viewer-open";
 const CHAT_HISTORY_OPEN_EVENT: &str = "chat-history-open";
 const GROUP_ANNOUNCEMENT_OPEN_EVENT: &str = "group-announcement-open";
+const DRIVE_OPEN_EVENT: &str = "drive-open";
 const SCREENSHOT_OPEN_START_EVENT: &str = "screenshot-open-start";
 const SCREENSHOT_OPEN_EVENT: &str = "screenshot-open";
 
@@ -51,6 +53,8 @@ static LAST_GROUP_ANNOUNCEMENT_OPEN_PAYLOAD: OnceLock<
 static LAST_SCREENSHOT_OPEN_PAYLOAD: OnceLock<Mutex<Option<ScreenshotOpenPayload>>> =
     OnceLock::new();
 static LAST_MEDIA_VIEWER_OPEN_PAYLOAD: OnceLock<Mutex<Option<MediaViewerOpenPayload>>> =
+    OnceLock::new();
+static LAST_DRIVE_OPEN_PAYLOAD: OnceLock<Mutex<Option<DriveOpenPayload>>> =
     OnceLock::new();
 
 #[derive(Clone, Serialize)]
@@ -145,6 +149,15 @@ pub struct GroupAnnouncementOpenPayload {
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DriveOpenPayload {
+    mode: String,
+    group_id: Option<String>,
+    title: Option<String>,
+    can_manage: Option<bool>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScreenshotOpenOptions {
     hide_current_window: Option<bool>,
 }
@@ -229,6 +242,25 @@ pub fn open_group_announcement_window(
         .emit(GROUP_ANNOUNCEMENT_OPEN_EVENT, payload)
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn open_drive_window(app: AppHandle, payload: DriveOpenPayload) -> Result<(), String> {
+    set_last_drive_open_payload(payload.clone())?;
+    let window = ensure_drive_window(&app)?;
+    window
+        .set_title(payload.title.as_deref().unwrap_or("网盘"))
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit_to(DRIVE_WINDOW_LABEL, DRIVE_OPEN_EVENT, payload.clone());
+    window
+        .emit(DRIVE_OPEN_EVENT, payload)
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_drive_open_payload() -> Result<Option<DriveOpenPayload>, String> {
+    get_last_drive_open_payload()
 }
 
 #[tauri::command]
@@ -500,6 +532,7 @@ pub fn create_hidden_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
     create_friend_request_window(app)?;
     create_image_preview_window(app)?;
     create_media_viewer_window(app)?;
+    create_drive_window(app)?;
     create_screenshot_window(app)?;
     Ok(())
 }
@@ -521,6 +554,7 @@ pub fn hide_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
         FRIEND_REQUEST_WINDOW_LABEL,
         IMAGE_PREVIEW_WINDOW_LABEL,
         MEDIA_VIEWER_WINDOW_LABEL,
+        DRIVE_WINDOW_LABEL,
         SCREENSHOT_WINDOW_LABEL,
     ] {
         if let Some(window) = app.get_webview_window(label) {
@@ -642,6 +676,10 @@ pub fn ensure_media_viewer_window(app: &AppHandle) -> Result<WebviewWindow, Stri
     )
 }
 
+pub fn ensure_drive_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    show_existing_or_create(app, DRIVE_WINDOW_LABEL, create_drive_window)
+}
+
 pub fn show_auth_window_if_hidden(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(AUTH_WINDOW_LABEL) {
         if window.is_visible().map_err(|error| error.to_string())? {
@@ -697,6 +735,19 @@ fn set_last_media_viewer_open_payload(payload: MediaViewerOpenPayload) -> Result
 
 fn get_last_media_viewer_open_payload() -> Result<Option<MediaViewerOpenPayload>, String> {
     let store = LAST_MEDIA_VIEWER_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
+    let guard = store.lock().map_err(|error| error.to_string())?;
+    Ok(guard.clone())
+}
+
+fn set_last_drive_open_payload(payload: DriveOpenPayload) -> Result<(), String> {
+    let store = LAST_DRIVE_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
+    let mut guard = store.lock().map_err(|error| error.to_string())?;
+    *guard = Some(payload);
+    Ok(())
+}
+
+fn get_last_drive_open_payload() -> Result<Option<DriveOpenPayload>, String> {
+    let store = LAST_DRIVE_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
     let guard = store.lock().map_err(|error| error.to_string())?;
     Ok(guard.clone())
 }
@@ -1269,6 +1320,41 @@ fn create_media_viewer_window(app: &AppHandle) -> Result<WebviewWindow, String> 
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
             let _ = viewer_window.hide();
+        }
+    });
+
+    Ok(window)
+}
+
+fn create_drive_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(DRIVE_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        DRIVE_WINDOW_LABEL,
+        WebviewUrl::App("index.html?window=drive#drive".into()),
+    )
+    .title("网盘")
+    .devtools(false)
+    .decorations(true)
+    .transparent(false)
+    .resizable(true)
+    .minimizable(true)
+    .maximizable(true)
+    .skip_taskbar(false)
+    .visible(false)
+    .inner_size(920.0, 680.0)
+    .min_inner_size(720.0, 520.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let drive_window = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = drive_window.hide();
         }
     });
 
