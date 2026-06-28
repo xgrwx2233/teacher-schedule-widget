@@ -41,8 +41,20 @@ export function messagePreview(message: ChatMessage): string {
   if (message.kind === "video") {
     return "[视频]";
   }
+  if ((message.kind as ChatMessageKind) === "voice") {
+    const duration =
+      numberFromUnknown(message.contentJson?.durationSeconds) ??
+      numberFromUnknown(message.contentJson?.duration);
+    return duration ? `[语音] ${Math.round(duration)}"` : message.content || "[语音]";
+  }
   if (message.kind === "sticker") {
     return "[表情]";
+  }
+  if ((message.kind as ChatMessageKind) === "voice") {
+    const duration =
+      numberFromUnknown(message.contentJson?.durationSeconds) ??
+      numberFromUnknown(message.contentJson?.duration);
+    return duration ? `[语音] ${Math.round(duration)}"` : message.content || "[语音]";
   }
   if (message.kind === "file") {
     return `[文件] ${fileNameFromMessage(message, "文件")}`;
@@ -215,6 +227,9 @@ export function contentTypeFromFilename(fileName: string, fallback: string): str
 export function fileTypeFromMessage(
   message: ChatMessage,
 ): "image" | "video" | "file" | "sticker" | null {
+  if (message.kind === "voice") {
+    return "file";
+  }
   if (
     message.kind === "image" ||
     message.kind === "video" ||
@@ -544,13 +559,18 @@ export function quoteMetaFromMessage(
     previewText: quotePrimaryPreview(message),
     thumbnailUrl: quoteThumbnailUrl(message),
     fileObjectId:
-      message.kind === "image" || message.kind === "sticker"
+      message.kind === "image" || message.kind === "sticker" || message.kind === "voice"
         ? fileObjectIdFromMessage(message) || null
         : null,
     fileName:
       message.kind === "file" ? fileNameFromMessage(message, "文件") : null,
-    fileSize: message.kind === "file" ? sizeBytesFromMessage(message) : null,
-    duration: numberFromUnknown(message.contentJson?.duration),
+    fileSize:
+      message.kind === "file" || message.kind === "voice"
+        ? sizeBytesFromMessage(message)
+        : null,
+    duration:
+      numberFromUnknown(message.contentJson?.durationSeconds) ??
+      numberFromUnknown(message.contentJson?.duration),
     isRevoked: message.status === "revoked",
     quotedCreatedAt: message.createdAt ?? null,
   };

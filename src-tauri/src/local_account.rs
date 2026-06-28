@@ -20,10 +20,7 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use windows::{
     core::PCWSTR,
-    Win32::{
-        Foundation::HWND,
-        UI::Shell::ShellExecuteW,
-    },
+    Win32::{Foundation::HWND, UI::Shell::ShellExecuteW},
 };
 
 const DEFAULT_USER_ID: &str = "default_local";
@@ -357,7 +354,10 @@ pub fn search_chat_history_messages(
         around_seq.unwrap_or(0),
         limit.unwrap_or(80).clamp(1, 200)
     );
-    if let Some(value) = date_from.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(value) = date_from
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         path.push_str("&dateFrom=");
         path.push_str(&urlencoding::encode(value));
     }
@@ -385,7 +385,10 @@ pub fn send_chat_message(
     let token = session_token(&conn, &owner_user_id)?;
     let device_id = sync_client_id(&conn)?;
     cloud_post_json(
-        &format!("/chat/messages?clientId={}", urlencoding::encode(&device_id)),
+        &format!(
+            "/chat/messages?clientId={}",
+            urlencoding::encode(&device_id)
+        ),
         &token,
         json!({
             "conversationId": conversation_id,
@@ -638,10 +641,7 @@ pub fn update_my_chat_group_member(
     let owner_user_id = active_user_id(&conn)?;
     let token = session_token(&conn, &owner_user_id)?;
     cloud_patch_json(
-        &format!(
-            "/chat/groups/{}/members/me",
-            urlencoding::encode(&group_id)
-        ),
+        &format!("/chat/groups/{}/members/me", urlencoding::encode(&group_id)),
         &token,
         json!({
             "groupNickname": group_nickname,
@@ -742,10 +742,7 @@ pub fn create_chat_group_invite(
     let owner_user_id = active_user_id(&conn)?;
     let token = session_token(&conn, &owner_user_id)?;
     cloud_post_json(
-        &format!(
-            "/chat/groups/{}/invites",
-            urlencoding::encode(&group_id)
-        ),
+        &format!("/chat/groups/{}/invites", urlencoding::encode(&group_id)),
         &token,
         json!({
             "scene": scene.unwrap_or_else(|| "qr_modal".to_string()),
@@ -777,7 +774,10 @@ pub fn apply_chat_group_invite(
     let owner_user_id = active_user_id(&conn)?;
     let token = session_token(&conn, &owner_user_id)?;
     cloud_post_json(
-        &format!("/chat/group-invites/{}/apply", urlencoding::encode(&invite_token)),
+        &format!(
+            "/chat/group-invites/{}/apply",
+            urlencoding::encode(&invite_token)
+        ),
         &token,
         json!({
             "reason": reason,
@@ -905,7 +905,10 @@ pub fn mark_chat_conversation_read(
     let owner_user_id = active_user_id(&conn)?;
     let token = session_token(&conn, &owner_user_id)?;
     cloud_post_json(
-        &format!("/chat/conversations/{}/read", urlencoding::encode(&conversation_id)),
+        &format!(
+            "/chat/conversations/{}/read",
+            urlencoding::encode(&conversation_id)
+        ),
         &token,
         json!({
             "conversationSeq": conversation_seq,
@@ -983,7 +986,10 @@ pub fn archive_chat_conversation(app: AppHandle, conversation_id: String) -> Res
     let owner_user_id = active_user_id(&conn)?;
     let token = session_token(&conn, &owner_user_id)?;
     cloud_post_json(
-        &format!("/chat/conversations/{}/archive", urlencoding::encode(&conversation_id)),
+        &format!(
+            "/chat/conversations/{}/archive",
+            urlencoding::encode(&conversation_id)
+        ),
         &token,
         json!({}),
     )
@@ -1159,11 +1165,19 @@ pub fn reupload_cached_chat_file(
 }
 
 #[tauri::command]
-pub fn pick_chat_upload_files(kind: Option<String>, multiple: Option<bool>) -> Result<Value, String> {
+pub fn pick_chat_upload_files(
+    kind: Option<String>,
+    multiple: Option<bool>,
+) -> Result<Value, String> {
     let upload_kind = kind.unwrap_or_else(|| "file".to_string());
     let mut dialog = rfd::FileDialog::new().set_title("选择要发送的文件");
     dialog = match upload_kind.as_str() {
-        "media" => dialog.add_filter("图片和视频", &["png", "jpg", "jpeg", "webp", "gif", "bmp", "mp4", "mov", "webm", "avi", "mkv"]),
+        "media" => dialog.add_filter(
+            "图片和视频",
+            &[
+                "png", "jpg", "jpeg", "webp", "gif", "bmp", "mp4", "mov", "webm", "avi", "mkv",
+            ],
+        ),
         "image" => dialog.add_filter("图片", &["png", "jpg", "jpeg", "webp", "gif", "bmp"]),
         "video" => dialog.add_filter("视频", &["mp4", "mov", "webm", "avi", "mkv"]),
         _ => dialog,
@@ -1171,7 +1185,10 @@ pub fn pick_chat_upload_files(kind: Option<String>, multiple: Option<bool>) -> R
     let paths = if multiple.unwrap_or(true) {
         dialog.pick_files().unwrap_or_default()
     } else {
-        dialog.pick_file().map(|path| vec![path]).unwrap_or_default()
+        dialog
+            .pick_file()
+            .map(|path| vec![path])
+            .unwrap_or_default()
     };
     let files: Vec<PickedLocalFile> = paths
         .into_iter()
@@ -1249,8 +1266,9 @@ fn upload_chat_file_path_chunked_blocking(
         .unwrap_or("file")
         .to_string();
     let sha256 = sha256_file(&path)?;
-    let requested_chunk_size =
-        chunk_size.unwrap_or(4 * 1024 * 1024).clamp(512 * 1024, 16 * 1024 * 1024);
+    let requested_chunk_size = chunk_size
+        .unwrap_or(4 * 1024 * 1024)
+        .clamp(512 * 1024, 16 * 1024 * 1024);
 
     let conn = open_db(&app)?;
     ensure_default_user(&conn)?;
@@ -1283,7 +1301,11 @@ fn upload_chat_file_path_chunked_blocking(
         .get("upload")
         .and_then(Value::as_object)
         .ok_or_else(|| "missing upload session".to_string())?;
-    if upload.get("instant").and_then(Value::as_bool).unwrap_or(false) {
+    if upload
+        .get("instant")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         unregister_transfer_control(&task_id);
         emit_transfer_event(
             &app,
@@ -1383,7 +1405,10 @@ fn upload_chat_file_path_chunked_blocking(
         );
     }
     let completed = cloud_post_json(
-        &format!("/files/upload-sessions/{}/complete", urlencoding::encode(&upload_id)),
+        &format!(
+            "/files/upload-sessions/{}/complete",
+            urlencoding::encode(&upload_id)
+        ),
         &token,
         json!({}),
     );
@@ -1472,7 +1497,12 @@ fn get_chat_file_signed_url_blocking(
     let owner_user_id = active_user_id(&conn)?;
     let token = session_token(&conn, &owner_user_id)?;
     cloud_get_json(
-        &signed_url_path(&file_object_id, source.as_deref(), message_id.as_deref(), drive_node_id.as_deref()),
+        &signed_url_path(
+            &file_object_id,
+            source.as_deref(),
+            message_id.as_deref(),
+            drive_node_id.as_deref(),
+        ),
         &token,
     )
 }
@@ -1559,7 +1589,14 @@ pub async fn cache_resolved_media_file(
     );
     tauri::async_runtime::spawn_blocking(move || {
         let started_at = Instant::now();
-        let result = cache_resolved_media_file_blocking(app, file_object_id, file_name, action, source, source_id);
+        let result = cache_resolved_media_file_blocking(
+            app,
+            file_object_id,
+            file_name,
+            action,
+            source,
+            source_id,
+        );
         match &result {
             Ok(value) => println!(
                 "[media-rust] cache_resolved_media_file command end elapsedMs={} path={}",
@@ -1597,7 +1634,7 @@ fn cache_resolved_media_file_blocking(
         app.clone(),
         action,
         source,
-        source_id,
+        source_id.clone(),
         file_object_id.clone(),
     )?;
     let status = resolved
@@ -1629,12 +1666,27 @@ fn cache_resolved_media_file_blocking(
             path.to_string_lossy()
         );
     }
+    if let Ok(conn) = open_db(&app) {
+        if let Ok(owner_user_id) = active_user_id(&conn) {
+            let _ = remember_local_file_candidate_for_user(
+                &conn,
+                &owner_user_id,
+                &file_object_id,
+                Some(&source_id),
+                "local_preview_cache",
+                &path.to_string_lossy(),
+            );
+        }
+    }
     Ok(json!({ "path": path.to_string_lossy(), "access": resolved }))
 }
 
 #[tauri::command]
 pub fn validate_local_media_file(path: String) -> Result<Value, String> {
-    println!("[media-rust] validate_local_media_file command start path={}", path);
+    println!(
+        "[media-rust] validate_local_media_file command start path={}",
+        path
+    );
     let candidate = PathBuf::from(path.trim());
     if candidate.as_os_str().is_empty() {
         eprintln!("[media-rust] validate_local_media_file command error missing path");
@@ -1705,13 +1757,23 @@ pub async fn download_chat_file(
     );
     tauri::async_runtime::spawn_blocking(move || {
         let started_at = Instant::now();
-        let result = download_chat_file_blocking(app, file_object_id, file_name, source, message_id, drive_node_id);
+        let result = download_chat_file_blocking(
+            app,
+            file_object_id,
+            file_name,
+            source,
+            message_id,
+            drive_node_id,
+        );
         match &result {
             Ok(value) => println!(
                 "[media-rust] download_chat_file command end elapsedMs={} path={} cancelled={}",
                 started_at.elapsed().as_millis(),
                 value.get("path").and_then(Value::as_str).unwrap_or(""),
-                value.get("cancelled").and_then(Value::as_bool).unwrap_or(false)
+                value
+                    .get("cancelled")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
             ),
             Err(error) => eprintln!(
                 "[media-rust] download_chat_file command error elapsedMs={} error={}",
@@ -1757,6 +1819,18 @@ fn download_chat_file_blocking(
         message_id.as_deref(),
         drive_node_id.as_deref(),
     )?;
+    if let Ok(conn) = open_db(&app) {
+        if let Ok(owner_user_id) = active_user_id(&conn) {
+            let _ = remember_local_file_candidate_for_user(
+                &conn,
+                &owner_user_id,
+                &file_object_id,
+                drive_node_id.as_deref(),
+                "local_download",
+                &target.to_string_lossy(),
+            );
+        }
+    }
     Ok(json!({ "path": target.to_string_lossy(), "cancelled": false }))
 }
 
@@ -1770,7 +1844,14 @@ pub async fn cache_chat_file(
     drive_node_id: Option<String>,
 ) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        cache_chat_file_blocking(app, file_object_id, file_name, source, message_id, drive_node_id)
+        cache_chat_file_blocking(
+            app,
+            file_object_id,
+            file_name,
+            source,
+            message_id,
+            drive_node_id,
+        )
     })
     .await
     .map_err(|error| format!("chat file cache task failed: {error}"))?
@@ -1798,6 +1879,18 @@ fn cache_chat_file_blocking(
             drive_node_id.as_deref(),
         )?;
     }
+    if let Ok(conn) = open_db(&app) {
+        if let Ok(owner_user_id) = active_user_id(&conn) {
+            let _ = remember_local_file_candidate_for_user(
+                &conn,
+                &owner_user_id,
+                &file_object_id,
+                drive_node_id.as_deref(),
+                "local_preview_cache",
+                &path.to_string_lossy(),
+            );
+        }
+    }
     Ok(json!({ "path": path.to_string_lossy() }))
 }
 
@@ -1811,7 +1904,14 @@ pub async fn open_cached_chat_file(
     drive_node_id: Option<String>,
 ) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        open_cached_chat_file_blocking(app, file_object_id, file_name, source, message_id, drive_node_id)
+        open_cached_chat_file_blocking(
+            app,
+            file_object_id,
+            file_name,
+            source,
+            message_id,
+            drive_node_id,
+        )
     })
     .await
     .map_err(|error| format!("open cached file task failed: {error}"))?
@@ -1825,7 +1925,14 @@ fn open_cached_chat_file_blocking(
     message_id: Option<String>,
     drive_node_id: Option<String>,
 ) -> Result<Value, String> {
-    let cached = cache_chat_file_blocking(app, file_object_id, file_name, source, message_id, drive_node_id)?;
+    let cached = cache_chat_file_blocking(
+        app,
+        file_object_id,
+        file_name,
+        source,
+        message_id,
+        drive_node_id,
+    )?;
     let path = cached
         .get("path")
         .and_then(Value::as_str)
@@ -1833,6 +1940,121 @@ fn open_cached_chat_file_blocking(
         .ok_or_else(|| "missing cached file path".to_string())?;
     open_path_with_default_app(Path::new(path))?;
     Ok(json!({ "path": path }))
+}
+
+#[tauri::command]
+pub fn remember_local_file_candidate(
+    app: AppHandle,
+    file_object_id: String,
+    drive_node_id: Option<String>,
+    source_type: String,
+    local_path: String,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    remember_local_file_candidate_for_user(
+        &conn,
+        &owner_user_id,
+        &file_object_id,
+        drive_node_id.as_deref(),
+        &source_type,
+        &local_path,
+    )?;
+    Ok(json!({ "ok": true }))
+}
+
+#[tauri::command]
+pub fn list_local_file_candidates(
+    app: AppHandle,
+    file_object_id: String,
+    drive_node_id: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let candidates = list_local_file_candidates_for_user(
+        &conn,
+        &owner_user_id,
+        &file_object_id,
+        drive_node_id.as_deref(),
+    )?;
+    Ok(json!({ "candidates": candidates }))
+}
+
+#[tauri::command]
+pub async fn open_chat_file_local_first(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_chat_file_local_first_blocking(
+            app,
+            file_object_id,
+            file_name,
+            source,
+            message_id,
+            drive_node_id,
+        )
+    })
+    .await
+    .map_err(|error| format!("open local-first file task failed: {error}"))?
+}
+
+fn open_chat_file_local_first_blocking(
+    app: AppHandle,
+    file_object_id: String,
+    file_name: String,
+    source: Option<String>,
+    message_id: Option<String>,
+    drive_node_id: Option<String>,
+) -> Result<Value, String> {
+    let conn = open_db(&app)?;
+    ensure_default_user(&conn)?;
+    let owner_user_id = active_user_id(&conn)?;
+    let candidates = list_local_file_candidates_for_user(
+        &conn,
+        &owner_user_id,
+        &file_object_id,
+        drive_node_id.as_deref(),
+    )?;
+    drop(conn);
+
+    for candidate in candidates {
+        if let Some(path) = candidate.get("path").and_then(Value::as_str) {
+            let local_path = Path::new(path);
+            if local_path.is_file() {
+                open_path_with_default_app(local_path)?;
+                return Ok(json!({
+                    "path": path,
+                    "sourceType": candidate
+                        .get("sourceType")
+                        .and_then(Value::as_str)
+                        .unwrap_or("local_original")
+                }));
+            }
+        }
+    }
+
+    let cached = cache_chat_file_blocking(
+        app,
+        file_object_id,
+        file_name,
+        source,
+        message_id,
+        drive_node_id,
+    )?;
+    let path = cached
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "missing cached file path".to_string())?;
+    open_path_with_default_app(Path::new(path))?;
+    Ok(json!({ "path": path, "sourceType": "local_preview_cache" }))
 }
 
 #[tauri::command]
@@ -1858,7 +2080,10 @@ pub fn list_drive_nodes(
         path.push_str("&groupId=");
         path.push_str(&urlencoding::encode(value));
     }
-    if let Some(value) = parent_id.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(value) = parent_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         path.push_str("&parentId=");
         path.push_str(&urlencoding::encode(value));
     }
@@ -1963,10 +2188,7 @@ fn download_chat_file_to_path(
     let token = session_token(&conn, &owner_user_id)?;
     let signed_path = signed_url_path(file_object_id, source, message_id, drive_node_id);
     println!("[media-rust] download_chat_file_to_path signed-url request path={signed_path}");
-    let signed = cloud_get_json(
-        &signed_path,
-        &token,
-    )?;
+    let signed = cloud_get_json(&signed_path, &token)?;
     let url = signed
         .get("url")
         .and_then(Value::as_str)
@@ -1995,7 +2217,10 @@ fn signed_url_path(
         path.push_str("&messageId=");
         path.push_str(&urlencoding::encode(value));
     }
-    if let Some(value) = drive_node_id.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(value) = drive_node_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         path.push_str("&driveNodeId=");
         path.push_str(&urlencoding::encode(value));
     }
@@ -2003,7 +2228,11 @@ fn signed_url_path(
     path
 }
 
-fn media_cache_path(app: &AppHandle, file_object_id: &str, file_name: &str) -> Result<PathBuf, String> {
+fn media_cache_path(
+    app: &AppHandle,
+    file_object_id: &str,
+    file_name: &str,
+) -> Result<PathBuf, String> {
     let filename = safe_download_filename(file_name);
     let extension = Path::new(&filename)
         .extension()
@@ -2910,7 +3139,11 @@ fn unique_download_path(dir: &Path, filename: &str) -> PathBuf {
 }
 
 fn avatar_extension(value: &str) -> &'static str {
-    let path = value.split('?').next().unwrap_or(value).to_ascii_lowercase();
+    let path = value
+        .split('?')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_lowercase();
     if path.ends_with(".png") {
         "png"
     } else if path.ends_with(".webp") {
@@ -3129,6 +3362,15 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
           server_seq INTEGER NOT NULL,
           processed_at TEXT NOT NULL,
           PRIMARY KEY (owner_user_id, client_id, server_seq)
+        );
+        CREATE TABLE IF NOT EXISTS local_file_candidates (
+          owner_user_id TEXT NOT NULL,
+          file_object_id TEXT NOT NULL,
+          drive_node_id TEXT,
+          source_type TEXT NOT NULL,
+          local_path TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (owner_user_id, file_object_id, source_type, local_path)
         );
         INSERT OR IGNORE INTO app_meta (key, value) VALUES ('dataSchemaVersion', '1');
         INSERT OR IGNORE INTO app_meta (key, value) VALUES ('syncProtocolVersion', '1');
@@ -3568,6 +3810,104 @@ fn clear_session_token(conn: &Connection, user_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn remember_local_file_candidate_for_user(
+    conn: &Connection,
+    owner_user_id: &str,
+    file_object_id: &str,
+    drive_node_id: Option<&str>,
+    source_type: &str,
+    local_path: &str,
+) -> Result<(), String> {
+    let file_object_id = file_object_id.trim();
+    let source_type = source_type.trim();
+    let local_path = local_path.trim();
+    if file_object_id.is_empty() || source_type.is_empty() || local_path.is_empty() {
+        return Ok(());
+    }
+    let drive_node_id = drive_node_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let now = now_string();
+    conn.execute(
+        "INSERT INTO local_file_candidates
+           (owner_user_id, file_object_id, drive_node_id, source_type, local_path, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(owner_user_id, file_object_id, source_type, local_path)
+         DO UPDATE SET drive_node_id = excluded.drive_node_id, updated_at = excluded.updated_at",
+        params![
+            owner_user_id,
+            file_object_id,
+            drive_node_id,
+            source_type,
+            local_path,
+            now
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn list_local_file_candidates_for_user(
+    conn: &Connection,
+    owner_user_id: &str,
+    file_object_id: &str,
+    drive_node_id: Option<&str>,
+) -> Result<Vec<Value>, String> {
+    let file_object_id = file_object_id.trim();
+    if file_object_id.is_empty() {
+        return Ok(Vec::new());
+    }
+    let drive_node_id = drive_node_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let mut statement = conn
+        .prepare(
+            "SELECT drive_node_id, source_type, local_path, updated_at
+             FROM local_file_candidates
+             WHERE owner_user_id = ?1
+               AND file_object_id = ?2
+               AND (?3 IS NULL OR drive_node_id IS NULL OR drive_node_id = ?3)
+             ORDER BY
+               CASE source_type
+                 WHEN 'local_download' THEN 0
+                 WHEN 'local_original' THEN 1
+                 WHEN 'local_preview_cache' THEN 2
+                 ELSE 3
+               END,
+               updated_at DESC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(
+            params![owner_user_id, file_object_id, drive_node_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .map_err(|error| error.to_string())?;
+
+    let mut candidates = Vec::new();
+    for row in rows {
+        let (drive_node_id, source_type, path, updated_at) =
+            row.map_err(|error| error.to_string())?;
+        if !Path::new(&path).is_file() {
+            continue;
+        }
+        candidates.push(json!({
+            "path": path,
+            "sourceType": source_type,
+            "driveNodeId": drive_node_id,
+            "updatedAt": updated_at,
+        }));
+    }
+    Ok(candidates)
+}
+
 fn upsert_sync_meta_cloud_user(
     conn: &Connection,
     owner_user_id: &str,
@@ -3973,12 +4313,7 @@ async fn run_blocking_apply_pushed_change(
     }
 }
 
-async fn run_chat_realtime_loop(
-    app: AppHandle,
-    token: String,
-    device_id: String,
-    generation: u64,
-) {
+async fn run_chat_realtime_loop(app: AppHandle, token: String, device_id: String, generation: u64) {
     use futures_util::StreamExt;
     use tokio_tungstenite::{connect_async, tungstenite::Message};
 

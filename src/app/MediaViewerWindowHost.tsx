@@ -168,7 +168,10 @@ export function MediaViewerWindowHost() {
     let disposed = false;
     let unlisten: (() => void) | null = null;
     let unlistenFullscreen: (() => void) | null = null;
+    let unlistenCloseRequested: (() => void) | null = null;
+    let unlistenFocusChanged: (() => void) | null = null;
     async function bind() {
+      const currentWindow = getCurrentWindow();
       invoke<MediaViewerOpenPayload | null>("get_media_viewer_open_payload")
         .then((payload) => {
           if (!disposed && payload) {
@@ -182,15 +185,15 @@ export function MediaViewerWindowHost() {
         }
         applyOpenPayload(event.payload);
       });
-      getCurrentWindow().isFullscreen()
+      currentWindow.isFullscreen()
         .then((fullscreen) => {
           if (!disposed) {
             setIsFullscreen(fullscreen);
           }
         })
         .catch(() => undefined);
-      unlistenFullscreen = await getCurrentWindow().onResized(() => {
-        getCurrentWindow().isFullscreen()
+      unlistenFullscreen = await currentWindow.onResized(() => {
+        currentWindow.isFullscreen()
           .then((fullscreen) => {
             if (!disposed) {
               setIsFullscreen(fullscreen);
@@ -198,12 +201,40 @@ export function MediaViewerWindowHost() {
           })
           .catch(() => undefined);
       });
+      unlistenCloseRequested = await currentWindow.onCloseRequested(() => {
+        stopVideoPlayback();
+      });
+      unlistenFocusChanged = await currentWindow.onFocusChanged(({ payload }) => {
+        if (!payload) {
+          window.setTimeout(() => {
+            currentWindow.isVisible()
+              .then((visible) => {
+                if (!visible) {
+                  stopVideoPlayback();
+                }
+              })
+              .catch(() => undefined);
+          }, 80);
+        }
+      });
     }
+    const handleDocumentVisibility = () => {
+      if (document.hidden) {
+        stopVideoPlayback();
+      }
+    };
+    window.addEventListener("pagehide", stopVideoPlayback);
+    document.addEventListener("visibilitychange", handleDocumentVisibility);
     void bind();
     return () => {
       disposed = true;
+      stopVideoPlayback();
       unlisten?.();
       unlistenFullscreen?.();
+      unlistenCloseRequested?.();
+      unlistenFocusChanged?.();
+      window.removeEventListener("pagehide", stopVideoPlayback);
+      document.removeEventListener("visibilitychange", handleDocumentVisibility);
       clearHideTimer();
     };
   }, []);
@@ -426,6 +457,14 @@ export function MediaViewerWindowHost() {
     setVideoDuration(0);
   };
 
+  const stopVideoPlayback = () => {
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+    }
+    setVideoPlaying(false);
+  };
+
   const selectByOffset = (offset: number) => {
     const nextIndex = activeIndex + offset;
     if (nextIndex < 0 || nextIndex >= mediaList.length) {
@@ -440,6 +479,7 @@ export function MediaViewerWindowHost() {
   const runWindowAction = (action: "minimize" | "toggleMaximize" | "close") => {
     const currentWindow = getCurrentWindow();
     if (action === "minimize") {
+      stopVideoPlayback();
       void currentWindow.minimize();
       return;
     }
@@ -447,6 +487,7 @@ export function MediaViewerWindowHost() {
       void currentWindow.toggleMaximize();
       return;
     }
+    stopVideoPlayback();
     void currentWindow.close();
   };
 

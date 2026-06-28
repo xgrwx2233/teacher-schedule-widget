@@ -1,4 +1,5 @@
 mod app_state;
+mod commands;
 mod config_store;
 mod desktop_icons;
 mod desktop_layer;
@@ -81,15 +82,11 @@ pub fn run() {
             settings_windows::open_image_preview_window,
             settings_windows::open_media_viewer_window,
             settings_windows::get_media_viewer_open_payload,
-            settings_windows::open_screenshot_window,
-            settings_windows::get_screenshot_open_payload,
-            settings_windows::hide_screenshot_window,
             settings_windows::hide_auth_window,
             settings_windows::toggle_auth_window,
-            screenshot_tool::capture_screenshot_screen,
-            screenshot_tool::save_screenshot_png,
+            commands::screenshot::capture_region_interactive,
+            commands::screenshot::capture_region,
             screenshot_tool::save_group_share_poster_png,
-            screenshot_tool::copy_screenshot_png_to_clipboard,
             local_account::load_local_account_state,
             local_account::load_local_sync_status,
             local_account::manual_sync_current_user,
@@ -156,6 +153,9 @@ pub fn run() {
             local_account::download_chat_file,
             local_account::cache_chat_file,
             local_account::open_cached_chat_file,
+            local_account::remember_local_file_candidate,
+            local_account::list_local_file_candidates,
+            local_account::open_chat_file_local_first,
             local_account::list_drive_nodes,
             local_account::create_drive_folder,
             local_account::save_file_to_drive,

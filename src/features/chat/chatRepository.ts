@@ -491,6 +491,50 @@ export async function openCachedChatFile(
   return response.path;
 }
 
+export async function rememberLocalFileCandidate(input: {
+  fileObjectId: string;
+  driveNodeId?: string | null;
+  sourceType: "local_download" | "local_original" | "local_preview_cache" | string;
+  localPath: string;
+}): Promise<void> {
+  await invoke("remember_local_file_candidate", {
+    fileObjectId: input.fileObjectId,
+    driveNodeId: input.driveNodeId ?? null,
+    sourceType: input.sourceType,
+    localPath: input.localPath,
+  });
+}
+
+export async function listLocalFileCandidates(input: {
+  fileObjectId: string;
+  driveNodeId?: string | null;
+}): Promise<Array<{ path: string; sourceType?: string | null }>> {
+  const response = await invoke<{
+    candidates: Array<{ path: string; sourceType?: string | null }>;
+  }>("list_local_file_candidates", {
+    fileObjectId: input.fileObjectId,
+    driveNodeId: input.driveNodeId ?? null,
+  });
+  return response.candidates;
+}
+
+export async function openChatFileLocalFirst(
+  fileObjectId: string,
+  fileName: string,
+  access?: ChatFileAccessSource,
+): Promise<{ path: string; sourceType?: string | null }> {
+  return invoke<{ path: string; sourceType?: string | null }>(
+    "open_chat_file_local_first",
+    {
+      fileObjectId,
+      fileName,
+      source: access?.source ?? "legacy",
+      messageId: access?.source === "chat" ? access.messageId : null,
+      driveNodeId: access?.source === "drive" ? access.driveNodeId : null,
+    },
+  );
+}
+
 export async function revokeChatMessage(messageId: string): Promise<ChatMessage> {
   const response = await invoke<{ message: ApiMessage }>("revoke_chat_message", {
     messageId,
@@ -1042,6 +1086,7 @@ function normalizeMessageKind(messageType: string, status?: string): ChatMessage
   if (
     messageType === "image" ||
     messageType === "video" ||
+    messageType === "voice" ||
     messageType === "file" ||
     messageType === "sticker" ||
     messageType === "system" ||

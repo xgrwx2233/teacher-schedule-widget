@@ -141,6 +141,8 @@ import type {
 } from "../../features/chat/types";
 import { FriendProfileView } from "../Profile/ProfileViews";
 import { RtcTestPanel } from "./RtcTestPanel";
+import { ScreenshotButton } from "../../features/screenshot/ScreenshotButton";
+import type { ScreenshotAttachment } from "../../features/screenshot/types";
 import BellIcon from "../../../images/bell.svg";
 import CameraIcon from "../../../images/camera.svg";
 import EllipsisIcon from "../../../images/ellipsis.svg";
@@ -210,6 +212,38 @@ type GroupConfirmState = {
 } | null;
 type GroupSettingsView = "main" | "profile";
 type QuotedMessage = QuoteMeta;
+type VoiceRecordState = "ready" | "recording" | "sending" | "canceled" | "failed";
+type SpeechRecognitionResultLike = {
+  isFinal: boolean;
+  0: {
+    transcript: string;
+  };
+};
+type SpeechRecognitionEventLike = Event & {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: SpeechRecognitionResultLike;
+  };
+};
+type SpeechRecognitionErrorEventLike = Event & {
+  error?: string;
+};
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+};
 type ForwardPickerState = {
   messageIds: string[];
 } | null;
@@ -377,6 +411,10 @@ const CHAT_COMPOSER_DEFAULT_HEIGHT = 158;
 const CHAT_COMPOSER_MIN_HEIGHT = 150;
 const CHAT_COMPOSER_MAX_HEIGHT = 360;
 const CHAT_MESSAGE_MIN_HEIGHT = 210;
+const VOICE_RECORD_MIN_SECONDS = 1;
+const VOICE_RECORD_MAX_SECONDS = 60;
+const VOICE_RECORD_READY_NOTICE =
+  "按住空格键说话，松开空格键发送。点击取消按钮取消。";
 const COMMON_EMOJIS = [
   "😀",
   "😃",
@@ -512,6 +550,9 @@ export function ChatWindow() {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [screenshotMenuOpen, setScreenshotMenuOpen] = useState(false);
   const [hideChatWhenScreenshot, setHideChatWhenScreenshot] = useState(false);
+  const [pendingImageAttachments, setPendingImageAttachments] = useState<
+    ScreenshotAttachment[]
+  >([]);
   const [chatListWidth, setChatListWidth] = useState(() =>
     readStoredLayoutNumber(
       CHAT_LIST_WIDTH_STORAGE_KEY,
@@ -570,6 +611,13 @@ export function ChatWindow() {
   const [rtcTestOpen, setRtcTestOpen] = useState(false);
   const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
   const [emojiPanelTab, setEmojiPanelTab] = useState<EmojiPanelTab>("emoji");
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [voiceRecordState, setVoiceRecordState] =
+    useState<VoiceRecordState>("ready");
+  const [voiceDuration, setVoiceDuration] = useState(0);
+  const [voiceNotice, setVoiceNotice] = useState(VOICE_RECORD_READY_NOTICE);
+  const [speechToTextActive, setSpeechToTextActive] = useState(false);
+  const [speechToTextNotice, setSpeechToTextNotice] = useState<string | null>(null);
   const [stickers, setStickers] = useState<ChatSticker[]>([]);
   const [stickerUploading, setStickerUploading] = useState(false);
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
@@ -676,6 +724,18 @@ export function ChatWindow() {
   const groupLoadingMapRef = useRef(groupLoadingMap);
   const hoverProfileShowTimerRef = useRef<number | null>(null);
   const hoverProfileHideTimerRef = useRef<number | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
+  const voiceStartTimeRef = useRef(0);
+  const voiceTimerRef = useRef<number | null>(null);
+  const voiceStopModeRef = useRef<"send" | "cancel" | null>(null);
+  const spacePressedRef = useRef(false);
+  const ignoreCurrentSpaceHoldRef = useRef(false);
+  const voiceObjectUrlsRef = useRef<Set<string>>(new Set());
+  const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const speechBaseDraftRef = useRef("");
+  const speechFinalTextRef = useRef("");
 
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
@@ -813,6 +873,80 @@ export function ChatWindow() {
       window.removeEventListener("pointerdown", closeOnOutsidePointerDown, true);
     };
   }, [emojiPanelOpen]);
+
+  useEffect(() => {
+    return () => {
+      speechRecognitionRef.current?.stop();
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.onstop = null;
+        recorder.stop();
+      }
+      if (voiceTimerRef.current !== null) {
+        window.clearInterval(voiceTimerRef.current);
+        voiceTimerRef.current = null;
+      }
+      voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+      voiceObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      voiceObjectUrlsRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!voiceMode) {
+      stopVoiceRecording("cancel");
+      ignoreCurrentSpaceHoldRef.current = false;
+      spacePressedRef.current = false;
+    }
+  }, [voiceMode]);
+
+  useEffect(() => {
+    if (voiceMode && speechToTextActive) {
+      stopSpeechToText();
+    }
+  }, [speechToTextActive, voiceMode]);
+
+  useEffect(() => {
+    if (!voiceMode) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      event.preventDefault();
+      spacePressedRef.current = true;
+      if (ignoreCurrentSpaceHoldRef.current) {
+        return;
+      }
+      void startVoiceRecording();
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== "Space") {
+        return;
+      }
+      event.preventDefault();
+      spacePressedRef.current = false;
+      if (ignoreCurrentSpaceHoldRef.current) {
+        ignoreCurrentSpaceHoldRef.current = false;
+        setVoiceRecordState("ready");
+        setVoiceDuration(0);
+        setVoiceNotice("按住空格键说话，松开空格键发送。点击取消按钮取消。");
+        return;
+      }
+      stopVoiceRecording("send");
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("keyup", handleKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("keyup", handleKeyUp, true);
+    };
+  }, [voiceMode]);
 
   useEffect(() => {
     if (!groupSettingsOpen && !directSettingsOpen) {
@@ -2675,10 +2809,25 @@ export function ChatWindow() {
               <ChatIcon name="camera" />
             </button>
             <div className="composer-tool-popover-wrap">
+              <ScreenshotButton
+                title={hideChatWhenScreenshot ? "截图（隐藏当前窗口）" : "截图"}
+                className={`composer-tool-main${screenshotMenuOpen ? " is-active" : ""}`}
+                onBeforeStart={prepareScreenshotTool}
+                onCaptured={addScreenshotAttachment}
+                onFinished={() => void restoreChatWindowAfterScreenshot()}
+                onError={(error) =>
+                  setDataSource((current) => ({
+                    ...current,
+                    error: `截图启动失败：${friendlyError(String(error))}`,
+                  }))
+                }
+              >
+                <ChatIcon name="scissors" />
+              </ScreenshotButton>
               <button
                 type="button"
-                title="截图"
-                className={screenshotMenuOpen ? "is-active" : ""}
+                title="截图设置"
+                className="composer-tool-secondary"
                 onClick={(event) => {
                   event.stopPropagation();
                   setScreenshotMenuOpen((open) => !open);
@@ -2687,16 +2836,13 @@ export function ChatWindow() {
                   setMoreMenuOpen(false);
                 }}
               >
-                <ChatIcon name="scissors" />
+                <span className="composer-tool-secondary-arrow" aria-hidden="true" />
               </button>
               {screenshotMenuOpen ? (
                 <div
                   className="chat-screenshot-menu"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <button type="button" onClick={openScreenshotTool}>
-                    截图
-                  </button>
                   <label>
                     <input
                       type="checkbox"
@@ -2710,7 +2856,12 @@ export function ChatWindow() {
                 </div>
               ) : null}
             </div>
-            <button type="button" title="语音">
+            <button
+              type="button"
+              title={voiceMode ? "退出语音" : "语音"}
+              className={voiceMode ? "is-active" : ""}
+              onClick={toggleVoiceMode}
+            >
               <ChatIcon name="mic" />
             </button>
             <button
@@ -2754,37 +2905,82 @@ export function ChatWindow() {
             />
           ) : null}
         </div>
-        <div className="composer-input-row">
+        <div
+          className={`composer-input-row ${speechToTextActive ? "is-transcribing" : ""} ${
+            voiceMode ? "is-voice-mode" : ""
+          }`}
+        >
           {quotedMessage ? (
             <ComposerQuotePreview
               quoteMeta={quotedMessage}
               onClear={() => setQuotedMessage(null)}
             />
           ) : null}
-          <textarea
-            ref={draftInputRef}
-            value={draft}
-            placeholder="输入消息..."
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape" && quotedMessage) {
-                event.preventDefault();
-                setQuotedMessage(null);
-                return;
-              }
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void sendMessage();
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="composer-send"
-            onClick={() => void sendMessage()}
-          >
-            发送
-          </button>
+          {pendingImageAttachments.length > 0 ? (
+            <PendingImageAttachmentStrip
+              attachments={pendingImageAttachments}
+              onRemove={removePendingImageAttachment}
+            />
+          ) : null}
+          {voiceMode ? (
+            <VoiceRecordPanel
+              state={voiceRecordState}
+              duration={voiceDuration}
+              notice={voiceNotice}
+              onCancel={() => stopVoiceRecording("cancel")}
+            />
+          ) : (
+            <>
+              <textarea
+                ref={draftInputRef}
+                value={draft}
+                placeholder={
+                  speechToTextActive
+                    ? "正在听写，说话内容会实时转成文字..."
+                    : "输入消息..."
+                }
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  if (speechToTextActive) {
+                    speechBaseDraftRef.current = event.target.value;
+                    speechFinalTextRef.current = "";
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && quotedMessage) {
+                    event.preventDefault();
+                    setQuotedMessage(null);
+                    return;
+                  }
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void sendMessage();
+                  }
+                }}
+              />
+              {speechToTextNotice ? (
+                <span className="composer-speech-status">{speechToTextNotice}</span>
+              ) : null}
+              <button
+                type="button"
+                className={`composer-speech-button ${
+                  speechToTextActive ? "is-active" : ""
+                }`}
+                title={speechToTextActive ? "停止听写" : "语音转文字"}
+                aria-label={speechToTextActive ? "停止听写" : "语音转文字"}
+                onClick={toggleSpeechToText}
+              >
+                <ChatIcon name="mic" />
+              </button>
+              <button
+                type="button"
+                className="composer-send"
+                onClick={() => void sendMessage()}
+              >
+                发送
+              </button>
+            </>
+          )}
         </div>
       </footer>
     </>
@@ -4268,8 +4464,24 @@ export function ChatWindow() {
 
   const sendMessage = async () => {
     const content = draft.trim();
-    if (!content || !activeConversation) {
+    if (!activeConversation) {
       return;
+    }
+    if (!content && pendingImageAttachments.length === 0) {
+      return;
+    }
+    if (speechToTextActive) {
+      stopSpeechToText();
+      setSpeechToTextNotice(null);
+    }
+
+    if (pendingImageAttachments.length > 0) {
+      const files = pendingImageAttachments.map(screenshotAttachmentToLocalUploadFile);
+      setPendingImageAttachments([]);
+      await sendLocalUploadFiles(files);
+      if (!content) {
+        return;
+      }
     }
 
     const quote = quotedMessage;
@@ -4342,6 +4554,398 @@ export function ChatWindow() {
       input.focus();
       input.setSelectionRange(nextCursor, nextCursor);
     });
+  };
+
+  const clearVoiceTimer = () => {
+    if (voiceTimerRef.current !== null) {
+      window.clearInterval(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+  };
+
+  const releaseVoiceStream = () => {
+    voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceStreamRef.current = null;
+  };
+
+  const resetVoicePanel = (notice = VOICE_RECORD_READY_NOTICE) => {
+    clearVoiceTimer();
+    setVoiceDuration(0);
+    setVoiceRecordState("ready");
+    setVoiceNotice(notice);
+  };
+
+  const pickVoiceMimeType = () => {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/wav",
+    ];
+    return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+  };
+
+  const voiceFileExtension = (contentType: string) => {
+    const normalized = normalizedVoiceContentType(contentType);
+    if (normalized.includes("mp4")) return "m4a";
+    if (normalized.includes("wav")) return "wav";
+    if (normalized.includes("ogg")) return "ogg";
+    return "webm";
+  };
+
+  const normalizedVoiceContentType = (contentType: string) =>
+    (contentType || "audio/webm").split(";", 1)[0].trim().toLowerCase() ||
+    "audio/webm";
+
+  const startVoiceRecording = async () => {
+    if (!voiceMode || mediaRecorderRef.current) {
+      return;
+    }
+    if (!activeConversation) {
+      setVoiceRecordState("failed");
+      setVoiceNotice("请先选择一个会话");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setVoiceRecordState("failed");
+      setVoiceNotice("当前环境不支持录音，请检查系统或 WebView 麦克风能力");
+      return;
+    }
+    try {
+      stopSpeechToText();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!voiceMode || !spacePressedRef.current || ignoreCurrentSpaceHoldRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const mimeType = pickVoiceMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      voiceStreamRef.current = stream;
+      voiceChunksRef.current = [];
+      voiceStopModeRef.current = null;
+      mediaRecorderRef.current = recorder;
+      voiceStartTimeRef.current = Date.now();
+      setVoiceDuration(0);
+      setVoiceRecordState("recording");
+      setVoiceNotice("正在录音，松开空格键发送");
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          voiceChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = () => {
+        const stopMode = voiceStopModeRef.current;
+        const durationSeconds = Math.max(
+          0,
+          (Date.now() - voiceStartTimeRef.current) / 1000,
+        );
+        const chunks = voiceChunksRef.current;
+        mediaRecorderRef.current = null;
+        voiceStopModeRef.current = null;
+        voiceChunksRef.current = [];
+        clearVoiceTimer();
+        releaseVoiceStream();
+        if (stopMode !== "send") {
+          resetVoicePanel("已取消本次录音");
+          return;
+        }
+        if (durationSeconds < VOICE_RECORD_MIN_SECONDS || chunks.length === 0) {
+          resetVoicePanel("说话时间太短");
+          return;
+        }
+        const type = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(chunks, { type });
+        void sendVoiceBlob(blob, durationSeconds, type);
+      };
+      recorder.start();
+      voiceTimerRef.current = window.setInterval(() => {
+        const elapsed = (Date.now() - voiceStartTimeRef.current) / 1000;
+        setVoiceDuration(elapsed);
+        if (elapsed >= VOICE_RECORD_MAX_SECONDS) {
+          stopVoiceRecording("send");
+        }
+      }, 160);
+    } catch (error) {
+      mediaRecorderRef.current = null;
+      clearVoiceTimer();
+      releaseVoiceStream();
+      setVoiceRecordState("failed");
+      const message = String(error);
+      setVoiceNotice(
+        message.includes("NotAllowed") || message.includes("Permission")
+          ? "无法使用麦克风，请检查权限"
+          : "录音失败，请重试",
+      );
+    }
+  };
+
+  const stopVoiceRecording = (mode: "send" | "cancel") => {
+    if (mode === "cancel") {
+      ignoreCurrentSpaceHoldRef.current = true;
+      spacePressedRef.current = false;
+    }
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) {
+      if (mode === "cancel") {
+        resetVoicePanel("已取消本次录音");
+      }
+      return;
+    }
+    voiceStopModeRef.current = mode;
+    if (mode === "cancel") {
+      setVoiceRecordState("canceled");
+      setVoiceNotice("已取消本次录音");
+    } else {
+      setVoiceRecordState("sending");
+      setVoiceNotice("正在发送语音...");
+    }
+    try {
+      recorder.stop();
+    } catch {
+      mediaRecorderRef.current = null;
+      clearVoiceTimer();
+      releaseVoiceStream();
+      if (mode === "cancel") {
+        resetVoicePanel("已取消本次录音");
+      }
+    }
+  };
+
+  const sendVoiceBlob = async (
+    blob: Blob,
+    durationSeconds: number,
+    contentType: string,
+  ) => {
+    const conversation = activeConversation;
+    if (!conversation) {
+      resetVoicePanel("请先选择一个会话");
+      return;
+    }
+    const normalizedContentType = normalizedVoiceContentType(
+      contentType || blob.type || "audio/webm",
+    );
+    const quote = quotedMessage;
+    const roundedDuration = Math.max(1, Math.round(durationSeconds));
+    const extension = voiceFileExtension(normalizedContentType);
+    const fileName = `voice-${Date.now()}.${extension}`;
+    const localUrl = URL.createObjectURL(blob);
+    voiceObjectUrlsRef.current.add(localUrl);
+    const localContentJson = withQuoteMeta(
+      {
+        fileName,
+        sizeBytes: blob.size,
+        contentType: normalizedContentType,
+        fileType: "file",
+        messageSubtype: "voice",
+        duration: roundedDuration,
+        durationSeconds: roundedDuration,
+        localUrl,
+        url: localUrl,
+      },
+      quote,
+    );
+    const localMessage = createLocalMessage(
+      "voice",
+      `[语音] ${roundedDuration}"`,
+      localContentJson,
+      null,
+      quote,
+    );
+    scheduleScrollToLatestSelfMessage(conversation.id);
+    setMessages((current) => [...current, localMessage]);
+    setConversations((current) =>
+      current.map((item) =>
+        item.id === conversation.id
+          ? {
+              ...item,
+              subtitle: messagePreview(localMessage),
+              timeLabel: localMessage.timeLabel ?? item.timeLabel,
+            }
+          : item,
+      ),
+    );
+    setQuotedMessage(null);
+
+    if (!dataSource.live) {
+      resetVoicePanel();
+      return;
+    }
+
+    const refreshId = chatRefreshSeqRef.current;
+    try {
+      const uploaded = await uploadChatFileBytes({
+        filename: fileName,
+        contentType: normalizedContentType,
+        bytes: await blobToNumberArray(blob),
+        fileType: "file",
+      });
+      const contentJson = withQuoteMeta(
+        {
+          ...fileContentJson(uploaded),
+          messageSubtype: "voice",
+          duration: roundedDuration,
+          durationSeconds: roundedDuration,
+          localUrl,
+          url: localUrl,
+        },
+        quote,
+      );
+      const saved = await postTypedChatMessage({
+        conversationId: conversation.id,
+        messageType: "voice",
+        content: `[语音] ${roundedDuration}"`,
+        contentJson,
+        quoteMeta: quote,
+        fileObjectId: uploaded.id,
+      });
+      if (refreshId !== chatRefreshSeqRef.current) {
+        return;
+      }
+      const displaySaved = {
+        ...saved,
+        direction: "outgoing" as const,
+        senderId: currentUserId,
+        contentJson: {
+          ...(saved.contentJson ?? {}),
+          localUrl,
+          url: localUrl,
+          duration: roundedDuration,
+          durationSeconds: roundedDuration,
+          messageSubtype: "voice",
+        },
+      };
+      setMessages((current) =>
+        current.map((item) => (item.id === localMessage.id ? displaySaved : item)),
+      );
+      setConversations((current) =>
+        current.map((item) =>
+          item.id === conversation.id
+            ? {
+                ...item,
+                subtitle: messagePreview(displaySaved),
+                timeLabel: displaySaved.timeLabel ?? item.timeLabel,
+              }
+            : item,
+        ),
+      );
+      resetVoicePanel();
+    } catch (error) {
+      if (refreshId !== chatRefreshSeqRef.current) {
+        return;
+      }
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === localMessage.id
+            ? {
+                ...item,
+                status: "failed",
+                contentJson: {
+                  ...(item.contentJson ?? {}),
+                  errorMessage: friendlyError(String(error)),
+                },
+              }
+            : item,
+        ),
+      );
+      setVoiceRecordState("failed");
+      setVoiceNotice("语音发送失败，请重试");
+      setDataSource((current) => ({ ...current, error: friendlyError(String(error)) }));
+    }
+  };
+
+  const toggleVoiceMode = () => {
+    if (voiceMode) {
+      stopVoiceRecording("cancel");
+      setVoiceMode(false);
+      return;
+    }
+    stopSpeechToText();
+    setEmojiPanelOpen(false);
+    setScreenshotMenuOpen(false);
+    setAddMenuOpen(false);
+    setMoreMenuOpen(false);
+    setVoiceMode(true);
+    resetVoicePanel();
+  };
+
+  const stopSpeechToText = () => {
+    const recognition = speechRecognitionRef.current;
+    speechRecognitionRef.current = null;
+    if (recognition) {
+      recognition.onend = null;
+      recognition.onerror = null;
+      recognition.onresult = null;
+      try {
+        recognition.stop();
+      } catch {}
+    }
+    setSpeechToTextActive(false);
+  };
+
+  const toggleSpeechToText = () => {
+    if (speechToTextActive) {
+      stopSpeechToText();
+      setSpeechToTextNotice("已停止听写，可继续编辑后发送");
+      draftInputRef.current?.focus();
+      return;
+    }
+    if (voiceMode) {
+      setSpeechToTextNotice("语音条模式下不能同时听写");
+      return;
+    }
+    const SpeechRecognition =
+      (window as SpeechRecognitionWindow).SpeechRecognition ??
+      (window as SpeechRecognitionWindow).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setSpeechToTextNotice("当前环境不支持实时语音转文字，可继续手动输入");
+      return;
+    }
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "zh-CN";
+      speechRecognitionRef.current = recognition;
+      speechBaseDraftRef.current = draft;
+      speechFinalTextRef.current = "";
+      recognition.onresult = (event) => {
+        let interimText = "";
+        let finalText = speechFinalTextRef.current;
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const result = event.results[index];
+          const transcript = result[0]?.transcript ?? "";
+          if (result.isFinal) {
+            finalText = `${finalText}${transcript}`;
+          } else {
+            interimText = `${interimText}${transcript}`;
+          }
+        }
+        speechFinalTextRef.current = finalText;
+        setDraft(
+          `${speechBaseDraftRef.current}${speechBaseDraftRef.current && (finalText || interimText) ? "\n" : ""}${finalText}${interimText}`,
+        );
+      };
+      recognition.onerror = (event) => {
+        setSpeechToTextNotice(
+          event.error === "not-allowed"
+            ? "无法使用麦克风，请检查权限"
+            : "识别失败，请重试",
+        );
+        stopSpeechToText();
+      };
+      recognition.onend = () => {
+        setSpeechToTextActive(false);
+      };
+      recognition.start();
+      setSpeechToTextActive(true);
+      setSpeechToTextNotice("语音转文字中");
+      window.requestAnimationFrame(() => draftInputRef.current?.focus());
+    } catch (error) {
+      setSpeechToTextNotice(friendlyError(String(error)) || "识别启动失败，请重试");
+      stopSpeechToText();
+    }
   };
 
   const sendAttachmentMessage = async (
@@ -5405,7 +6009,12 @@ export function ChatWindow() {
     });
   };
 
-  const openScreenshotTool = () => {
+  const prepareScreenshotTool = async () => {
+    if (!activeConversation) {
+      setScreenshotMenuOpen(false);
+      setDataSource((current) => ({ ...current, error: "请先选择一个会话" }));
+      return false;
+    }
     setScreenshotMenuOpen(false);
     setEmojiPanelOpen(false);
     setMoreMenuOpen(false);
@@ -5413,11 +6022,34 @@ export function ChatWindow() {
     setConversationMenu(null);
     setMessageMenu(null);
     setGroupMemberMenu(null);
-    void invoke("open_screenshot_window", {
-      options: { hideCurrentWindow: hideChatWhenScreenshot },
-    }).catch((error) => {
-      setDataSource((current) => ({ ...current, error: String(error) }));
-    });
+    setDataSource((current) => ({ ...current, error: null }));
+    if (hideChatWhenScreenshot) {
+      await getCurrentWindow().hide().catch(() => undefined);
+      await sleep(100);
+    } else {
+      await waitForAnimationFrame();
+    }
+    return true;
+  };
+
+  const restoreChatWindowAfterScreenshot = async () => {
+    if (!hideChatWhenScreenshot) {
+      return;
+    }
+    const currentWindow = getCurrentWindow();
+    await currentWindow.show().catch(() => undefined);
+    await currentWindow.setFocus().catch(() => undefined);
+  };
+
+  const addScreenshotAttachment = (attachment: ScreenshotAttachment) => {
+    setPendingImageAttachments((current) => [...current, attachment]);
+    window.requestAnimationFrame(() => draftInputRef.current?.focus());
+  };
+
+  const removePendingImageAttachment = (attachmentId: string) => {
+    setPendingImageAttachments((current) =>
+      current.filter((item) => item.id !== attachmentId),
+    );
   };
 
   const locateMessageFromHistory = async (
@@ -7747,6 +8379,35 @@ function ComposerQuotePreview({
   );
 }
 
+function PendingImageAttachmentStrip({
+  attachments,
+  onRemove,
+}: {
+  attachments: ScreenshotAttachment[];
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <div className="composer-pending-images" aria-label="待发送图片">
+      {attachments.map((attachment) => (
+        <div className="composer-pending-image" key={attachment.id}>
+          <img src={attachment.previewUrl} alt={attachment.name} draggable={false} />
+          <span>
+            {attachment.width} x {attachment.height}
+          </span>
+          <button
+            type="button"
+            title="移除图片"
+            aria-label="移除图片"
+            onClick={() => onRemove(attachment.id)}
+          >
+            x
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MessageQuoteBlock({
   quote,
   onLocate,
@@ -7860,6 +8521,9 @@ function quoteIconLabel(messageType: string): string {
   if (messageType === "file") {
     return "文";
   }
+  if (messageType === "voice") {
+    return "语";
+  }
   if (messageType === "contact_card") {
     return "名";
   }
@@ -7892,6 +8556,7 @@ function MessageContextMenuView({
     !isMessageFileDefinitelyUnavailable(message) &&
     (message.kind === "image" ||
       message.kind === "video" ||
+      message.kind === "voice" ||
       message.kind === "file" ||
       message.kind === "sticker");
   const isFileLike = Boolean(fileTypeFromMessage(message));
@@ -9997,6 +10662,8 @@ function MessageRenderer({
             message={message}
             onPlay={() => onPlayVideo(message)}
           />
+        ) : message.kind === "voice" ? (
+          <VoiceMessageRenderer message={message} />
         ) : message.kind === "sticker" ? (
           <StickerMessageRenderer message={message} />
         ) : message.kind === "file" ? (
@@ -10038,6 +10705,158 @@ function MessageRenderer({
 function TextMessageRenderer({ message }: { message: ChatMessage }) {
   return (
     <p>{message.content}</p>
+  );
+}
+
+function VoiceRecordPanel({
+  state,
+  duration,
+  notice,
+  onCancel,
+}: {
+  state: VoiceRecordState;
+  duration: number;
+  notice: string;
+  onCancel: () => void;
+}) {
+  const recording = state === "recording";
+  const sending = state === "sending";
+  return (
+    <div className={`voice-record-panel is-${state}`}>
+      <div className="voice-record-stage" aria-hidden="true">
+        <span className="voice-wave-bars is-left">
+          <i />
+          <i />
+          <i />
+        </span>
+        <span className="voice-record-orb">
+          <ChatIcon name="mic" />
+        </span>
+        <span className="voice-wave-bars is-right">
+          <i />
+          <i />
+          <i />
+        </span>
+      </div>
+      <div className="voice-record-copy">
+        <strong>
+          {recording
+            ? formatDuration(duration)
+            : sending
+              ? "发送中"
+              : "语音消息"}
+        </strong>
+        <span>{notice}</span>
+      </div>
+      <button type="button" className="voice-record-cancel" onClick={onCancel}>
+        取消
+      </button>
+    </div>
+  );
+}
+
+function VoiceMessageRenderer({ message }: { message: ChatMessage }) {
+  const fileObjectId = fileObjectIdFromMessage(message);
+  const fileName = fileNameFromMessage(message, "语音消息.webm");
+  const duration =
+    numberPayload(message.contentJson?.durationSeconds) ??
+    numberPayload(message.contentJson?.duration) ??
+    0;
+  const localUrl =
+    localMediaUrlPayload(message.contentJson?.localUrl) ||
+    localMediaUrlPayload(message.contentJson?.url);
+  const [audioUrl, setAudioUrl] = useState(localUrl);
+  const [playing, setPlaying] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (localUrl) {
+      setAudioUrl(localUrl);
+      setError("");
+    }
+  }, [localUrl]);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    };
+  }, []);
+
+  const ensureAudioUrl = async () => {
+    if (audioUrl) {
+      return audioUrl;
+    }
+    if (!fileObjectId || !chatFileCloudAvailable(message)) {
+      throw new Error(chatFileAccessReason(message));
+    }
+    setLoading(true);
+    try {
+      const nextUrl = await cacheChatFile(
+        fileObjectId,
+        fileName,
+        chatMessageFileAccessSource(message),
+      );
+      setAudioUrl(nextUrl);
+      return nextUrl;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const togglePlayback = async () => {
+    try {
+      setError("");
+      const nextUrl = await ensureAudioUrl();
+      const current = audioRef.current;
+      if (current && current.src === nextUrl && !current.paused) {
+        current.pause();
+        setPlaying(false);
+        return;
+      }
+      current?.pause();
+      const audio = current && current.src === nextUrl ? current : new Audio(nextUrl);
+      audioRef.current = audio;
+      audio.onended = () => setPlaying(false);
+      audio.onpause = () => setPlaying(false);
+      audio.onplay = () => setPlaying(true);
+      await audio.play();
+      setPlaying(true);
+    } catch (playError) {
+      setPlaying(false);
+      setError(friendlyError(String(playError)));
+    }
+  };
+
+  const bars = [7, 14, 10, 18, 12, 21, 9, 16, 11, 19, 8, 15];
+  return (
+    <button
+      type="button"
+      className={`message-voice-card ${playing ? "is-playing" : ""} ${
+        message.status === "failed" ? "is-failed" : ""
+      }`}
+      onClick={() => void togglePlayback()}
+      title={playing ? "暂停语音" : "播放语音"}
+    >
+      <span className="message-voice-play">
+        {loading ? <i className="is-loading" /> : playing ? <i className="is-pause" /> : <i />}
+      </span>
+      <span className="message-voice-wave" aria-hidden="true">
+        {bars.map((height, index) => (
+          <i key={`${height}-${index}`} style={{ height }} />
+        ))}
+      </span>
+      <span className="message-voice-duration">
+        {duration > 0 ? `${Math.round(duration)}"` : "--"}
+      </span>
+      {message.status === "failed" ? (
+        <em className="message-voice-error">发送失败</em>
+      ) : error ? (
+        <em className="message-voice-error">{error}</em>
+      ) : null}
+    </button>
   );
 }
 
@@ -11833,6 +12652,14 @@ function waitForVideoMetadata(video: HTMLVideoElement): Promise<void> {
   });
 }
 
+function waitForAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function posterCandidateTimes(duration: number): number[] {
   const safeDuration = Math.max(0, duration);
   const values = [1, 0.5, 2, 3];
@@ -12024,6 +12851,18 @@ function normalizeLocalUploadKind(
   return detectKindFromName(file.name, file.contentType);
 }
 
+function screenshotAttachmentToLocalUploadFile(
+  attachment: ScreenshotAttachment,
+): LocalUploadFile {
+  return {
+    path: attachment.filePath,
+    name: attachment.name,
+    sizeBytes: 0,
+    contentType: attachment.mimeType,
+    fileType: "image",
+  };
+}
+
 function detectKindFromName(
   name: string,
   contentType: string,
@@ -12085,6 +12924,7 @@ function fileKindLabel(fileName: string): string {
   if (/\.pdf$/i.test(lower)) return "PDF";
   if (/\.(zip|rar|7z|tar|gz)$/i.test(lower)) return "压缩包";
   if (/\.(mp4|mov|webm|avi|mkv)$/i.test(lower)) return "视频";
+  if (/\.(m4a|mp3|wav|ogg|opus)$/i.test(lower)) return "音频";
   if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(lower)) return "图片";
   return "文件";
 }
@@ -12437,6 +13277,11 @@ function friendlyError(error: string): string {
 
 async function fileToBytes(file: File): Promise<number[]> {
   const buffer = await file.arrayBuffer();
+  return Array.from(new Uint8Array(buffer));
+}
+
+async function blobToNumberArray(blob: Blob): Promise<number[]> {
+  const buffer = await blob.arrayBuffer();
   return Array.from(new Uint8Array(buffer));
 }
 

@@ -16,7 +16,6 @@ import { InteractionProxyHost } from "./app/InteractionProxyHost";
 import { MediaViewerWindowHost } from "./app/MediaViewerWindowHost";
 import { ProfileEditWindowHost } from "./app/ProfileEditWindowHost";
 import { ProfileSearchWindowHost } from "./app/ProfileSearchWindowHost";
-import { ScreenshotWindowHost } from "./app/ScreenshotWindowHost";
 import { SettingsWindowHost } from "./app/SettingsWindowHost";
 import { WidgetMenuWindowHost } from "./app/WidgetMenuWindowHost";
 import {
@@ -35,7 +34,6 @@ import {
   MEDIA_VIEWER_WINDOW_LABEL,
   PROFILE_EDIT_WINDOW_LABEL,
   PROFILE_SEARCH_WINDOW_LABEL,
-  SCREENSHOT_WINDOW_LABEL,
   SETTINGS_WINDOW_LABEL,
   WIDGET_MENU_WINDOW_LABEL,
 } from "./features/settings/windowEvents";
@@ -60,7 +58,6 @@ function resolveRootComponent() {
   if (windowLabel === FRIEND_REQUEST_WINDOW_LABEL) return FriendRequestWindowHost;
   if (windowLabel === IMAGE_PREVIEW_WINDOW_LABEL) return ImagePreviewWindowHost;
   if (windowLabel === MEDIA_VIEWER_WINDOW_LABEL) return MediaViewerWindowHost;
-  if (windowLabel === SCREENSHOT_WINDOW_LABEL) return ScreenshotWindowHost;
   if (
     windowLabel === CARD_SETTINGS_WINDOW_LABEL ||
     windowLabel === PERIOD_CARD_SETTINGS_WINDOW_LABEL

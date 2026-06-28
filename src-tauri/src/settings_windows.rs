@@ -1,15 +1,9 @@
-use std::{thread, time::Duration};
 use std::sync::{Mutex, OnceLock};
+use std::{thread, time::Duration};
 
-use crate::screenshot_tool::{capture_screenshot_screen, ScreenshotCapturePayload};
 use serde::{Deserialize, Serialize};
 use tauri::{
-    AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-    WindowEvent,
-};
-use windows::Win32::{
-    Foundation::HWND,
-    UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE},
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 
 const SETTINGS_WINDOW_LABEL: &str = "settings";
@@ -30,7 +24,6 @@ const FRIEND_REQUEST_WINDOW_LABEL: &str = "friend-request";
 const IMAGE_PREVIEW_WINDOW_LABEL: &str = "image-preview";
 const MEDIA_VIEWER_WINDOW_LABEL: &str = "media-viewer";
 const DRIVE_WINDOW_LABEL: &str = "drive";
-const SCREENSHOT_WINDOW_LABEL: &str = "screenshot";
 const WIDGET_WINDOW_LABEL: &str = "widget";
 
 const SETTINGS_WINDOW_CLOSE_EVENT: &str = "settings-window-close";
@@ -44,18 +37,12 @@ const MEDIA_VIEWER_OPEN_EVENT: &str = "media-viewer-open";
 const CHAT_HISTORY_OPEN_EVENT: &str = "chat-history-open";
 const GROUP_ANNOUNCEMENT_OPEN_EVENT: &str = "group-announcement-open";
 const DRIVE_OPEN_EVENT: &str = "drive-open";
-const SCREENSHOT_OPEN_START_EVENT: &str = "screenshot-open-start";
-const SCREENSHOT_OPEN_EVENT: &str = "screenshot-open";
 
-static LAST_GROUP_ANNOUNCEMENT_OPEN_PAYLOAD: OnceLock<
-    Mutex<Option<GroupAnnouncementOpenPayload>>,
-> = OnceLock::new();
-static LAST_SCREENSHOT_OPEN_PAYLOAD: OnceLock<Mutex<Option<ScreenshotOpenPayload>>> =
+static LAST_GROUP_ANNOUNCEMENT_OPEN_PAYLOAD: OnceLock<Mutex<Option<GroupAnnouncementOpenPayload>>> =
     OnceLock::new();
 static LAST_MEDIA_VIEWER_OPEN_PAYLOAD: OnceLock<Mutex<Option<MediaViewerOpenPayload>>> =
     OnceLock::new();
-static LAST_DRIVE_OPEN_PAYLOAD: OnceLock<Mutex<Option<DriveOpenPayload>>> =
-    OnceLock::new();
+static LAST_DRIVE_OPEN_PAYLOAD: OnceLock<Mutex<Option<DriveOpenPayload>>> = OnceLock::new();
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -156,19 +143,6 @@ pub struct DriveOpenPayload {
     can_manage: Option<bool>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScreenshotOpenOptions {
-    hide_current_window: Option<bool>,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScreenshotOpenPayload {
-    capture: ScreenshotCapturePayload,
-    hidden_chat_window: bool,
-}
-
 #[tauri::command]
 pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
     ensure_settings_window(&app).map(|_| ())
@@ -264,8 +238,8 @@ pub fn get_drive_open_payload() -> Result<Option<DriveOpenPayload>, String> {
 }
 
 #[tauri::command]
-pub fn get_group_announcement_open_payload(
-) -> Result<Option<GroupAnnouncementOpenPayload>, String> {
+pub fn get_group_announcement_open_payload() -> Result<Option<GroupAnnouncementOpenPayload>, String>
+{
     get_last_group_announcement_open_payload()
 }
 
@@ -337,7 +311,11 @@ pub fn open_media_viewer_window(
         .media_list
         .iter()
         .find(|item| item.id == payload.active_id)
-        .or_else(|| payload.media_list.get(payload.current_index.max(0) as usize))
+        .or_else(|| {
+            payload
+                .media_list
+                .get(payload.current_index.max(0) as usize)
+        })
     {
         println!(
             "[media-rust] open_media_viewer_window active source={} sourceId={} messageFileRefId={:?} fileObjectId={:?} localCandidates={}",
@@ -384,117 +362,6 @@ pub fn get_media_viewer_open_payload() -> Result<Option<MediaViewerOpenPayload>,
 }
 
 #[tauri::command]
-pub fn open_screenshot_window(
-    app: AppHandle,
-    options: Option<ScreenshotOpenOptions>,
-) -> Result<(), String> {
-    let hide_current_window = options
-        .as_ref()
-        .and_then(|value| value.hide_current_window)
-        .unwrap_or(false);
-    if hide_current_window {
-        if let Some(chat_window) = app.get_webview_window(CHAT_WINDOW_LABEL) {
-            chat_window.hide().map_err(|error| error.to_string())?;
-        }
-        thread::sleep(Duration::from_millis(40));
-    }
-    clear_last_screenshot_open_payload()?;
-
-    let window = if let Some(window) = app.get_webview_window(SCREENSHOT_WINDOW_LABEL) {
-        window
-    } else {
-        create_screenshot_window(&app)?
-    };
-    let _ = window.emit(SCREENSHOT_OPEN_START_EVENT, ());
-    let _ = window.set_always_on_top(true);
-    let _ = window.set_fullscreen(true);
-    let _ = set_window_capture_excluded(&window, true);
-    window.show().map_err(|error| error.to_string())?;
-    let _ = window.set_focus();
-    let app_for_capture = app.clone();
-    let window_for_capture = window.clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(60));
-        match capture_screenshot_screen(app_for_capture.clone()) {
-            Ok(capture) => {
-                let payload = ScreenshotOpenPayload {
-                    capture,
-                    hidden_chat_window: hide_current_window,
-                };
-                let _ = set_last_screenshot_open_payload(payload.clone());
-                let _ = window_for_capture.show();
-                let _ = window_for_capture.set_focus();
-                let _ = app_for_capture.emit_to(
-                    SCREENSHOT_WINDOW_LABEL,
-                    SCREENSHOT_OPEN_EVENT,
-                    payload.clone(),
-                );
-                if let Some(window) = app_for_capture.get_webview_window(SCREENSHOT_WINDOW_LABEL) {
-                    let _ = window.emit(SCREENSHOT_OPEN_EVENT, payload);
-                }
-            }
-            Err(error) => {
-                let _ = set_window_capture_excluded(&window_for_capture, false);
-                let _ = window_for_capture.hide();
-                if hide_current_window {
-                    if let Some(chat_window) =
-                        app_for_capture.get_webview_window(CHAT_WINDOW_LABEL)
-                    {
-                        let _ = chat_window.show();
-                        let _ = chat_window.set_focus();
-                    }
-                }
-                let _ = app_for_capture.emit_to(
-                    SCREENSHOT_WINDOW_LABEL,
-                    SCREENSHOT_OPEN_ERROR_EVENT,
-                    ScreenshotOpenErrorPayload { message: error },
-                );
-            }
-        }
-    });
-    Ok(())
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ScreenshotOpenErrorPayload {
-    message: String,
-}
-
-const SCREENSHOT_OPEN_ERROR_EVENT: &str = "screenshot-open-error";
-
-#[allow(dead_code)]
-fn emit_screenshot_open_payload(
-    app: &AppHandle,
-    window: &WebviewWindow,
-    payload: ScreenshotOpenPayload,
-) -> Result<(), String> {
-    let _ = app.emit_to(
-        SCREENSHOT_WINDOW_LABEL,
-        SCREENSHOT_OPEN_EVENT,
-        payload.clone(),
-    );
-    window
-        .emit(SCREENSHOT_OPEN_EVENT, payload)
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn get_screenshot_open_payload() -> Result<Option<ScreenshotOpenPayload>, String> {
-    get_last_screenshot_open_payload()
-}
-
-#[tauri::command]
-pub fn hide_screenshot_window(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(SCREENSHOT_WINDOW_LABEL) {
-        let _ = set_window_capture_excluded(&window, false);
-        window.hide().map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
 pub fn hide_auth_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(AUTH_WINDOW_LABEL) {
         window.hide().map_err(|error| error.to_string())?;
@@ -533,7 +400,6 @@ pub fn create_hidden_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
     create_image_preview_window(app)?;
     create_media_viewer_window(app)?;
     create_drive_window(app)?;
-    create_screenshot_window(app)?;
     Ok(())
 }
 
@@ -555,12 +421,8 @@ pub fn hide_auxiliary_windows(app: &AppHandle) -> Result<(), String> {
         IMAGE_PREVIEW_WINDOW_LABEL,
         MEDIA_VIEWER_WINDOW_LABEL,
         DRIVE_WINDOW_LABEL,
-        SCREENSHOT_WINDOW_LABEL,
     ] {
         if let Some(window) = app.get_webview_window(label) {
-            if label == SCREENSHOT_WINDOW_LABEL {
-                let _ = set_window_capture_excluded(&window, false);
-            }
             window.hide().map_err(|error| error.to_string())?;
         }
     }
@@ -605,11 +467,7 @@ pub fn ensure_chat_window(app: &AppHandle) -> Result<WebviewWindow, String> {
 }
 
 pub fn ensure_chat_history_window(app: &AppHandle) -> Result<WebviewWindow, String> {
-    show_existing_or_create(
-        app,
-        CHAT_HISTORY_WINDOW_LABEL,
-        create_chat_history_window,
-    )
+    show_existing_or_create(app, CHAT_HISTORY_WINDOW_LABEL, create_chat_history_window)
 }
 
 pub fn ensure_group_announcement_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -621,11 +479,7 @@ pub fn ensure_group_announcement_window(app: &AppHandle) -> Result<WebviewWindow
 }
 
 pub fn ensure_profile_edit_window(app: &AppHandle) -> Result<WebviewWindow, String> {
-    show_existing_or_create(
-        app,
-        PROFILE_EDIT_WINDOW_LABEL,
-        create_profile_edit_window,
-    )
+    show_existing_or_create(app, PROFILE_EDIT_WINDOW_LABEL, create_profile_edit_window)
 }
 
 pub fn ensure_class_account_edit_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -661,19 +515,11 @@ pub fn ensure_friend_request_window(app: &AppHandle) -> Result<WebviewWindow, St
 }
 
 pub fn ensure_image_preview_window(app: &AppHandle) -> Result<WebviewWindow, String> {
-    show_existing_or_create(
-        app,
-        IMAGE_PREVIEW_WINDOW_LABEL,
-        create_image_preview_window,
-    )
+    show_existing_or_create(app, IMAGE_PREVIEW_WINDOW_LABEL, create_image_preview_window)
 }
 
 pub fn ensure_media_viewer_window(app: &AppHandle) -> Result<WebviewWindow, String> {
-    show_existing_or_create(
-        app,
-        MEDIA_VIEWER_WINDOW_LABEL,
-        create_media_viewer_window,
-    )
+    show_existing_or_create(app, MEDIA_VIEWER_WINDOW_LABEL, create_media_viewer_window)
 }
 
 pub fn ensure_drive_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -699,29 +545,9 @@ fn set_last_group_announcement_open_payload(
     Ok(())
 }
 
-fn get_last_group_announcement_open_payload(
-) -> Result<Option<GroupAnnouncementOpenPayload>, String> {
+fn get_last_group_announcement_open_payload() -> Result<Option<GroupAnnouncementOpenPayload>, String>
+{
     let store = LAST_GROUP_ANNOUNCEMENT_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
-    let guard = store.lock().map_err(|error| error.to_string())?;
-    Ok(guard.clone())
-}
-
-fn set_last_screenshot_open_payload(payload: ScreenshotOpenPayload) -> Result<(), String> {
-    let store = LAST_SCREENSHOT_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
-    let mut guard = store.lock().map_err(|error| error.to_string())?;
-    *guard = Some(payload);
-    Ok(())
-}
-
-fn clear_last_screenshot_open_payload() -> Result<(), String> {
-    let store = LAST_SCREENSHOT_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
-    let mut guard = store.lock().map_err(|error| error.to_string())?;
-    *guard = None;
-    Ok(())
-}
-
-fn get_last_screenshot_open_payload() -> Result<Option<ScreenshotOpenPayload>, String> {
-    let store = LAST_SCREENSHOT_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
     let guard = store.lock().map_err(|error| error.to_string())?;
     Ok(guard.clone())
 }
@@ -750,19 +576,6 @@ fn get_last_drive_open_payload() -> Result<Option<DriveOpenPayload>, String> {
     let store = LAST_DRIVE_OPEN_PAYLOAD.get_or_init(|| Mutex::new(None));
     let guard = store.lock().map_err(|error| error.to_string())?;
     Ok(guard.clone())
-}
-
-fn set_window_capture_excluded<R: Runtime>(
-    window: &WebviewWindow<R>,
-    excluded: bool,
-) -> Result<(), String> {
-    let hwnd = HWND(window.hwnd().map_err(|error| error.to_string())?.0);
-    let affinity = if excluded {
-        WDA_EXCLUDEFROMCAPTURE
-    } else {
-        WDA_NONE
-    };
-    unsafe { SetWindowDisplayAffinity(hwnd, affinity).map_err(|error| error.to_string()) }
 }
 
 fn show_existing_or_create(
@@ -1355,42 +1168,6 @@ fn create_drive_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
             let _ = drive_window.hide();
-        }
-    });
-
-    Ok(window)
-}
-
-fn create_screenshot_window(app: &AppHandle) -> Result<WebviewWindow, String> {
-    if let Some(window) = app.get_webview_window(SCREENSHOT_WINDOW_LABEL) {
-        return Ok(window);
-    }
-
-    let window = WebviewWindowBuilder::new(
-        app,
-        SCREENSHOT_WINDOW_LABEL,
-        WebviewUrl::App("index.html?window=screenshot#screenshot".into()),
-    )
-    .title("截图")
-    .devtools(false)
-    .decorations(false)
-    .transparent(false)
-    .resizable(false)
-    .minimizable(false)
-    .maximizable(false)
-    .skip_taskbar(true)
-    .always_on_top(true)
-    .visible(false)
-    .inner_size(1280.0, 720.0)
-    .build()
-    .map_err(|error| error.to_string())?;
-
-    let screenshot_window = window.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-            let _ = set_window_capture_excluded(&screenshot_window, false);
-            let _ = screenshot_window.hide();
         }
     });
 

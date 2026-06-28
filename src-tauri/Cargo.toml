@@ -40,6 +40,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
 tauri = { version = "2.10.3", features = ["protocol-asset", "tray-icon"] }
 thiserror = "2"
+xcap = "0.9.6"
 futures-util = "0.3"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 tokio = { version = "1", features = ["time"] }

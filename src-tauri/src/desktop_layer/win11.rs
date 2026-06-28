@@ -13,7 +13,7 @@ use tauri::Runtime;
 use windows::{
     core::{s, w, BOOL},
     Win32::{
-        Foundation::{HWND, LPARAM, POINT, RECT, WPARAM, MAX_PATH},
+        Foundation::{HWND, LPARAM, MAX_PATH, POINT, RECT, WPARAM},
         Graphics::{
             Dwm::{DwmFlush, DwmSetWindowAttribute, DWMWA_NCRENDERING_POLICY},
             Gdi::{
@@ -26,19 +26,19 @@ use windows::{
             Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST},
             WindowsAndMessaging::{
                 CallWindowProcW, DefWindowProcW, DestroyWindow, EnumWindows, FindWindowA,
-                FindWindowExA, GetParent, GetWindowLongPtrW, GetWindowRect, IsWindowVisible, SendMessageTimeoutA,
-                SendMessageW, SetParent, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
-                SystemParametersInfoW, GWL_EXSTYLE, GWL_STYLE, GWLP_WNDPROC, HWND_BOTTOM, HWND_TOP,
-                SMTO_NORMAL, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
-                SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SWP_FRAMECHANGED, SWP_HIDEWINDOW,
-                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE,
-                SW_SHOW, WS_BORDER, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-                WS_DLGFRAME, WS_EX_APPWINDOW, WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME,
-                WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
-                WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
-                WS_THICKFRAME, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCPAINT,
+                FindWindowExA, GetParent, GetWindowLongPtrW, GetWindowRect, IsWindowVisible,
+                SendMessageTimeoutA, SendMessageW, SetParent, SetWindowLongPtrW, SetWindowPos,
+                SetWindowTextW, ShowWindow, SystemParametersInfoW, GWLP_WNDPROC, GWL_EXSTYLE,
+                GWL_STYLE, HWND_BOTTOM, HWND_TOP, SMTO_NORMAL, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
+                SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, STYLESTRUCT, SWP_FRAMECHANGED,
+                SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+                SWP_SHOWWINDOW, SW_HIDE, SW_SHOW, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCPAINT,
                 WM_SETREDRAW, WM_STYLECHANGED, WM_STYLECHANGING, WM_WINDOWPOSCHANGED,
-                WM_WINDOWPOSCHANGING, STYLESTRUCT,
+                WM_WINDOWPOSCHANGING, WS_BORDER, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN,
+                WS_CLIPSIBLINGS, WS_DLGFRAME, WS_EX_APPWINDOW, WS_EX_CLIENTEDGE,
+                WS_EX_DLGMODALFRAME, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+                WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
+                WS_THICKFRAME,
             },
         },
     },
@@ -277,7 +277,9 @@ pub fn cleanup_desktop_layer_before_exit<R: Runtime>(
     Ok(())
 }
 
-pub fn attach_diagnostics<R: Runtime>(window: &tauri::WebviewWindow<R>) -> DesktopAttachDiagnostics {
+pub fn attach_diagnostics<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+) -> DesktopAttachDiagnostics {
     let mut diagnostics = DesktopAttachDiagnostics::default();
 
     unsafe {
@@ -306,7 +308,8 @@ pub fn attach_diagnostics<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Deskt
 
     if let Ok(worker_w) = desktop_host_candidates() {
         unsafe {
-            diagnostics.parent_is_worker_w = worker_w.contains(&GetParent(hwnd).unwrap_or_default());
+            diagnostics.parent_is_worker_w =
+                worker_w.contains(&GetParent(hwnd).unwrap_or_default());
             diagnostics.window_visible = IsWindowVisible(hwnd).as_bool();
             diagnostics.attached = diagnostics.parent_is_worker_w && diagnostics.window_visible;
         }
@@ -322,7 +325,8 @@ pub fn is_attached_to_desktop_icon_layer<R: Runtime>(
     let candidates = desktop_host_candidates()?;
 
     unsafe {
-        Ok(candidates.contains(&GetParent(hwnd).unwrap_or_default()) && IsWindowVisible(hwnd).as_bool())
+        Ok(candidates.contains(&GetParent(hwnd).unwrap_or_default())
+            && IsWindowVisible(hwnd).as_bool())
     }
 }
 
@@ -579,15 +583,7 @@ unsafe fn force_frame_refresh(hwnd: HWND, allow_activate: bool) {
         flags | SWP_NOACTIVATE
     };
 
-    let _ = SetWindowPos(
-        hwnd,
-        None,
-        0,
-        0,
-        0,
-        0,
-        flags,
-    );
+    let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, flags);
 }
 
 unsafe fn disable_dwm_non_client_rendering(hwnd: HWND) {
@@ -620,7 +616,10 @@ unsafe extern "system" fn native_frame_guard_wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
-    let phase = format!("msg=0x{msg:04X} wp=0x{:X} lp=0x{:X}", wparam.0, lparam.0 as usize);
+    let phase = format!(
+        "msg=0x{msg:04X} wp=0x{:X} lp=0x{:X}",
+        wparam.0, lparam.0 as usize
+    );
 
     match msg {
         WM_NCCALCSIZE => {
@@ -633,7 +632,10 @@ unsafe extern "system" fn native_frame_guard_wnd_proc(
         }
         WM_NCACTIVATE => {
             if !NATIVE_ATTACHED_MODE.load(Ordering::Relaxed) {
-                record_native_frame_debug(&phase, "allow detached activation without nonclient repaint");
+                record_native_frame_debug(
+                    &phase,
+                    "allow detached activation without nonclient repaint",
+                );
                 return windows::Win32::Foundation::LRESULT(1);
             }
             record_native_frame_debug(&phase, "allow attached nonclient activation");
@@ -665,8 +667,7 @@ unsafe fn call_original_wnd_proc(
     lparam: LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
     if let Some(previous) = ORIGINAL_WNDPROC.get().copied().filter(|value| *value != 0) {
-        let previous_proc: windows::Win32::UI::WindowsAndMessaging::WNDPROC =
-            transmute(previous);
+        let previous_proc: windows::Win32::UI::WindowsAndMessaging::WNDPROC = transmute(previous);
         let result = CallWindowProcW(previous_proc, hwnd, msg, wparam, lparam);
         record_native_frame_debug(
             &format!("msg=0x{msg:04X}"),

@@ -6,6 +6,7 @@ export type ChatMessageKind =
   | "text"
   | "image"
   | "video"
+  | "voice"
   | "file"
   | "sticker"
   | "system"

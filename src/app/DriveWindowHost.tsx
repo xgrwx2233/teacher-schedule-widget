@@ -1,22 +1,53 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   createDriveFolder,
   downloadChatFile,
   forwardDriveNodeToChat,
+  listLocalFileCandidates,
   listDriveNodes,
   loadChatConversations,
   loadChatGroup,
-  openCachedChatFile,
+  openChatFileLocalFirst,
   pickChatUploadFiles,
+  rememberLocalFileCandidate,
   saveFileToDrive,
   uploadChatFilePathChunked,
 } from "../features/chat/chatRepository";
 import { formatBytes } from "../features/chat/chatMessageUtils";
-import type { ChatConversation, ChatGroup, DriveNode, LocalUploadFile, MediaViewerItem } from "../features/chat/types";
+import type {
+  ChatConversation,
+  ChatGroup,
+  DriveNode,
+  LocalUploadFile,
+  MediaViewerItem,
+  MediaViewerLocalCandidate,
+} from "../features/chat/types";
 import { DRIVE_OPEN_EVENT } from "../features/settings/windowEvents";
+import DownloadIcon from "../../images/netdisk/download.svg";
+import FileIcon from "../../images/netdisk/file.svg";
+import FileTextIcon from "../../images/netdisk/file-text.svg";
+import FileDocIcon from "../../images/netdisk/file-type-doc.svg";
+import FileDocxIcon from "../../images/netdisk/file-type-docx.svg";
+import FilePdfIcon from "../../images/netdisk/file-type-pdf.svg";
+import FilePptIcon from "../../images/netdisk/file-type-ppt.svg";
+import FileXlsIcon from "../../images/netdisk/file-type-xls.svg";
+import FileZipIcon from "../../images/netdisk/file-type-zip.svg";
+import FolderIcon from "../../images/netdisk/folder.svg";
+import GridIcon from "../../images/netdisk/layout-grid.svg";
+import ListIcon from "../../images/netdisk/layout-list.svg";
+import MoreIcon from "../../images/netdisk/dots.svg";
+import MusicIcon from "../../images/netdisk/music.svg";
+import PhotoIcon from "../../images/netdisk/photo.svg";
+import PreviewIcon from "../../images/netdisk/eye.svg";
+import RefreshIcon from "../../images/netdisk/refresh.svg";
+import SearchIcon from "../../images/netdisk/search (1).svg";
+import ShareIcon from "../../images/netdisk/share-3.svg";
+import SortIcon from "../../images/netdisk/sort-descending.svg";
+import UploadIcon from "../../images/netdisk/upload.svg";
+import VideoIcon from "../../images/netdisk/video.svg";
 
 type DrivePanelMode = "personal" | "group";
 type DriveFilter = "all" | "image" | "video" | "document" | "archive" | "other";
@@ -49,7 +80,15 @@ type DriveForwardState = {
   nodeName: string;
 } | null;
 
+type DriveFolderDialogState = {
+  open: boolean;
+  name: string;
+  submitting: boolean;
+  error: string | null;
+};
+
 const DEFAULT_CHAT_CHUNK_SIZE = 4 * 1024 * 1024;
+const INVALID_FOLDER_NAME_PATTERN = /[\\/:*?"<>|]/;
 
 export function DriveWindowHost() {
   const [state, setState] = useState<DrivePanelState>(() => initialDriveState());
@@ -60,6 +99,12 @@ export function DriveWindowHost() {
   const [forwardSearch, setForwardSearch] = useState("");
   const [forwardSendingId, setForwardSendingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [folderDialog, setFolderDialog] = useState<DriveFolderDialogState>({
+    open: false,
+    name: "",
+    submitting: false,
+    error: null,
+  });
   const stateRef = useRef(state);
   const refreshSeqRef = useRef(0);
 
@@ -71,6 +116,7 @@ export function DriveWindowHost() {
     ? true
     : payloadCanManage ??
       (group?.currentUserRole === "owner" || group?.currentUserRole === "admin");
+  const canForward = state.mode === "personal" || canManage;
 
   const openDrive = (payload: DriveOpenPayload) => {
     const mode = payload.mode === "group" ? "group" : "personal";
@@ -176,12 +222,45 @@ export function DriveWindowHost() {
     }
   };
 
+  const openCreateFolderDialog = () => {
+    setFolderDialog({
+      open: true,
+      name: "",
+      submitting: false,
+      error: null,
+    });
+  };
+
+  const closeCreateFolderDialog = () => {
+    setFolderDialog((current) => (
+      current.submitting
+        ? current
+        : {
+            open: false,
+            name: "",
+            submitting: false,
+            error: null,
+          }
+    ));
+  };
+
+  const updateFolderDialogName = (name: string) => {
+    setFolderDialog((current) => ({
+      ...current,
+      name,
+      error: current.error ? null : current.error,
+    }));
+  };
+
   const createFolder = async () => {
-    const name = window.prompt("新建文件夹名称", "新建文件夹")?.trim();
-    if (!name) {
+    const name = folderDialog.name.trim();
+    const validationError = validateFolderName(name);
+    if (validationError) {
+      setFolderDialog((current) => ({ ...current, error: validationError }));
       return;
     }
     const parent = stateRef.current.breadcrumb[stateRef.current.breadcrumb.length - 1] ?? null;
+    setFolderDialog((current) => ({ ...current, submitting: true, error: null }));
     try {
       await createDriveFolder({
         driveType: stateRef.current.mode,
@@ -189,9 +268,21 @@ export function DriveWindowHost() {
         parentId: parent?.id ?? null,
         name,
       });
+      setFolderDialog({
+        open: false,
+        name: "",
+        submitting: false,
+        error: null,
+      });
+      setNotice("文件夹已创建");
+      window.setTimeout(() => setNotice(null), 2200);
       await refreshDrive();
     } catch (error) {
-      setState((current) => ({ ...current, error: friendlyError(String(error)) }));
+      setFolderDialog((current) => ({
+        ...current,
+        submitting: false,
+        error: friendlyError(String(error)),
+      }));
     }
   };
 
@@ -210,12 +301,18 @@ export function DriveWindowHost() {
           chunkSize: DEFAULT_CHAT_CHUNK_SIZE,
           taskId: `drive-upload-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         });
-        await saveFileToDrive({
+        const node = await saveFileToDrive({
           driveType: stateRef.current.mode,
           groupId: stateRef.current.groupId ?? null,
           parentId: parent?.id ?? null,
           fileObjectId: uploaded.id,
           name: uploaded.originalName || file.name,
+        });
+        await rememberLocalFileCandidate({
+          fileObjectId: uploaded.id,
+          driveNodeId: node.id,
+          sourceType: "local_original",
+          localPath: file.path,
         });
       }
       await refreshDrive();
@@ -232,14 +329,14 @@ export function DriveWindowHost() {
       return;
     }
     if (isDriveMediaNode(node)) {
-      openDriveMediaViewer(node);
+      await openDriveMediaViewer(node);
       return;
     }
     if (!node.fileObjectId) {
       return;
     }
     try {
-      await openCachedChatFile(node.fileObjectId, node.name, {
+      await openChatFileLocalFirst(node.fileObjectId, node.name, {
         source: "drive",
         driveNodeId: node.id,
       });
@@ -248,7 +345,7 @@ export function DriveWindowHost() {
     }
   };
 
-  const openDriveMediaViewer = (node: DriveNode) => {
+  const openDriveMediaViewer = async (node: DriveNode) => {
     if (!node.fileObjectId) {
       return;
     }
@@ -259,6 +356,29 @@ export function DriveWindowHost() {
     const mediaNodes = visibleNodes.some((item) => item.id === node.id)
       ? visibleNodes
       : [node, ...visibleNodes];
+    const candidateMap = new Map<string, MediaViewerLocalCandidate[]>();
+    await Promise.all(
+      mediaNodes.filter(isDriveMediaNode).map(async (item) => {
+        if (!item.fileObjectId) {
+          return;
+        }
+        try {
+          const candidates = await listLocalFileCandidates({
+            fileObjectId: item.fileObjectId,
+            driveNodeId: item.id,
+          });
+          candidateMap.set(
+            item.id,
+            candidates.map((candidate) => ({
+              path: candidate.path,
+              sourceType: candidate.sourceType ?? "local_original",
+            })),
+          );
+        } catch {
+          candidateMap.set(item.id, []);
+        }
+      }),
+    );
     const mediaList = mediaNodes
       .filter(isDriveMediaNode)
       .map((item): MediaViewerItem => ({
@@ -282,7 +402,7 @@ export function DriveWindowHost() {
         senderName: null,
         sentAt: item.updatedAt ?? item.createdAt ?? null,
         seq: null,
-        localCandidates: [],
+        localCandidates: candidateMap.get(item.id) ?? [],
       }));
     void invoke("open_media_viewer_window", {
       payload: {
@@ -320,7 +440,7 @@ export function DriveWindowHost() {
   };
 
   const forwardNode = async (conversation: ChatConversation) => {
-    if (!forwardState || forwardSendingId) {
+    if (!forwardState || forwardSendingId || !canForward) {
       return;
     }
     try {
@@ -342,7 +462,6 @@ export function DriveWindowHost() {
       <DrivePanelView
         state={state}
         canManage={canManage}
-        onClose={() => void getCurrentWindow().hide()}
         onRefresh={() => void refreshDrive()}
         onSearch={(search) => {
           setState((current) => ({ ...current, search }));
@@ -354,12 +473,13 @@ export function DriveWindowHost() {
         }}
         onSort={(sortMode) => setState((current) => ({ ...current, sortMode }))}
         onViewMode={(viewMode) => setState((current) => ({ ...current, viewMode }))}
-        onCreateFolder={() => void createFolder()}
+        onCreateFolder={openCreateFolderDialog}
         onUpload={() => void uploadFiles()}
         onOpenNode={(node) => void openNode(node)}
         onDownloadNode={(node) => void downloadNode(node)}
         onForwardNode={(node) => setForwardState({ nodeId: node.id, nodeName: node.name })}
         onBreadcrumb={(index) => void navigateBreadcrumb(index)}
+        canForward={canForward}
       />
 
       {forwardState ? (
@@ -379,6 +499,17 @@ export function DriveWindowHost() {
         />
       ) : null}
 
+      {folderDialog.open ? (
+        <DriveFolderDialog
+          name={folderDialog.name}
+          submitting={folderDialog.submitting}
+          error={folderDialog.error}
+          onNameChange={updateFolderDialogName}
+          onClose={closeCreateFolderDialog}
+          onSubmit={() => void createFolder()}
+        />
+      ) : null}
+
       {notice ? <div className="drive-save-toast">{notice}</div> : null}
     </main>
   );
@@ -387,7 +518,7 @@ export function DriveWindowHost() {
 function DrivePanelView({
   state,
   canManage,
-  onClose,
+  canForward,
   onRefresh,
   onSearch,
   onFilter,
@@ -402,7 +533,7 @@ function DrivePanelView({
 }: {
   state: DrivePanelState;
   canManage: boolean;
-  onClose: () => void;
+  canForward: boolean;
   onRefresh: () => void;
   onSearch: (search: string) => void;
   onFilter: (filter: DriveFilter) => void;
@@ -416,6 +547,7 @@ function DrivePanelView({
   onBreadcrumb: (index: number) => void;
 }) {
   const sortedNodes = sortDriveNodes(filterDriveNodes(state.nodes, state.filter), state.sortMode);
+  const [openMenuNodeId, setOpenMenuNodeId] = useState<string | null>(null);
   const filters: Array<[DriveFilter, string]> = [
     ["all", "全部"],
     ["image", "图片"],
@@ -424,57 +556,88 @@ function DrivePanelView({
     ["archive", "压缩包"],
     ["other", "其他"],
   ];
+  const rootLabel = state.mode === "group" ? "群网盘" : "我的网盘";
+  const subtitle = state.mode === "group"
+    ? "群内长期资料沉淀，不自动收纳聊天文件"
+    : "个人长期文件资产";
+  useEffect(() => {
+    setOpenMenuNodeId(null);
+  }, [state.viewMode, state.filter, state.sortMode, state.search, state.breadcrumb]);
+
+  useEffect(() => {
+    if (!openMenuNodeId) {
+      return;
+    }
+    const closeMenu = () => setOpenMenuNodeId(null);
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [openMenuNodeId]);
+
   return (
     <section className={`drive-panel-view is-${state.mode}`}>
       <header className="drive-panel-header">
         <div>
           <h2>{state.title}</h2>
-          <p>{state.mode === "group" ? "群内长期资料沉淀，不自动收纳聊天文件" : "个人长期文件资产"}</p>
+          <p>{subtitle}</p>
         </div>
         <div className="drive-panel-actions">
-          <button type="button" onClick={onRefresh}>刷新</button>
           {canManage ? (
             <>
-              <button type="button" onClick={onCreateFolder}>新建文件夹</button>
-              <button type="button" className="profile-primary-button" onClick={onUpload}>
+              <button type="button" className="drive-action-button" onClick={onCreateFolder}>
+                <Icon src={FolderIcon} alt="" />
+                新建文件夹
+              </button>
+              <button type="button" className="drive-action-button is-primary" onClick={onUpload}>
+                <Icon src={UploadIcon} alt="" />
                 上传文件
               </button>
             </>
           ) : null}
-          <button type="button" onClick={onClose}>关闭</button>
         </div>
       </header>
       <div className="drive-toolbar">
         <label className="drive-search">
-          <span className="drive-search-icon">⌕</span>
+          <Icon src={SearchIcon} alt="" />
           <input
             value={state.search}
             placeholder={state.mode === "group" ? "搜索群文件..." : "搜索文件..."}
             onChange={(event) => onSearch(event.currentTarget.value)}
           />
         </label>
-        <select value={state.sortMode} onChange={(event) => onSort(event.currentTarget.value as DriveSortMode)}>
-          <option value="updated">按修改时间</option>
-          <option value="name">按名称</option>
-          <option value="size">按大小</option>
-          <option value="type">按类型</option>
-        </select>
+        <label className="drive-sort-select" title="排序方式">
+          <Icon src={SortIcon} alt="" />
+          <select value={state.sortMode} onChange={(event) => onSort(event.currentTarget.value as DriveSortMode)}>
+            <option value="updated">按修改时间</option>
+            <option value="name">按名称</option>
+            <option value="size">按大小</option>
+            <option value="type">按类型</option>
+          </select>
+        </label>
         <div className="drive-view-toggle">
           <button
             type="button"
+            title="列表视图"
             className={state.viewMode === "list" ? "is-active" : ""}
             onClick={() => onViewMode("list")}
           >
-            列表
+            <Icon src={ListIcon} alt="" />
           </button>
           <button
             type="button"
+            title="宫格视图"
             className={state.viewMode === "grid" ? "is-active" : ""}
             onClick={() => onViewMode("grid")}
           >
-            宫格
+            <Icon src={GridIcon} alt="" />
           </button>
         </div>
+        <button type="button" className="drive-icon-button" title="刷新" onClick={onRefresh}>
+          <Icon src={RefreshIcon} alt="" />
+        </button>
       </div>
       <nav className="drive-filter-row">
         {filters.map(([key, label]) => (
@@ -490,7 +653,7 @@ function DrivePanelView({
       </nav>
       <div className="drive-breadcrumb">
         <button type="button" onClick={() => onBreadcrumb(-1)}>
-          {state.mode === "group" ? "群网盘" : "我的网盘"}
+          {rootLabel}
         </button>
         {state.breadcrumb.map((node, index) => (
           <Fragment key={node.id}>
@@ -511,9 +674,16 @@ function DrivePanelView({
               key={node.id}
               node={node}
               viewMode={state.viewMode}
+              canForward={canForward}
+              menuOpen={openMenuNodeId === node.id}
               onOpen={() => onOpenNode(node)}
               onDownload={() => onDownloadNode(node)}
               onForward={() => onForwardNode(node)}
+              onToggleMenu={(event) => {
+                event.stopPropagation();
+                setOpenMenuNodeId((current) => (current === node.id ? null : node.id));
+              }}
+              onCloseMenu={() => setOpenMenuNodeId(null)}
             />
           ))}
         </div>
@@ -530,30 +700,37 @@ function DrivePanelView({
 function DriveNodeCard({
   node,
   viewMode,
+  canForward,
+  menuOpen,
   onOpen,
   onDownload,
   onForward,
+  onToggleMenu,
+  onCloseMenu,
 }: {
   node: DriveNode;
   viewMode: DriveViewMode;
+  canForward: boolean;
+  menuOpen: boolean;
   onOpen: () => void;
   onDownload: () => void;
   onForward: () => void;
+  onToggleMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onCloseMenu: () => void;
 }) {
   const isFolder = node.type === "folder";
   const size = node.file?.sizeBytes ?? 0;
   const updated = formatDriveDate(node.updatedAt || node.createdAt);
+  const typeLabel = isFolder ? "文件夹" : fileKindLabel(node.name);
   return (
     <article className={`drive-node-card is-${viewMode}`} onDoubleClick={onOpen}>
       <button type="button" className="drive-node-main" onClick={onOpen}>
-        <span className={`drive-node-icon tone-${isFolder ? "folder" : driveNodeFileTone(node)}`}>
-          {isFolder ? "F" : driveNodeShortLabel(node)}
+        <span className={`drive-node-icon tone-${isFolder ? "folder" : driveNodeIconTone(node)}`}>
+          <DriveFileIcon node={node} />
         </span>
         <span>
           <strong title={node.name}>{node.name}</strong>
-          <em>
-            {isFolder ? "文件夹" : `${fileKindLabel(node.name)} · ${size ? formatBytes(size) : "未知大小"}`}
-          </em>
+          <em>{typeLabel}</em>
         </span>
       </button>
       {viewMode === "list" ? (
@@ -562,10 +739,56 @@ function DriveNodeCard({
           <span className="drive-node-size">{isFolder ? "--" : formatBytes(size)}</span>
         </>
       ) : null}
-      <footer>
-        {!isFolder ? <button type="button" onClick={onDownload}>下载</button> : null}
-        {!isFolder ? <button type="button" onClick={onForward}>转发</button> : null}
-        <button type="button" onClick={onOpen}>{isFolder ? "打开" : "预览"}</button>
+      <footer className="drive-node-actions">
+        <button
+          type="button"
+          className="drive-row-action"
+          title={isFolder ? "打开" : "预览"}
+          aria-label={isFolder ? "打开" : "预览"}
+          onClick={onOpen}
+        >
+          <Icon src={isFolder ? FolderIcon : PreviewIcon} alt="" />
+        </button>
+        {!isFolder ? (
+          <span className="drive-more-wrap">
+            <button
+              type="button"
+              className={`drive-row-action ${menuOpen ? "is-active" : ""}`}
+              title="更多"
+              aria-label="更多"
+              aria-expanded={menuOpen}
+              onClick={onToggleMenu}
+            >
+              <Icon src={MoreIcon} alt="" />
+            </button>
+            {menuOpen ? (
+              <span className="drive-more-menu" onClick={(event) => event.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onCloseMenu();
+                    onDownload();
+                  }}
+                >
+                  <Icon src={DownloadIcon} alt="" />
+                  <span>下载</span>
+                </button>
+                {canForward ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCloseMenu();
+                      onForward();
+                    }}
+                  >
+                    <Icon src={ShareIcon} alt="" />
+                    <span>转发</span>
+                  </button>
+                ) : null}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
       </footer>
     </article>
   );
@@ -642,6 +865,105 @@ function DriveForwardPickerDialog({
       </section>
     </div>
   );
+}
+
+function DriveFolderDialog({
+  name,
+  submitting,
+  error,
+  onNameChange,
+  onClose,
+  onSubmit,
+}: {
+  name: string;
+  submitting: boolean;
+  error: string | null;
+  onNameChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const canSubmit = name.trim().length > 0 && !submitting;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 40);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (canSubmit) {
+          onSubmit();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [canSubmit, onClose, onSubmit]);
+
+  return (
+    <div className="drive-folder-dialog-backdrop" role="presentation">
+      <section
+        className="drive-folder-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="drive-folder-dialog-title"
+      >
+        <header>
+          <h2 id="drive-folder-dialog-title">新建文件夹</h2>
+          <button type="button" title="关闭" disabled={submitting} onClick={onClose}>
+            ×
+          </button>
+        </header>
+        <label className={`drive-folder-input ${error ? "has-error" : ""}`}>
+          <input
+            ref={inputRef}
+            value={name}
+            placeholder="请输入文件夹名称"
+            maxLength={50}
+            disabled={submitting}
+            onChange={(event) => onNameChange(event.currentTarget.value)}
+          />
+        </label>
+        <p className={`drive-folder-dialog-error ${error ? "is-visible" : ""}`}>
+          {error || " "}
+        </p>
+        <footer>
+          <button type="button" className="drive-folder-cancel" disabled={submitting} onClick={onClose}>
+            取消
+          </button>
+          <button
+            type="button"
+            className="drive-folder-confirm"
+            disabled={!canSubmit}
+            onClick={onSubmit}
+          >
+            {submitting ? "创建中..." : "确定"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function Icon({ src, alt }: { src: string; alt: string }) {
+  return <img className="drive-svg-icon" src={src} alt={alt} draggable={false} />;
+}
+
+type DriveFileIconStyle = CSSProperties & {
+  "--drive-file-icon-url": string;
+};
+
+function DriveFileIcon({ node }: { node: DriveNode }) {
+  const style: DriveFileIconStyle = {
+    "--drive-file-icon-url": `url("${driveNodeIcon(node)}")`,
+  };
+  return <span className="drive-file-glyph" style={style} aria-hidden="true" />;
 }
 
 function initialDriveState(): DrivePanelState {
@@ -735,14 +1057,16 @@ function formatDriveDate(value?: string | null): string {
 }
 
 function fileKindLabel(fileName: string): string {
-  const lower = fileName.toLowerCase();
-  if (/\.(doc|docx)$/i.test(lower)) return "Word 文档";
-  if (/\.(xls|xlsx)$/i.test(lower)) return "表格";
-  if (/\.(ppt|pptx)$/i.test(lower)) return "演示文稿";
-  if (/\.pdf$/i.test(lower)) return "PDF";
-  if (/\.(zip|rar|7z|tar|gz)$/i.test(lower)) return "压缩包";
-  if (/\.(mp4|mov|webm|avi|mkv)$/i.test(lower)) return "视频";
-  if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(lower)) return "图片";
+  const key = fileKindKey(fileName);
+  if (key === "doc" || key === "docx") return "Word 文档";
+  if (key === "xls") return "表格";
+  if (key === "ppt") return "演示文稿";
+  if (key === "pdf") return "PDF";
+  if (key === "archive") return "压缩包";
+  if (key === "video") return "视频";
+  if (key === "image") return "图片";
+  if (key === "audio") return "音频";
+  if (key === "text") return "文本文档";
   return "文件";
 }
 
@@ -750,10 +1074,12 @@ function driveNodeFileTone(node: DriveNode): string {
   const type = node.file?.fileType || detectKindFromName(node.name, node.file?.contentType || "");
   if (type === "image") return "image";
   if (type === "video") return "video";
-  if (fileKindLabel(node.name) === "压缩包") return "archive";
-  if (["Word 文档", "表格", "演示文稿", "PDF"].includes(fileKindLabel(node.name))) {
+  const key = fileKindKey(node.name);
+  if (key === "archive") return "archive";
+  if (["doc", "docx", "xls", "ppt", "pdf", "text"].includes(key)) {
     return "document";
   }
+  if (key === "audio") return "audio";
   return "file";
 }
 
@@ -763,13 +1089,69 @@ function isDriveMediaNode(node: DriveNode): boolean {
   return tone === "image" || tone === "video";
 }
 
-function driveNodeShortLabel(node: DriveNode): string {
-  const tone = driveNodeFileTone(node);
-  if (tone === "video") return "V";
-  if (tone === "image") return "I";
-  if (tone === "archive") return "Z";
-  if (tone === "document") return "D";
-  return "F";
+function driveNodeIcon(node: DriveNode): string {
+  if (node.type === "folder") return FolderIcon;
+  const key = fileKindKey(node.name);
+  if (key === "video") return VideoIcon;
+  if (key === "image") return PhotoIcon;
+  if (key === "doc") return FileDocIcon;
+  if (key === "docx") return FileDocxIcon;
+  if (key === "pdf") return FilePdfIcon;
+  if (key === "ppt") return FilePptIcon;
+  if (key === "xls") return FileXlsIcon;
+  if (key === "archive") return FileZipIcon;
+  if (key === "audio") return MusicIcon;
+  if (key === "text") return FileTextIcon;
+  const type = node.file?.fileType || detectKindFromName(node.name, node.file?.contentType || "");
+  if (type === "video") return VideoIcon;
+  if (type === "image") return PhotoIcon;
+  return FileIcon;
+}
+
+function driveNodeIconTone(node: DriveNode): string {
+  if (node.type === "folder") return "folder";
+  const key = fileKindKey(node.name);
+  if (key === "video") return "video";
+  if (key === "image") return "image";
+  if (key === "xls") return "spreadsheet";
+  if (key === "ppt") return "presentation";
+  if (key === "archive") return "archive";
+  if (key === "doc" || key === "docx" || key === "pdf" || key === "text") {
+    return "document";
+  }
+  if (key === "audio") return "audio";
+  const type = node.file?.fileType || detectKindFromName(node.name, node.file?.contentType || "");
+  if (type === "video") return "video";
+  if (type === "image") return "image";
+  return "file";
+}
+
+function fileKindKey(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (/\.doc$/i.test(lower)) return "doc";
+  if (/\.docx$/i.test(lower)) return "docx";
+  if (/\.(xls|xlsx)$/i.test(lower)) return "xls";
+  if (/\.(ppt|pptx)$/i.test(lower)) return "ppt";
+  if (/\.pdf$/i.test(lower)) return "pdf";
+  if (/\.(zip|rar|7z|tar|gz)$/i.test(lower)) return "archive";
+  if (/\.(mp4|mov|webm|avi|mkv)$/i.test(lower)) return "video";
+  if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(lower)) return "image";
+  if (/\.(mp3|wav|flac|aac|m4a|ogg)$/i.test(lower)) return "audio";
+  if (/\.(txt|md|json|csv)$/i.test(lower)) return "text";
+  return "file";
+}
+
+function validateFolderName(name: string): string | null {
+  if (!name) {
+    return "请输入文件夹名称";
+  }
+  if (name.length > 50) {
+    return "文件夹名称不能超过 50 个字符";
+  }
+  if (INVALID_FOLDER_NAME_PATTERN.test(name)) {
+    return '文件夹名称不能包含 \\ / : * ? " < > |';
+  }
+  return null;
 }
 
 function friendlyError(error: string): string {
