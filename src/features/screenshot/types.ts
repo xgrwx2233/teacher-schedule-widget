@@ -10,6 +10,7 @@ export type ScreenshotResult = {
   filePath: string;
   width: number;
   height: number;
+  action: "send" | "save";
 };
 
 export type ScreenshotAttachment = {

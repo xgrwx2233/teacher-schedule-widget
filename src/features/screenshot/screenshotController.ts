@@ -12,7 +12,9 @@ export function startScreenshot(): Promise<ScreenshotAttachment | null> {
   }
 
   activeCapture = captureRegionInteractive()
-    .then((result) => screenshotResultToAttachment(result))
+    .then((result) =>
+      result.action === "send" ? screenshotResultToAttachment(result) : null,
+    )
     .catch((error) => {
       if (String(error).toLowerCase().includes("cancelled")) {
         return null;
